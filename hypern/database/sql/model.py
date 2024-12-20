@@ -5,7 +5,7 @@ from hypern.config import context_store
 from hypern.exceptions import OutOfScopeApplicationException
 from hypern.hypern import get_session_database
 
-from .field import Field, ForeignKey
+from .field import Field, ForeignKeyField
 from .query import QuerySet
 
 
@@ -77,7 +77,7 @@ class Model(metaclass=MetaModel):
             fields_sql.append(cls._get_field_sql(name, field))
             if field.index:
                 indexes_sql.append(cls._get_index_sql(name))
-            if isinstance(field, ForeignKey):
+            if isinstance(field, ForeignKeyField):
                 foreign_keys.append(cls._get_foreign_key_sql(name, field))
 
         fields_sql.extend(foreign_keys)
@@ -109,7 +109,8 @@ class Model(metaclass=MetaModel):
 
     @classmethod
     def _get_foreign_key_sql(cls, name, field) -> str:
-        return f"FOREIGN KEY ({name}) REFERENCES {field.to_model}({field.related_field}) ON DELETE {field.on_delete} ON UPDATE {field.on_update}"
+        target_table = field.to_model.__name__.lower() if not isinstance(field.to_model, str) else field.to_model.lower()
+        return f"FOREIGN KEY ({name}) REFERENCES {target_table}({field.related_field}) ON DELETE {field.on_delete} ON UPDATE {field.on_update}"
 
     def save(self):
         query_object = QuerySet(self)
