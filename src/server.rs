@@ -360,8 +360,6 @@ async fn execute_request(
         }
     }
 
-    println!("Request: {:?}", deps);
-
     // Execute the main handler
     let mut response = execute_http_function(&request, &function, deps)
         .await
