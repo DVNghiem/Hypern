@@ -119,6 +119,7 @@ class RedirectResponse(BaseResponse):
         self.raw_headers["location"] = quote(str(url), safe=":/%#?=@[]!$&'()*+,;")
 
 
+@to_response
 class FileResponse(BaseResponse):
     def __init__(
         self,
