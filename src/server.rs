@@ -67,15 +67,13 @@ pub struct Server {
 impl Server {
     #[new]
     pub fn new() -> Self {
-        let inject = Arc::new(DependencyInjection::new());
-        let middlewares = Arc::new(Middleware::new());
         Self {
             router: Arc::new(RwLock::new(Router::default())),
             websocket_router: Arc::new(WebsocketRouter::default()),
             startup_handler: None,
             shutdown_handler: None,
-            injected: inject,
-            middlewares,
+            injected: Arc::new(DependencyInjection::new()),
+            middlewares: Arc::new(Middleware::new()),
             extra_headers: Arc::new(DashMap::new()),
             auto_compression: true,
             database_config: None,
