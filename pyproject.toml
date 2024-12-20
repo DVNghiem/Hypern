@@ -36,6 +36,7 @@ dependencies=[
     "watchdog==6.0.0",
     "jsonschema==4.23.0",
     "psutil==6.1.0",
+    "msgpack==1.1.0",
 ]
 [tool.maturin]
 features = ["pyo3/extension-module"]
