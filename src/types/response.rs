@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    http::{HeaderMap, HeaderName, Response as ServerResponse, StatusCode},
+    http::{HeaderName, Response as ServerResponse, StatusCode},
 };
 use dashmap::DashMap;
 use pyo3::{
@@ -34,35 +34,28 @@ pub struct Response {
 }
 
 impl Response {
-
-    pub fn to_axum_response(&self, extra_headers: DashMap<String, String>) -> axum::http::Response<axum::body::Body> {
-        let mut headers = HeaderMap::new();
-        for (key, value) in self.headers.headers.clone() {
-            let header_name = HeaderName::from_bytes(key.as_bytes()).unwrap();
-            headers.insert(header_name, value.parse().unwrap());
-        }
-
-        // Add extra headers
-        for (key, value) in extra_headers {
-            let header_name = HeaderName::from_bytes(key.as_bytes()).unwrap();
-            headers.insert(header_name, value.parse().unwrap());
-        }
-    
-       
-
-        let mut response_builder =
+    pub fn to_axum_response(
+        &self,
+        extra_headers: &DashMap<String, String>,
+    ) -> axum::http::Response<Body> {
+        let mut builder =
             ServerResponse::builder().status(StatusCode::from_u16(self.status_code).unwrap());
-        for (key, value) in headers {
-            if let Some(k) = key {
-                response_builder = response_builder.header(k, value);
+
+        for (key, value) in self.headers.headers.iter() {
+            if let Ok(name) = HeaderName::from_bytes(key.as_bytes()) {
+                builder = builder.header(name, value);
             }
         }
-        response_builder
-            .body(Body::from(self.description.clone()))
-            .unwrap()
+
+        for ref_multi in extra_headers.iter() {
+            if let Ok(name) = HeaderName::from_bytes(ref_multi.key().as_bytes()) {
+                builder = builder.header(name, ref_multi.value());
+            }
+        }
+
+        builder.body(Body::from(self.description.clone())).unwrap()
     }
 }
-
 impl ToPyObject for Response {
     fn to_object(&self, py: Python) -> PyObject {
         let headers = self.headers.clone().into_py(py).extract(py).unwrap();

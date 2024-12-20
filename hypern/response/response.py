@@ -4,6 +4,7 @@ import typing
 from urllib.parse import quote
 from hypern.hypern import Response as InternalResponse, Header
 import orjson
+import msgpack
 
 from hypern.background import BackgroundTask, BackgroundTasks
 
@@ -132,3 +133,10 @@ class FileResponse(BaseResponse):
         self.raw_headers["content-disposition"] = f'attachment; filename="{filename}"'
         self.raw_headers.setdefault("content-type", "application/octet-stream")
         self.raw_headers.setdefault("content-length", str(len(content)))
+
+
+@to_response
+class BinaryResponse(BaseResponse):
+    def __init__(self, content: bytes):
+        super().__init__(status_code=200, media_type="application/x-msgpack", headers={"Content-Type": "application/x-msgpack"})
+        self.content = msgpack.packb(content)

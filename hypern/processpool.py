@@ -3,7 +3,7 @@ import os
 import signal
 import sys
 from typing import List
-
+from concurrent.futures import ThreadPoolExecutor
 from multiprocess import Process
 from watchdog.observers import Observer
 
@@ -76,7 +76,7 @@ def init_processpool(
 ) -> List[Process]:
     process_pool = []
 
-    for _ in range(processes):
+    for i in range(processes):
         copied_socket = socket.try_clone()
         process = Process(
             target=spawn_process,
@@ -86,25 +86,43 @@ def init_processpool(
                 workers,
                 max_blocking_threads,
             ),
+            name=f"hypern-worker-{i}",
         )
+        process.daemon = True  # This is important to avoid zombie processes
         process.start()
         process_pool.append(process)
 
     return process_pool
 
 
-def initialize_event_loop():
+class OptimizedEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
+    def __init__(self, max_blocking_threads: int):
+        super().__init__()
+        self.max_blocking_threads = max_blocking_threads
+
+    def new_event_loop(self):
+        loop = super().new_event_loop()
+        # Optimize thread pool cho I/O operations
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=self.max_blocking_threads, thread_name_prefix="hypern-io"))
+        return loop
+
+
+def initialize_event_loop(max_blocking_threads: int = 100) -> asyncio.AbstractEventLoop:
     if sys.platform.startswith("win32") or sys.platform.startswith("linux-cross"):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        return loop
     else:
         import uvloop
 
         uvloop.install()
+
+        asyncio.set_event_loop_policy(OptimizedEventLoopPolicy(max_blocking_threads))
         loop = uvloop.new_event_loop()
         asyncio.set_event_loop(loop)
-        return loop
+
+    loop.slow_callback_duration = 0.1  # Log warnings for slow callbacks
+    loop.set_debug(False)  # Disable debug mode
+    return loop
 
 
 def spawn_process(
@@ -113,7 +131,7 @@ def spawn_process(
     workers: int,
     max_blocking_threads: int,
 ):
-    loop = initialize_event_loop()
+    loop = initialize_event_loop(max_blocking_threads)
 
     try:
         server.start(socket, workers, max_blocking_threads)

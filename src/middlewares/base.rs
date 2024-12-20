@@ -38,11 +38,11 @@ pub struct Middleware {
 }
 
 impl Middleware {
-    pub fn new() -> PyResult<Self> {
-        Ok(Self {
+    pub fn new() -> Self {
+        Self {
             before_hooks: Vec::new(),
             after_hooks: Vec::new(),
-        })
+        }
     }
 
     pub fn add_before_hook(&mut self, hook: FunctionInfo, config: MiddlewareConfig) {

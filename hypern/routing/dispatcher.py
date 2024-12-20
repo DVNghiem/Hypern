@@ -10,7 +10,7 @@ import typing
 import orjson
 from pydantic import BaseModel
 
-from hypern.exceptions import BaseException
+from hypern.exceptions import HTTPException
 from hypern.hypern import Request, Response
 from hypern.response import JSONResponse
 
@@ -56,10 +56,9 @@ async def dispatch(handler, request: Request, inject: typing.Dict[str, typing.An
 
     except Exception as e:
         _res: typing.Dict = {"message": "", "error_code": "UNKNOWN_ERROR"}
-        if isinstance(e, BaseException):
-            _res["error_code"] = e.error_code
-            _res["message"] = e.msg
-            _status = e.status
+        if isinstance(e, HTTPException):
+            _res = e.to_dict()
+            _status = e.status_code
         else:
             traceback.print_exc()
             _res["message"] = str(e)

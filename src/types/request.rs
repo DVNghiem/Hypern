@@ -256,8 +256,8 @@ impl Request {
             headers: headers.clone(),
             method,
             path_params: HashMap::new(),
-            body: body,
-            remote_addr: remote_addr,
+            body,
+            remote_addr,
             timestamp,
             context_id,
         }

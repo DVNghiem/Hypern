@@ -16,7 +16,7 @@ fn get_function_output<'a, T>(
     function: &'a FunctionInfo,
     py: Python<'a>,
     function_args: &T,
-    deps: Option<DependencyInjection>,
+    deps: Option<Arc<DependencyInjection>>,
 ) -> Result<&'a PyAny, PyErr>
 where
     T: ToPyObject,
@@ -57,7 +57,7 @@ where
 pub async fn execute_http_function(
     request: &Request,
     function: &FunctionInfo,
-    deps: Option<DependencyInjection>,
+    deps: Option<Arc<DependencyInjection>>,
 ) -> PyResult<Response> {
     if function.is_async {
         let output = Python::with_gil(|py| {

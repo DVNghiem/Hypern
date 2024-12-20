@@ -41,11 +41,6 @@ impl Route {
         self.path == path && self.method.to_uppercase() == method.to_uppercase()
     }
 
-    // Create a copy of the route
-    pub fn clone_route(&self) -> Route {
-        self.clone()
-    }
-
     // Update the route path
     pub fn update_path(&mut self, new_path: &str) {
         self.path = new_path.to_string();
@@ -96,35 +91,6 @@ impl Route {
         path
     }
 
-    // Compare routes for equality based only on path and method
-    fn __eq__(&self, other: &PyAny) -> PyResult<bool> {
-        // Try to extract other as Route
-        if let Ok(other_route) = other.extract::<PyRef<Route>>() {
-            // Compare only path and method, not the function
-            Ok(self.path == other_route.path && 
-               self.method.to_uppercase() == other_route.method.to_uppercase())
-        } else {
-            Ok(false)
-        }
-    }
-
-    // Generate hash for the route based only on path and method
-    fn __hash__(&self) -> PyResult<isize> {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        
-        let mut hasher = DefaultHasher::new();
-        self.path.hash(&mut hasher);
-        self.method.to_uppercase().hash(&mut hasher);
-        Ok(hasher.finish() as isize)
-    }
-
-    // Check if routes have the same handler function
-    pub fn same_handler(&self, other: &Route) -> PyResult<bool> {
-        // Compare the Python objects using the Python 'is' operator
-        Ok(self.function.handler.is(&other.function.handler))
-    }
-
     // Get method name for sorting and comparison
     pub fn get_method_priority(&self) -> u8 {
         match self.method.to_uppercase().as_str() {
@@ -136,26 +102,6 @@ impl Route {
             "HEAD" => 6,
             "OPTIONS" => 7,
             _ => 99
-        }
-    }
-
-    // Compare routes for sorting
-    pub fn __lt__(&self, other: &PyAny) -> PyResult<bool> {
-        if let Ok(other_route) = other.extract::<PyRef<Route>>() {
-            // First compare by path length (shorter paths first)
-            if self.path.len() != other_route.path.len() {
-                return Ok(self.path.len() < other_route.path.len());
-            }
-            
-            // Then by path string
-            if self.path != other_route.path {
-                return Ok(self.path < other_route.path);
-            }
-            
-            // Finally by method priority
-            Ok(self.get_method_priority() < other_route.get_method_priority())
-        } else {
-            Ok(false)
         }
     }
 }
