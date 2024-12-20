@@ -9,8 +9,8 @@ from pydantic import BaseModel, ValidationError
 from pydash import get
 
 from hypern.auth.authorization import Authorization
-from hypern.exceptions import BadRequest
-from hypern.exceptions import ValidationError as HypernValidationError
+from hypern.exceptions import BadRequestException
+from hypern.exceptions import ValidationException
 from hypern.hypern import Request
 
 
@@ -28,7 +28,7 @@ class ParamParser:
 
         parser = data_parsers.get(param_name)
         if not parser:
-            raise BadRequest(msg="Backend Error: Invalid parameter type, must be query_params, path_params or form_data.")
+            raise BadRequestException(details={"message": f"Invalid parameter name: {param_name}"})
         return parser()
 
     def _parse_query_params(self) -> dict:
@@ -53,16 +53,14 @@ class InputHandler:
             return model_class(**data)
         except ValidationError as e:
             invalid_fields = orjson.loads(e.json())
-            raise HypernValidationError(
-                msg=orjson.dumps(
-                    [
-                        {
-                            "field": get(item, "loc")[0],
-                            "msg": get(item, "msg"),
-                        }
-                        for item in invalid_fields
-                    ]
-                ).decode("utf-8"),
+            raise ValidationException(
+                details=[
+                    {
+                        "field": get(item, "loc")[0],
+                        "msg": get(item, "msg"),
+                    }
+                    for item in invalid_fields
+                ]
             )
 
     async def handle_special_params(self, param_name: str) -> typing.Any:

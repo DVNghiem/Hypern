@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import jwt
 
-from hypern.exceptions import Forbidden, Unauthorized
+from hypern.exceptions import ForbiddenException, UnauthorizedException
 from hypern.hypern import Request, Response
 from .base import Middleware, MiddlewareConfig
 
@@ -91,9 +91,9 @@ class SecurityMiddleware(Middleware):
             payload = jwt.decode(token, self.secur_config.jwt_secret, algorithms=[self.secur_config.jwt_algorithm])
             return payload
         except jwt.ExpiredSignatureError:
-            raise Unauthorized("Token has expired")
+            raise UnauthorizedException(details={"message": "Token has expired"})
         except jwt.InvalidTokenError:
-            raise Unauthorized("Invalid token")
+            raise UnauthorizedException(details={"message": "Invalid token"})
 
     def _generate_csrf_token(self, session_id: str) -> str:
         """Generate a new CSRF token"""
@@ -155,18 +155,18 @@ class SecurityMiddleware(Middleware):
         if self.secur_config.jwt_auth:
             auth_header = request.headers.get("Authorization")
             if not auth_header or not auth_header.startswith("Bearer "):
-                raise Unauthorized("Missing or invalid authorization header")
+                raise UnauthorizedException(details={"message": "Authorization header missing or invalid"})
             token = auth_header.split(" ")[1]
             try:
                 request.user = self._verify_jwt_token(token)
-            except Unauthorized as e:
+            except UnauthorizedException as e:
                 return Response(status_code=401, description=str(e))
 
         # CSRF protection check
         if self.secur_config.csrf_protection and request.method in ["POST", "PUT", "DELETE", "PATCH"]:
             csrf_token = request.headers.get("X-CSRF-Token")
             if not csrf_token or not self._validate_csrf_token(csrf_token):
-                raise Forbidden("CSRF token missing or invalid")
+                raise ForbiddenException(details={"message": "Invalid CSRF token"})
 
         return request
 
