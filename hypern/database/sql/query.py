@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Any, Dict, List, Tuple, Union
-from hypern.database.sql.field import ForeignKey
+from hypern.database.sql.field import ForeignKeyField
 
 
 class JoinType(Enum):
@@ -553,7 +553,7 @@ class QuerySet:
         """
         qs = self.clone()
         for field in fields:
-            if field in qs.model._fields and isinstance(qs.model._fields[field], ForeignKey):
+            if field in qs.model._fields and isinstance(qs.model._fields[field], ForeignKeyField):
                 qs._selected_related.add(field)
         return qs
 

@@ -17,10 +17,13 @@ use dashmap::DashMap;
 use futures::future::join_all;
 use pyo3::{prelude::*, types::PyDict};
 use std::{
-    collections::HashMap, sync::{
+    collections::HashMap,
+    sync::{
         atomic::Ordering::{Relaxed, SeqCst},
         RwLock,
-    }, thread, time::Duration
+    },
+    thread,
+    time::Duration,
 };
 use std::{
     process::exit,
@@ -100,11 +103,15 @@ impl Server {
     }
 
     pub fn set_before_hooks(&mut self, hooks: Vec<(FunctionInfo, MiddlewareConfig)>) {
-        Arc::get_mut(&mut self.middlewares).unwrap().set_before_hooks(hooks);
+        Arc::get_mut(&mut self.middlewares)
+            .unwrap()
+            .set_before_hooks(hooks);
     }
 
     pub fn set_after_hooks(&mut self, hooks: Vec<(FunctionInfo, MiddlewareConfig)>) {
-        Arc::get_mut(&mut self.middlewares).unwrap().set_after_hooks(hooks);
+        Arc::get_mut(&mut self.middlewares)
+            .unwrap()
+            .set_after_hooks(hooks);
     }
 
     pub fn set_response_headers(&mut self, headers: HashMap<String, String>) {
@@ -167,7 +174,7 @@ impl Server {
         let shutdown_handler = self.shutdown_handler.clone();
 
         let task_locals = Arc::new(pyo3_asyncio::TaskLocals::new(event_loop).copy_context(py)?);
-        let task_local_copy= Arc::clone(&task_locals);
+        let task_local_copy = Arc::clone(&task_locals);
 
         let injected = Arc::clone(&self.injected);
         let copy_middlewares = Arc::clone(&self.middlewares);
@@ -207,13 +214,7 @@ impl Server {
                     let copy_middlewares = Arc::clone(&copy_middlewares);
                     let extra_headers = Arc::clone(&extra_headers);
                     let handler = move |req| {
-                        mapping_method(
-                            req,
-                            function,
-                            task_locals,
-                            copy_middlewares,
-                            extra_headers,
-                        )
+                        mapping_method(req, function, task_locals, copy_middlewares, extra_headers)
                     };
 
                     app = app.route(
@@ -296,6 +297,24 @@ impl Server {
     }
 }
 
+async fn inject_database(request_id: Arc<String>) {
+    let database = get_sql_connect();
+    match database {
+        Some(database) => {
+            insert_sql_session(&request_id, database.transaction().await);
+        }
+        None => {}
+    }
+}
+
+fn free_database(request_id: String) {
+    tokio::task::spawn(async move {
+        let tx = get_session_database(&request_id);
+        tx.unwrap().commit_internal().await;
+        remove_sql_session(&request_id);
+    });
+}
+
 async fn execute_request(
     req: HttpRequest<Body>,
     function: FunctionInfo,
@@ -305,17 +324,11 @@ async fn execute_request(
     let response_builder = ServerResponse::builder();
 
     let deps = req.extensions().get::<Arc<DependencyInjection>>().cloned();
-    let database = get_sql_connect();
 
     let mut request = Request::from_request(req).await;
+    let request_id = Arc::new(request.context_id.clone());
 
-    // inject session db to global
-    match database.clone() {
-        Some(database) => {
-            insert_sql_session(&request.context_id, database.transaction().await);
-        }
-        None => {}
-    }
+    inject_database(Arc::clone(&request_id)).await;
 
     // Execute before middlewares in parallel where possible
     let before_results = join_all(
@@ -368,15 +381,6 @@ async fn execute_request(
     // mapping context id
     response.context_id = request.context_id;
 
-    // mapping neaded header request to response
-    // response.headers.set(
-    //     "accept-encoding".to_string(),
-    //     request
-    //         .headers
-    //         .get("accept-encoding".to_string())
-    //         .unwrap_or_default(),
-    // );
-
     // Execute after middlewares with similar optimization
     for (after_middleware, _) in middlewares.get_after_hooks() {
         response = match execute_middleware_function(&response, &after_middleware).await {
@@ -399,13 +403,7 @@ async fn execute_request(
         };
     }
 
-    // clean up session db
-    // auto commit after response
-    if !database.is_none() {
-        let tx = get_session_database(&response.context_id);
-        tx.unwrap().commit_internal().await;
-        remove_sql_session(&response.context_id);
-    }
+    free_database(request_id.to_string());
 
     response.to_axum_response(&extra_headers)
 }
