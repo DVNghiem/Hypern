@@ -310,8 +310,13 @@ async fn inject_database(request_id: Arc<String>) {
 fn free_database(request_id: String) {
     tokio::task::spawn(async move {
         let tx = get_session_database(&request_id);
-        tx.unwrap().commit_internal().await;
-        remove_sql_session(&request_id);
+        match tx {
+            None => return,
+            Some(mut tx) => {
+                tx.commit_internal().await;
+                remove_sql_session(&request_id);
+            }
+        }
     });
 }
 

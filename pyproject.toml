@@ -37,6 +37,7 @@ dependencies=[
     "jsonschema==4.23.0",
     "psutil==6.1.0",
     "msgpack==1.1.0",
+    "redis==5.2.1",
 ]
 [tool.maturin]
 features = ["pyo3/extension-module"]
@@ -74,6 +75,7 @@ aiohttp = "^3.11.10"
 jsonschema = "^4.23.0"
 psutil = "^6.1.0"
 msgpack = "^1.1.0"
+redis = "^5.2.1"
 
 [tool.poetry.group.test.dependencies]
 pytest = "7.2.1"
