@@ -224,8 +224,8 @@ class Route:
             raise ValueError(f"No handler found for route: {self.path}")
 
         # Handle functional routes
-        for h in self.functional_handlers:
-            router.add_route(route=self.make_internal_route(path=h["path"], handler=h["func"], method=h["method"].upper()))
+        for route in self.functional_handlers:
+            router.add_route(route=route)
         if not self.endpoint:
             return router
 
@@ -234,9 +234,10 @@ class Route:
             if name.upper() in self.http_methods:
                 sig = inspect.signature(func)
                 doc = self.swagger_generate(sig, func.__doc__)
-                self.endpoint.dispatch.__doc__ = doc
                 endpoint_obj = self.endpoint()
-                router.add_route(route=self.make_internal_route(path="/", handler=endpoint_obj.dispatch, method=name.upper()))
+                route = self.make_internal_route(path="/", handler=endpoint_obj.dispatch, method=name.upper())
+                route.doc = doc
+                router.add_route(route=route)
                 del endpoint_obj  # free up memory
         return router
 
@@ -250,15 +251,10 @@ class Route:
                 return await dispatch(func, request, inject)
 
             sig = inspect.signature(func)
-            functional_wrapper.__doc__ = self.swagger_generate(sig, func.__doc__)
+            route = self.make_internal_route(path=path, handler=functional_wrapper, method=method.upper())
+            route.doc = self.swagger_generate(sig, func.__doc__)
 
-            self.functional_handlers.append(
-                {
-                    "path": path,
-                    "method": method,
-                    "func": functional_wrapper,
-                }
-            )
+            self.functional_handlers.append(route)
 
         return decorator
 
