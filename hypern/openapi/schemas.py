@@ -37,17 +37,15 @@ class SchemaGenerator(BaseSchemaGenerator):
     def get_schema(self, app) -> dict[str, typing.Any]:
         schema = dict(self.base_schema)
         schema.setdefault("paths", {})
-        endpoints_info = self.get_endpoints(app.router.routes)
-
-        for endpoint in endpoints_info:
-            parsed = self.parse_docstring(endpoint.func)
+        for route in app.router.routes:
+            parsed = self.parse_docstring(route.doc)
 
             if not parsed:
                 continue
 
-            if endpoint.path not in schema["paths"]:
-                schema["paths"][endpoint.path] = {}
+            if route.path not in schema["paths"]:
+                schema["paths"][route.path] = {}
 
-            schema["paths"][endpoint.path][endpoint.http_method] = orjson.loads(parsed)
+            schema["paths"][route.path][route.method.lower()] = orjson.loads(parsed)
 
         return schema

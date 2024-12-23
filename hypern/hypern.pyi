@@ -7,7 +7,7 @@ from enum import Enum
 @dataclass
 class BaseSchemaGenerator:
     remove_converter: Callable[[str], str]
-    parse_docstring: Callable[[Callable[..., Any]], str]
+    parse_docstring: Callable[..., str]
 
 @dataclass
 class SwaggerUI:
@@ -196,6 +196,7 @@ class Route:
     path: str
     function: FunctionInfo
     method: str
+    doc: str | None = None
 
     def matches(self, path: str, method: str) -> str: ...
     def clone_route(self) -> Route: ...

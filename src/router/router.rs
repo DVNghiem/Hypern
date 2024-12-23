@@ -29,7 +29,6 @@ impl Router {
         if !route.is_valid() {
             return Err(PyValueError::new_err("Invalid route configuration"));
         }
-
         // Check for duplicate routes
         if self.has_duplicate_route(&route) {
             return Err(PyValueError::new_err(format!(
@@ -43,7 +42,6 @@ impl Router {
         route.update_path(&full_path);
 
         self.routes.push(route);
-        // Sort routes after adding new one
         self.sort_routes();
         Ok(())
     }

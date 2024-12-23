@@ -12,16 +12,21 @@ pub struct Route {
 
     #[pyo3(get, set)]
     pub method: String,
+
+    #[pyo3(get, set)]
+    pub doc: Option<String>,
 }
 
 #[pymethods]
 impl Route {
     #[new]
-    pub fn new(path: &str, function: FunctionInfo, method: String) -> Self {
+    #[pyo3(signature = (path, function, method, doc = None))]
+    pub fn new(path: &str, function: FunctionInfo, method: String, doc: Option<String>) -> Self {
         Self {
             path: path.to_string(),
             function,
-            method
+            method,
+            doc
         }
     }
 
