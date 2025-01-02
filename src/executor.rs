@@ -39,6 +39,8 @@ where
                 .downcast::<PyDict>()?
                 .to_owned(),
         )?;
+    } else {
+        kwargs.as_ref(py).set_item("inject", py.None())?;
     }
 
     let result = handler.call(
@@ -60,7 +62,7 @@ pub async fn execute_http_function(
     deps: Option<Arc<DependencyInjection>>,
 ) -> PyResult<Response> {
     if function.is_async {
-        let output = Python::with_gil(|py| {
+        let output = Python::with_gil(|py: Python<'_>| {
             let function_output = get_function_output(function, py, request, deps)?;
             pyo3_asyncio::tokio::into_future(function_output)
         })?

@@ -31,7 +31,7 @@ async def run_in_threadpool(func: typing.Callable, *args, **kwargs):
     return await asyncio.to_thread(func, *args)
 
 
-async def dispatch(handler, request: Request, inject: typing.Dict[str, typing.Any]) -> Response:
+async def dispatch(handler, request: Request, inject: typing.Dict[str, typing.Any] = None) -> Response:
     try:
         # set context for global handler
         context_store.set_context(request.context_id)

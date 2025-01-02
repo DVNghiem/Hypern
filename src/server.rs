@@ -10,7 +10,12 @@ use crate::{
     instants::create_mem_pool,
     middlewares::base::{Middleware, MiddlewareConfig},
     router::router::Router,
-    types::{body::{full, BoxBody}, function_info::FunctionInfo, middleware::MiddlewareReturn, request::Request},
+    types::{
+        body::{full, BoxBody},
+        function_info::FunctionInfo,
+        middleware::MiddlewareReturn,
+        request::Request,
+    },
     ws::{router::WebsocketRouter, socket::SocketHeld, websocket::websocket_handler},
 };
 use bytes::Bytes;
@@ -207,29 +212,59 @@ impl Server {
                 loop {
                     let (stream, _) = listener.accept().await.unwrap();
                     let io = TokioIo::new(stream);
+                    let router = Arc::clone(&router);
+                    let task_locals = Arc::clone(&task_locals);
+                    let copy_middlewares = Arc::clone(&copy_middlewares);
+                    let extra_headers = Arc::clone(&extra_headers);
+                    let extra_headers = Arc::clone(&extra_headers);
 
                     tokio::task::spawn(async move {
-                        let service =
-                            service_fn(|req: hyper::Request<hyper::body::Incoming>| async move {
+                        let router = Arc::clone(&router);
+                        let task_locals = Arc::clone(&task_locals);
+                        let copy_middlewares = Arc::clone(&copy_middlewares);
+                        let extra_headers = Arc::clone(&extra_headers);
+
+                        let service = service_fn(|req: hyper::Request<hyper::body::Incoming>| {
+                            let router = Arc::clone(&router);
+                            let task_locals = Arc::clone(&task_locals);
+                            let copy_middlewares = Arc::clone(&copy_middlewares);
+                            let extra_headers = Arc::clone(&extra_headers);
+                            async move {
                                 let path = req.uri().path().to_string();
                                 let method = req.method().to_string();
                                 // matching mapping router
-                                let router = router.read().unwrap();
-                                if let Some((function, deps)) = router.get(&path, &method) {
-                                    response = mapping_method(
-                                        req,
-                                        function.clone(),
-                                        task_local_copy.clone(),
-                                        copy_middlewares.clone(),
-                                        extra_headers.clone(),
-                                    )
-                                    .await;
+                                let task_locals = Arc::clone(&task_locals);
+                                let copy_middlewares = Arc::clone(&copy_middlewares);
+                                let extra_headers = Arc::clone(&extra_headers);
+                                let route = {
+                                    let router = router.read().unwrap();
+                                    router.find_matching_route_py(&path, &method).unwrap()
+                                };
+
+                                match route {
+                                    Some(route) => {
+                                        let function = route.function;
+                                        let task_locals = Arc::clone(&task_locals);
+                                        let middlewares = Arc::clone(&copy_middlewares);
+                                        let extra_headers = Arc::clone(&extra_headers);
+                                        let response = mapping_method(
+                                            req,
+                                            function,
+                                            task_locals,
+                                            middlewares,
+                                            extra_headers,
+                                        )
+                                        .await;
+                                        return Ok(response);
+                                    }
+                                    None => {
+                                        return HyperResponse::builder()
+                                            .status(StatusCode::NOT_FOUND)
+                                            .body(full(NOTFOUND));
+                                    }
                                 }
-                                
-                                return HyperResponse::builder()
-                                    .status(StatusCode::NOT_FOUND)
-                                    .body(full(NOTFOUND));
-                            });
+                            }
+                        });
 
                         if let Err(err) = http1::Builder::new().serve_connection(io, service).await
                         {
