@@ -216,7 +216,6 @@ impl Server {
                     let task_locals = Arc::clone(&task_locals);
                     let copy_middlewares = Arc::clone(&copy_middlewares);
                     let extra_headers = Arc::clone(&extra_headers);
-                    let extra_headers = Arc::clone(&extra_headers);
 
                     tokio::task::spawn(async move {
                         let router = Arc::clone(&router);
