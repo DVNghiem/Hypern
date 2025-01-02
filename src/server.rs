@@ -10,11 +10,21 @@ use crate::{
     instants::create_mem_pool,
     middlewares::base::{Middleware, MiddlewareConfig},
     router::router::Router,
-    types::{function_info::FunctionInfo, middleware::MiddlewareReturn, request::Request},
+    types::{body::{full, BoxBody}, function_info::FunctionInfo, middleware::MiddlewareReturn, request::Request},
     ws::{router::WebsocketRouter, socket::SocketHeld, websocket::websocket_handler},
 };
+use bytes::Bytes;
 use dashmap::DashMap;
 use futures::future::join_all;
+use http_body_util::{BodyExt, Full};
+use hyper::{
+    body::{Body, Incoming},
+    server::conn::http1,
+    service::service_fn,
+    Request as HyperRequest, StatusCode,
+};
+use hyper::{Error, Response as HyperResponse};
+use hyper_util::rt::TokioIo;
 use pyo3::{prelude::*, types::PyDict};
 use std::{
     collections::HashMap,
@@ -31,15 +41,6 @@ use std::{
 };
 use tower::ServiceBuilder;
 
-use axum::{
-    body::Body,
-    extract::{Request as HttpRequest, WebSocketUpgrade},
-    http::StatusCode,
-    response::{IntoResponse, Response as ServerResponse},
-    routing::{any, delete, get, head, options, patch, post, put, trace},
-    Extension, Router as RouterServer,
-};
-
 use crate::di::DependencyInjection;
 use tower_http::{
     trace::{DefaultOnResponse, TraceLayer},
@@ -50,6 +51,7 @@ use tracing::{debug, Level};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 static STARTED: AtomicBool = AtomicBool::new(false);
+static NOTFOUND: &[u8] = b"Not Found";
 
 #[pyclass]
 pub struct Server {
@@ -201,75 +203,40 @@ impl Server {
             debug!("Waiting for process to start...");
 
             rt.block_on(async move {
-                create_mem_pool(mem_pool_min_capacity, mem_pool_max_capacity);
-
-                let _ = execute_startup_handler(startup_handler, &Arc::clone(&task_locals)).await;
-
-                let mut app = RouterServer::new();
-
-                // handle logic for each route with pyo3
-                for route in router.read().unwrap().iter() {
-                    let task_locals = Arc::clone(&task_locals);
-                    let function = route.function.clone();
-                    let copy_middlewares = Arc::clone(&copy_middlewares);
-                    let extra_headers = Arc::clone(&extra_headers);
-                    let handler = move |req| {
-                        mapping_method(req, function, task_locals, copy_middlewares, extra_headers)
-                    };
-
-                    app = app.route(
-                        &route.path,
-                        match route.method.as_str() {
-                            "GET" => get(handler),
-                            "POST" => post(handler),
-                            "PUT" => put(handler),
-                            "DELETE" => delete(handler),
-                            "PATCH" => patch(handler),
-                            "HEAD" => head(handler),
-                            "OPTIONS" => options(handler),
-                            "TRACE" => trace(handler),
-                            _ => any(handler),
-                        },
-                    );
-                }
-
-                // handle logic for each websocket route with pyo3
-                for ws_route in websocket_router.iter() {
-                    let ws_route_copy = ws_route.clone();
-                    let handler = move |ws: WebSocketUpgrade| {
-                        websocket_handler(ws_route_copy.handler.clone(), ws)
-                    };
-                    app = app.route(&ws_route.path, any(handler));
-                }
-
-                match database_config {
-                    Some(config) => {
-                        let database = DatabaseConnection::new(config).await;
-                        set_sql_connect(database);
-                    }
-                    None => {}
-                };
-
-                app = app.layer(Extension(injected));
-                app = app.layer(
-                    TraceLayer::new_for_http().on_response(
-                        DefaultOnResponse::new()
-                            .level(Level::INFO)
-                            .latency_unit(LatencyUnit::Millis),
-                    ),
-                );
-                if auto_compression {
-                    // Add compression and decompression layers
-                    app = app.layer(
-                        ServiceBuilder::new()
-                            .layer(RequestDecompressionLayer::new())
-                            .layer(CompressionLayer::new()),
-                    )
-                }
-                debug!("Application started");
-                // run our app with hyper, listening globally on port 3000
                 let listener = tokio::net::TcpListener::from_std(raw_socket.into()).unwrap();
-                axum::serve(listener, app).await.unwrap();
+                loop {
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let io = TokioIo::new(stream);
+
+                    tokio::task::spawn(async move {
+                        let service =
+                            service_fn(|req: hyper::Request<hyper::body::Incoming>| async move {
+                                let path = req.uri().path().to_string();
+                                let method = req.method().to_string();
+                                // matching mapping router
+                                let router = router.read().unwrap();
+                                if let Some((function, deps)) = router.get(&path, &method) {
+                                    response = mapping_method(
+                                        req,
+                                        function.clone(),
+                                        task_local_copy.clone(),
+                                        copy_middlewares.clone(),
+                                        extra_headers.clone(),
+                                    )
+                                    .await;
+                                }
+                                
+                                return HyperResponse::builder()
+                                    .status(StatusCode::NOT_FOUND)
+                                    .body(full(NOTFOUND));
+                            });
+
+                        if let Err(err) = http1::Builder::new().serve_connection(io, service).await
+                        {
+                            println!("Failed to serve connection: {:?}", err);
+                        }
+                    });
+                }
             });
         });
 
@@ -321,12 +288,12 @@ fn free_database(request_id: String) {
 }
 
 async fn execute_request(
-    req: HttpRequest<Body>,
+    req: HyperRequest<Incoming>,
     function: FunctionInfo,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
-) -> ServerResponse {
-    let response_builder = ServerResponse::builder();
+) -> HyperResponse<BoxBody> {
+    let response_builder = HyperResponse::builder();
 
     let deps = req.extensions().get::<Arc<DependencyInjection>>().cloned();
 
@@ -356,7 +323,7 @@ async fn execute_request(
             Ok(MiddlewareReturn::Response(r)) => return r.to_axum_response(&extra_headers),
             Err(e) => {
                 return response_builder
-                    .body(Body::from(format!("Error: {}", e)))
+                    .body(full(format!("Error: {}", e)))
                     .unwrap();
             }
         }
@@ -369,9 +336,9 @@ async fn execute_request(
                 Ok(MiddlewareReturn::Request(r)) => request = r,
                 Ok(MiddlewareReturn::Response(r)) => return r.to_axum_response(&extra_headers),
                 Err(e) => {
-                    return ServerResponse::builder()
+                    return HyperResponse::builder()
                         .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Body::from(format!("Error: {}", e)))
+                        .body(full(format!("Error: {}", e)))
                         .unwrap();
                 }
             }
@@ -392,7 +359,7 @@ async fn execute_request(
             Ok(MiddlewareReturn::Request(_)) => {
                 return response_builder
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::from("Middleware returned a response"))
+                    .body(full("Middleware returned a response"))
                     .unwrap();
             }
             Ok(MiddlewareReturn::Response(r)) => {
@@ -402,7 +369,7 @@ async fn execute_request(
             Err(e) => {
                 return response_builder
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::from(e.to_string()))
+                    .body(full(e.to_string()))
                     .unwrap();
             }
         };
@@ -414,12 +381,12 @@ async fn execute_request(
 }
 
 async fn mapping_method(
-    req: HttpRequest<Body>,
+    req: HyperRequest<Incoming>,
     function: FunctionInfo,
     task_locals: Arc<pyo3_asyncio::TaskLocals>,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
-) -> impl IntoResponse {
+) -> HyperResponse<BoxBody> {
     pyo3_asyncio::tokio::scope(
         task_locals.as_ref().to_owned(),
         execute_request(req, function, middlewares, extra_headers),

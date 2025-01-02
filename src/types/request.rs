@@ -1,8 +1,7 @@
-use axum::extract::{ConnectInfo, Multipart};
-use axum::extract::{FromRequest, Request as HttpRequest};
-use axum::http::header;
-use axum::response::IntoResponse;
-use axum::Json;
+use http_body_util::BodyExt;
+use hyper::body::Incoming;
+use hyper::{header, Request as HyperRequest};
+use multer::Multipart;
 use pyo3::types::{PyBytes, PyDict, PyList, PyString};
 use pyo3::{exceptions::PyValueError, prelude::*};
 use serde_json::Value;
@@ -98,7 +97,6 @@ pub struct PyBodyData {
 
 #[derive(Default, Debug, Clone, FromPyObject)]
 pub struct Request {
-
     pub path: String,
     pub query_params: QueryParams,
     pub headers: Header,
@@ -109,7 +107,6 @@ pub struct Request {
     pub remote_addr: String,
     pub timestamp: u32,
     pub context_id: String,
-
 }
 
 impl ToPyObject for Request {
@@ -135,7 +132,7 @@ impl ToPyObject for Request {
 }
 
 impl Request {
-    pub async fn from_request(request: HttpRequest) -> Self {
+    pub async fn from_request(request: HyperRequest<Incoming>) -> Self {
         let mut query_params: QueryParams = QueryParams::new();
 
         // setup query params
@@ -149,10 +146,11 @@ impl Request {
         }
 
         let remote_addr = request
-            .extensions()
-            .get::<ConnectInfo<std::net::SocketAddr>>()
-            .map(|ConnectInfo(addr)| addr.ip().to_string())
-            .unwrap_or_default();
+            .headers()
+            .get(header::FORWARDED)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
 
         // init default current timestamp
         let timestamp = Some(
@@ -160,7 +158,8 @@ impl Request {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as u32,
-        ).unwrap();
+        )
+        .unwrap();
         let context_id = uuid::Uuid::new_v4().to_string();
 
         // parse the header to python header object
@@ -175,9 +174,8 @@ impl Request {
         let default_body = BodyData::default();
         let body = match content_type {
             t if t.starts_with("application/json") => {
-                let json = Json::<Value>::from_request(request, &())
-                    .await
-                    .map_err(|e| e.into_response());
+                let body = request.collect().await.unwrap().to_bytes();
+                let json = serde_json::from_slice::<Value>(&body);
                 match json {
                     Ok(json) => BodyData {
                         json: json.to_string().as_bytes().to_vec(),
@@ -187,37 +185,26 @@ impl Request {
                 }
             }
             t if t.starts_with("multipart/form-data") => {
-                let mut multipart = Multipart::from_request(request, &())
-                    .await
-                    .map_err(|e| e.into_response());
+                let body_stream = BodyExt::into_data_stream(request.into_body());
+                let mut multipart = Multipart::new(body_stream, "content_type");
 
                 let mut files = vec![];
                 let mut json = vec![];
 
-                while let Some(field) = multipart
-                    .as_mut()
-                    .unwrap()
-                    .next_field()
-                    .await
-                    .map_err(|e| e.into_response())
-                    .ok()
-                    .flatten()
-                {
+                while let Some(field) = multipart.next_field().await.unwrap() {
                     let name = field.name().unwrap_or("").to_string();
-                    let content_type = field
-                        .content_type()
-                        .unwrap_or("application/octet-stream")
-                        .to_string();
+
+                    let content_type = field.content_type().unwrap().to_string();
 
                     if name == "json" {
-                        let data = field.bytes().await.map_err(|e| e.into_response());
+                        let data: Result<bytes::Bytes, multer::Error> = field.bytes().await;
                         json = match Some(serde_json::from_slice(&data.unwrap()).map_err(|e| e)) {
                             Some(Ok(json)) => json,
                             _ => vec![],
                         }
                     } else {
                         let filename = field.file_name().unwrap_or("").to_string();
-                        let data = field.bytes().await.map_err(|e| e.into_response());
+                        let data: Result<bytes::Bytes, multer::Error> = field.bytes().await;
 
                         let mut temp_file = NamedTempFile::new().map_err(|e| e);
 
