@@ -18,19 +18,19 @@ use crate::{
     },
     ws::{router::WebsocketRouter, socket::SocketHeld, websocket::websocket_handler},
 };
-use bytes::Bytes;
 use dashmap::DashMap;
 use futures::future::join_all;
 use http_body_util::{BodyExt, Full};
 use hyper::{
     body::{Body, Incoming},
-    server::conn::http1,
+    server::conn::{http1, http2},
     service::service_fn,
     Request as HyperRequest, StatusCode,
 };
 use hyper::{Error, Response as HyperResponse};
 use hyper_util::rt::TokioIo;
 use pyo3::{prelude::*, types::PyDict};
+use pyo3_asyncio::TaskLocals;
 use std::{
     collections::HashMap,
     sync::{
@@ -57,6 +57,38 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 static NOTFOUND: &[u8] = b"Not Found";
+
+struct SharedContext {
+    router: Arc<RwLock<Router>>,
+    task_locals: Arc<TaskLocals>,
+    middlewares: Arc<Middleware>,
+    extra_headers: Arc<DashMap<String, String>>,
+}
+
+impl SharedContext {
+    fn new(
+        router: Arc<RwLock<Router>>,
+        task_locals: Arc<TaskLocals>,
+        middlewares: Arc<Middleware>,
+        extra_headers: Arc<DashMap<String, String>>,
+    ) -> Self {
+        Self {
+            router,
+            task_locals,
+            middlewares,
+            extra_headers,
+        }
+    }
+
+    fn clone(&self) -> Self {
+        Self {
+            router: Arc::clone(&self.router),
+            task_locals: Arc::clone(&self.task_locals),
+            middlewares: Arc::clone(&self.middlewares),
+            extra_headers: Arc::clone(&self.extra_headers),
+        }
+    }
+}
 
 #[pyclass]
 pub struct Server {
@@ -174,7 +206,6 @@ impl Server {
         let asyncio = py.import("asyncio")?;
         let event_loop = asyncio.call_method0("get_event_loop")?;
 
-        let router = Arc::clone(&self.router);
         let websocket_router = Arc::clone(&self.websocket_router);
 
         let startup_handler = self.startup_handler.clone();
@@ -183,13 +214,17 @@ impl Server {
         let task_locals = Arc::new(pyo3_asyncio::TaskLocals::new(event_loop).copy_context(py)?);
         let task_local_copy = Arc::clone(&task_locals);
 
-        let injected = Arc::clone(&self.injected);
-        let copy_middlewares = Arc::clone(&self.middlewares);
-        let extra_headers = Arc::clone(&self.extra_headers);
         let auto_compression = self.auto_compression;
-        let database_config = self.database_config.clone();
+        let database_config: Option<DatabaseConfig> = self.database_config.clone();
         let mem_pool_min_capacity = self.mem_pool_min_capacity;
         let mem_pool_max_capacity = self.mem_pool_max_capacity;
+
+        let shared_context = SharedContext::new(
+            self.router.clone(),
+            task_locals.clone(),
+            self.middlewares.clone(),
+            self.extra_headers.clone(),
+        );
 
         thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
@@ -208,33 +243,31 @@ impl Server {
             debug!("Waiting for process to start...");
 
             rt.block_on(async move {
+                // initialize mem pool
+                create_mem_pool(mem_pool_min_capacity, mem_pool_max_capacity);
+
+                // excute startup handler
+                let _ = execute_startup_handler(startup_handler, &Arc::clone(&task_locals)).await;
+
                 let listener = tokio::net::TcpListener::from_std(raw_socket.into()).unwrap();
+
                 loop {
                     let (stream, _) = listener.accept().await.unwrap();
                     let io = TokioIo::new(stream);
-                    let router = Arc::clone(&router);
-                    let task_locals = Arc::clone(&task_locals);
-                    let copy_middlewares = Arc::clone(&copy_middlewares);
-                    let extra_headers = Arc::clone(&extra_headers);
-
+                    let shared_context = shared_context.clone();
                     tokio::task::spawn(async move {
-                        let router = Arc::clone(&router);
-                        let task_locals = Arc::clone(&task_locals);
-                        let copy_middlewares = Arc::clone(&copy_middlewares);
-                        let extra_headers = Arc::clone(&extra_headers);
-
                         let service = service_fn(|req: hyper::Request<hyper::body::Incoming>| {
-                            let router = Arc::clone(&router);
-                            let task_locals = Arc::clone(&task_locals);
-                            let copy_middlewares = Arc::clone(&copy_middlewares);
-                            let extra_headers = Arc::clone(&extra_headers);
+                            let shared_context = shared_context.clone();
                             async move {
                                 let path = req.uri().path().to_string();
                                 let method = req.method().to_string();
+
                                 // matching mapping router
-                                let task_locals = Arc::clone(&task_locals);
-                                let copy_middlewares = Arc::clone(&copy_middlewares);
-                                let extra_headers = Arc::clone(&extra_headers);
+                                let router = shared_context.router.clone();
+                                let task_locals = shared_context.task_locals.clone();
+                                let middlewares = shared_context.middlewares.clone();
+                                let extra_headers = shared_context.extra_headers.clone();
+
                                 let route = {
                                     let router = router.read().unwrap();
                                     router.find_matching_route_py(&path, &method).unwrap()
@@ -244,7 +277,7 @@ impl Server {
                                     Some(route) => {
                                         let function = route.function;
                                         let task_locals = Arc::clone(&task_locals);
-                                        let middlewares = Arc::clone(&copy_middlewares);
+                                        let middlewares = Arc::clone(&middlewares);
                                         let extra_headers = Arc::clone(&extra_headers);
                                         let response = mapping_method(
                                             req,
