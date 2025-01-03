@@ -2,9 +2,8 @@ use crate::{
     database::{
         context::{
             get_session_database, get_sql_connect, insert_sql_session, remove_sql_session,
-            set_sql_connect,
         },
-        sql::{config::DatabaseConfig, connection::DatabaseConnection},
+        sql::config::DatabaseConfig,
     },
     executor::{execute_http_function, execute_middleware_function, execute_startup_handler},
     instants::create_mem_pool,
@@ -16,20 +15,19 @@ use crate::{
         middleware::MiddlewareReturn,
         request::Request,
     },
-    ws::{router::WebsocketRouter, socket::SocketHeld, websocket::websocket_handler},
+    ws::{router::WebsocketRouter, socket::SocketHeld},
 };
 use dashmap::DashMap;
 use futures::future::join_all;
-use http_body_util::{BodyExt, Full};
 use hyper::{
-    body::{Body, Incoming},
-    server::conn::{http1, http2},
+    body::Incoming,
+    server::conn::http1,
     service::service_fn,
     Request as HyperRequest, StatusCode,
 };
-use hyper::{Error, Response as HyperResponse};
+use hyper::Response as HyperResponse;
 use hyper_util::rt::TokioIo;
-use pyo3::{prelude::*, types::PyDict};
+use pyo3::prelude::*;
 use pyo3_asyncio::TaskLocals;
 use std::{
     collections::HashMap,
@@ -44,15 +42,8 @@ use std::{
     process::exit,
     sync::{atomic::AtomicBool, Arc},
 };
-use tower::ServiceBuilder;
 
-use crate::di::DependencyInjection;
-use tower_http::{
-    trace::{DefaultOnResponse, TraceLayer},
-    LatencyUnit,
-    {compression::CompressionLayer, decompression::RequestDecompressionLayer},
-};
-use tracing::{debug, Level};
+use tracing::debug;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -96,10 +87,8 @@ pub struct Server {
     websocket_router: Arc<WebsocketRouter>,
     startup_handler: Option<Arc<FunctionInfo>>,
     shutdown_handler: Option<Arc<FunctionInfo>>,
-    injected: Arc<DependencyInjection>,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
-    auto_compression: bool,
     database_config: Option<DatabaseConfig>,
     mem_pool_min_capacity: usize,
     mem_pool_max_capacity: usize,
@@ -114,10 +103,8 @@ impl Server {
             websocket_router: Arc::new(WebsocketRouter::default()),
             startup_handler: None,
             shutdown_handler: None,
-            injected: Arc::new(DependencyInjection::new()),
             middlewares: Arc::new(Middleware::new()),
             extra_headers: Arc::new(DashMap::new()),
-            auto_compression: true,
             database_config: None,
             mem_pool_min_capacity: 10,
             mem_pool_max_capacity: 100,
@@ -131,14 +118,6 @@ impl Server {
 
     pub fn set_websocket_router(&mut self, websocket_router: WebsocketRouter) {
         self.websocket_router = Arc::new(websocket_router);
-    }
-
-    pub fn inject(&mut self, key: &str, value: Py<PyAny>) {
-        let _ = self.injected.add_dependency(key, value);
-    }
-
-    pub fn set_injected(&mut self, injected: Py<PyDict>) {
-        self.injected = Arc::new(DependencyInjection::from_object(injected));
     }
 
     pub fn set_before_hooks(&mut self, hooks: Vec<(FunctionInfo, MiddlewareConfig)>) {
@@ -165,10 +144,6 @@ impl Server {
 
     pub fn set_shutdown_handler(&mut self, handler: FunctionInfo) {
         self.shutdown_handler = Some(Arc::new(handler));
-    }
-
-    pub fn set_auto_compression(&mut self, enabled: bool) {
-        self.auto_compression = enabled;
     }
 
     pub fn set_database_config(&mut self, config: DatabaseConfig) {
@@ -206,7 +181,7 @@ impl Server {
         let asyncio = py.import("asyncio")?;
         let event_loop = asyncio.call_method0("get_event_loop")?;
 
-        let websocket_router = Arc::clone(&self.websocket_router);
+        let _websocket_router = Arc::clone(&self.websocket_router);
 
         let startup_handler = self.startup_handler.clone();
         let shutdown_handler = self.shutdown_handler.clone();
@@ -214,8 +189,7 @@ impl Server {
         let task_locals = Arc::new(pyo3_asyncio::TaskLocals::new(event_loop).copy_context(py)?);
         let task_local_copy = Arc::clone(&task_locals);
 
-        let auto_compression = self.auto_compression;
-        let database_config: Option<DatabaseConfig> = self.database_config.clone();
+        let _database_config: Option<DatabaseConfig> = self.database_config.clone();
         let mem_pool_min_capacity = self.mem_pool_min_capacity;
         let mem_pool_max_capacity = self.mem_pool_max_capacity;
 
@@ -362,8 +336,6 @@ async fn execute_request(
 ) -> HyperResponse<BoxBody> {
     let response_builder = HyperResponse::builder();
 
-    let deps = req.extensions().get::<Arc<DependencyInjection>>().cloned();
-
     let mut request = Request::from_request(req).await;
     let request_id = Arc::new(request.context_id.clone());
 
@@ -413,7 +385,7 @@ async fn execute_request(
     }
 
     // Execute the main handler
-    let mut response = execute_http_function(&request, &function, deps)
+    let mut response = execute_http_function(&request, &function)
         .await
         .unwrap();
 

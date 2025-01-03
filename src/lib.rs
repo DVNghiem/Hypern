@@ -9,7 +9,6 @@ mod router;
 mod types;
 mod ws;
 mod executor;
-mod di;
 mod middlewares;
 mod database;
 mod mem_pool;

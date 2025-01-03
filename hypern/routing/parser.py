@@ -69,7 +69,7 @@ class InputHandler:
         }
         return special_params.get(param_name, lambda: None)()
 
-    async def get_input_handler(self, signature: inspect.Signature, inject: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+    async def get_input_handler(self, signature: inspect.Signature) -> typing.Dict[str, typing.Any]:
         """
         Parse the request data and return the kwargs for the handler
         """
@@ -93,6 +93,4 @@ class InputHandler:
             special_value = await self.handle_special_params(name)
             if special_value is not None:
                 kwargs[name] = special_value
-            if name in inject:
-                kwargs[name] = inject[name]
         return kwargs

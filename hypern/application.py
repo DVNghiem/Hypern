@@ -209,14 +209,6 @@ class Hypern:
                 """
             ),
         ] = None,
-        default_injectables: Annotated[
-            dict[str, Any] | None,
-            Doc(
-                """
-                A dictionary of default injectables to be passed to all routes.
-                """
-            ),
-        ] = None,
         auto_compression: Annotated[
             bool,
             Doc(
@@ -240,7 +232,6 @@ class Hypern:
         self.router = Router(path="/")
         self.websocket_router = WebsocketRouter(path="/")
         self.scheduler = scheduler
-        self.injectables = default_injectables or {}
         self.middleware_before_request = []
         self.middleware_after_request = []
         self.response_headers = {}
@@ -366,20 +357,6 @@ class Hypern:
 
         return decorator
 
-    def inject(self, key: str, value: Any):
-        """
-        Injects a key-value pair into the injectables dictionary.
-
-        Args:
-            key (str): The key to be added to the injectables dictionary.
-            value (Any): The value to be associated with the key.
-
-        Returns:
-            self: Returns the instance of the class to allow method chaining.
-        """
-        self.injectables[key] = value
-        return self
-
     def add_middleware(self, middleware: Middleware):
         """
         Adds middleware to the application.
@@ -429,11 +406,9 @@ class Hypern:
         server = Server()
         server.set_router(router=self.router)
         server.set_websocket_router(websocket_router=self.websocket_router)
-        server.set_injected(injected=self.injectables)
         server.set_before_hooks(hooks=self.middleware_before_request)
         server.set_after_hooks(hooks=self.middleware_after_request)
         server.set_response_headers(headers=self.response_headers)
-        server.set_auto_compression(enabled=self.auto_compression)
         server.set_mem_pool_capacity(min_capacity=self.args.min_capacity, max_capacity=self.args.max_capacity)
 
         if self.database_config:
