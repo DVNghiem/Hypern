@@ -1,12 +1,9 @@
 use crate::{
     database::{
-        context::{
-            get_session_database, get_sql_connect, insert_sql_session, remove_sql_session,
-        },
+        context::{get_session_database, get_sql_connect, insert_sql_session, remove_sql_session},
         sql::config::DatabaseConfig,
     },
     executor::{execute_http_function, execute_middleware_function, execute_startup_handler},
-    instants::create_mem_pool,
     middlewares::base::{Middleware, MiddlewareConfig},
     router::router::Router,
     types::{
@@ -19,13 +16,10 @@ use crate::{
 };
 use dashmap::DashMap;
 use futures::future::join_all;
-use hyper::{
-    body::Incoming,
-    server::conn::http1,
-    service::service_fn,
-    Request as HyperRequest, StatusCode,
-};
 use hyper::Response as HyperResponse;
+use hyper::{
+    body::Incoming, server::conn::http1, service::service_fn, Request as HyperRequest, StatusCode,
+};
 use hyper_util::rt::TokioIo;
 use pyo3::prelude::*;
 use pyo3_asyncio::TaskLocals;
@@ -42,8 +36,13 @@ use std::{
     process::exit,
     sync::{atomic::AtomicBool, Arc},
 };
+use tower::ServiceBuilder;
+use tower_http::{
+    trace::{DefaultOnResponse, TraceLayer},
+    LatencyUnit,
+};
 
-use tracing::debug;
+use tracing::{debug, Level};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -90,8 +89,6 @@ pub struct Server {
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
     database_config: Option<DatabaseConfig>,
-    mem_pool_min_capacity: usize,
-    mem_pool_max_capacity: usize,
 }
 
 #[pymethods]
@@ -106,8 +103,6 @@ impl Server {
             middlewares: Arc::new(Middleware::new()),
             extra_headers: Arc::new(DashMap::new()),
             database_config: None,
-            mem_pool_min_capacity: 10,
-            mem_pool_max_capacity: 100,
         }
     }
 
@@ -150,11 +145,6 @@ impl Server {
         self.database_config = Some(config);
     }
 
-    pub fn set_mem_pool_capacity(&mut self, min_capacity: usize, max_capacity: usize) {
-        self.mem_pool_min_capacity = min_capacity;
-        self.mem_pool_max_capacity = max_capacity;
-    }
-
     pub fn start(
         &mut self,
         py: Python,
@@ -190,8 +180,6 @@ impl Server {
         let task_local_copy = Arc::clone(&task_locals);
 
         let _database_config: Option<DatabaseConfig> = self.database_config.clone();
-        let mem_pool_min_capacity = self.mem_pool_min_capacity;
-        let mem_pool_max_capacity = self.mem_pool_max_capacity;
 
         let shared_context = SharedContext::new(
             self.router.clone(),
@@ -217,9 +205,6 @@ impl Server {
             debug!("Waiting for process to start...");
 
             rt.block_on(async move {
-                // initialize mem pool
-                create_mem_pool(mem_pool_min_capacity, mem_pool_max_capacity);
-
                 // excute startup handler
                 let _ = execute_startup_handler(startup_handler, &Arc::clone(&task_locals)).await;
 
@@ -271,6 +256,22 @@ impl Server {
                                 }
                             }
                         });
+
+                        let trace_layer = TraceLayer::new_for_http().on_response(
+                            DefaultOnResponse::new()
+                                .level(Level::INFO)
+                                .latency_unit(LatencyUnit::Millis),
+                        );
+
+                        let svc = ServiceBuilder::new()
+                            .layer(
+                                TraceLayer::new_for_http().on_response(
+                                    DefaultOnResponse::new()
+                                        .level(Level::INFO)
+                                        .latency_unit(LatencyUnit::Millis),
+                                ),
+                            )
+                            .service(service);
 
                         if let Err(err) = http1::Builder::new().serve_connection(io, service).await
                         {
@@ -385,9 +386,7 @@ async fn execute_request(
     }
 
     // Execute the main handler
-    let mut response = execute_http_function(&request, &function)
-        .await
-        .unwrap();
+    let mut response = execute_http_function(&request, &function).await.unwrap();
 
     // mapping context id
     response.context_id = request.context_id;

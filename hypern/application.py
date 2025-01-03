@@ -209,14 +209,6 @@ class Hypern:
                 """
             ),
         ] = None,
-        auto_compression: Annotated[
-            bool,
-            Doc(
-                """
-                Enable automatic compression of responses.
-                """
-            ),
-        ] = False,
         database_config: Annotated[
             DatabaseConfig | None,
             Doc(
@@ -238,7 +230,6 @@ class Hypern:
         self.args = ArgsConfig()
         self.start_up_handler = None
         self.shutdown_handler = None
-        self.auto_compression = auto_compression
         self.database_config = database_config
         self.thread_config = ThreadConfigurator().get_config()
 
@@ -409,7 +400,6 @@ class Hypern:
         server.set_before_hooks(hooks=self.middleware_before_request)
         server.set_after_hooks(hooks=self.middleware_after_request)
         server.set_response_headers(headers=self.response_headers)
-        server.set_mem_pool_capacity(min_capacity=self.args.min_capacity, max_capacity=self.args.max_capacity)
 
         if self.database_config:
             server.set_database_config(config=self.database_config)
