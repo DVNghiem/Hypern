@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use http_body_util::Full;
-use hyper::{upgrade::Upgraded, Request, Response};
+use hyper::{body::Incoming, header, upgrade::Upgraded, Request, Response};
 use hyper_util::rt::TokioIo;
 use pyo3::{
     prelude::*,
@@ -10,9 +10,8 @@ use pyo3::{
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::WebSocketStream;
+use tracing::{info, warn};
 use tungstenite::Message;
-
-use crate::types::body::BoxBody;
 
 #[derive(Debug, Clone)]
 pub enum WebSocketMessage {
@@ -82,6 +81,7 @@ impl WebSocketSession {
 
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             tx.send(WebSocketMessage::Close).await.map_err(|_| {
+                println!("Failed to close");
                 PyErr::new::<pyo3::exceptions::PyConnectionError, _>("Failed to close")
             })
         })
@@ -90,14 +90,64 @@ impl WebSocketSession {
 
 pub async fn websocket_handler(
     handler: PyObject,
-    req: Request<BoxBody>,
+    mut req: Request<Incoming>,
 ) -> Result<Response<Full<Bytes>>, Box<dyn std::error::Error>> {
+    info!("Received request with headers: {:?}", req.headers());
+
+    // Ensure all required headers are present and correct
+    let upgrade_header = req
+        .headers()
+        .get(header::UPGRADE)
+        .and_then(|h| h.to_str().ok())
+        .map(|h| h.to_lowercase());
+
+    let connection_header = req
+        .headers()
+        .get(header::CONNECTION)
+        .and_then(|h| h.to_str().ok())
+        .map(|h| h.to_lowercase());
+
+    let websocket_key = req.headers().get(header::SEC_WEBSOCKET_KEY);
+
+    let websocket_version = req.headers().get(header::SEC_WEBSOCKET_VERSION);
+
+    // Validate all required headers
+    if upgrade_header != Some("websocket".to_string())
+        || !connection_header
+            .clone()
+            .map(|h| h.contains("upgrade"))
+            .unwrap_or(false)
+        || websocket_key.is_none()
+        || websocket_version != Some(&header::HeaderValue::from_static("13"))
+    {
+        warn!(
+            "Invalid WebSocket headers: upgrade={:?}, connection={:?}, key={:?}, version={:?}",
+            upgrade_header, connection_header, websocket_key, websocket_version
+        );
+        return Ok(Response::new(Full::new(Bytes::from(
+            "Invalid WebSocket headers",
+        ))));
+    }
+
+    // Add required response headers if missing
+    if !req.headers().contains_key(header::SEC_WEBSOCKET_PROTOCOL) {
+        req.headers_mut().insert(
+            header::SEC_WEBSOCKET_PROTOCOL,
+            header::HeaderValue::from_static("websocket"),
+        );
+    }
+
     if hyper_tungstenite::is_upgrade_request(&req) {
-        let (response, websocket) = hyper_tungstenite::upgrade(req, None)?;
+        let (response, websocket) = hyper_tungstenite::upgrade(&mut req, None)?;
 
         tokio::spawn(async move {
-            if let Ok(ws) = websocket.await {
-                handle_socket(handler, ws).await;
+            match websocket.await {
+                Ok(ws) => {
+                    handle_socket(handler, ws).await;
+                }
+                Err(e) => {
+                    eprintln!("Failed to establish WebSocket connection: {:?}", e);
+                }
             }
         });
 
@@ -123,7 +173,10 @@ async fn handle_socket(python_handler: PyObject, ws: WebSocketStream<TokioIo<Upg
             let send_result = match msg {
                 WebSocketMessage::Text(text) => write.send(Message::Text(text.into())).await,
                 WebSocketMessage::Binary(bytes) => write.send(Message::Binary(bytes.into())).await,
-                WebSocketMessage::Close => break,
+                WebSocketMessage::Close => {
+                    info!("Closing connection");
+                    break;
+                }
             };
 
             if send_result.is_err() {
@@ -191,6 +244,18 @@ async fn handle_socket(python_handler: PyObject, ws: WebSocketStream<TokioIo<Upg
                     {
                         break;
                     }
+                }
+                Ok(Message::Ping(ping)) => {
+                    if tx_recv
+                        .send(WebSocketMessage::Binary(ping.to_vec()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok(Message::Pong(_)) => {
+                    // Handle pong messages if needed
                 }
                 Ok(Message::Close(_)) | Err(_) => {
                     let mut closed = is_closed_clone.lock().await;

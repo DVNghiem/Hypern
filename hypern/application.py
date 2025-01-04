@@ -237,7 +237,8 @@ class Hypern:
             self.router.extend_route(route(app=self).routes)
 
         for websocket_route in websockets or []:
-            self.websocket_router.add_route(websocket_route)
+            for route in websocket_route.routes:
+                self.websocket_router.add_route(route)
 
         if openapi_url and docs_url:
             self.__add_openapi(

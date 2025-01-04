@@ -13,6 +13,10 @@ impl WebsocketRouter {
     pub fn iter(&self) -> std::slice::Iter<WebsocketRoute> {
         self.routes.iter()
     }
+
+    pub fn find_route(&self, path: &str) -> Option<&WebsocketRoute> {
+        self.routes.iter().find(|r| r.path == path)
+    }
 }
 
 impl ToPyObject for WebsocketRouter {

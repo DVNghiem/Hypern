@@ -12,14 +12,16 @@ use crate::{
         middleware::MiddlewareReturn,
         request::Request,
     },
-    ws::{router::WebsocketRouter, socket::SocketHeld},
+    ws::{self, router::WebsocketRouter, socket::SocketHeld, websocket::websocket_handler},
 };
+use bytes::Bytes;
 use dashmap::DashMap;
 use futures::future::join_all;
-use hyper::Response as HyperResponse;
+use http_body_util::Full;
 use hyper::{
     body::Incoming, server::conn::http1, service::service_fn, Request as HyperRequest, StatusCode,
 };
+use hyper::{header::HeaderValue, Response as HyperResponse};
 use hyper_util::rt::TokioIo;
 use pyo3::prelude::*;
 use pyo3_asyncio::TaskLocals;
@@ -30,19 +32,15 @@ use std::{
         RwLock,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use std::{
     process::exit,
     sync::{atomic::AtomicBool, Arc},
 };
 use tower::ServiceBuilder;
-use tower_http::{
-    trace::{DefaultOnResponse, TraceLayer},
-    LatencyUnit,
-};
 
-use tracing::{debug, Level};
+use tracing::{debug, info};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -50,6 +48,7 @@ static NOTFOUND: &[u8] = b"Not Found";
 
 struct SharedContext {
     router: Arc<RwLock<Router>>,
+    ws_router: Arc<WebsocketRouter>,
     task_locals: Arc<TaskLocals>,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
@@ -58,12 +57,14 @@ struct SharedContext {
 impl SharedContext {
     fn new(
         router: Arc<RwLock<Router>>,
+        ws_router: Arc<WebsocketRouter>,
         task_locals: Arc<TaskLocals>,
         middlewares: Arc<Middleware>,
         extra_headers: Arc<DashMap<String, String>>,
     ) -> Self {
         Self {
             router,
+            ws_router,
             task_locals,
             middlewares,
             extra_headers,
@@ -73,6 +74,7 @@ impl SharedContext {
     fn clone(&self) -> Self {
         Self {
             router: Arc::clone(&self.router),
+            ws_router: Arc::clone(&self.ws_router),
             task_locals: Arc::clone(&self.task_locals),
             middlewares: Arc::clone(&self.middlewares),
             extra_headers: Arc::clone(&self.extra_headers),
@@ -157,7 +159,12 @@ impl Server {
                 tracing_subscriber::EnvFilter::try_from_default_env()
                     .unwrap_or_else(|_| "debug".into()),
             )
-            .with(fmt::layer().with_target(false).with_level(true))
+            .with(
+                fmt::layer()
+                    .with_target(false)
+                    .with_level(true)
+                    .with_file(true),
+            )
             .init();
 
         if STARTED
@@ -183,6 +190,7 @@ impl Server {
 
         let shared_context = SharedContext::new(
             self.router.clone(),
+            self.websocket_router.clone(),
             task_locals.clone(),
             self.middlewares.clone(),
             self.extra_headers.clone(),
@@ -215,65 +223,28 @@ impl Server {
                     let io = TokioIo::new(stream);
                     let shared_context = shared_context.clone();
                     tokio::task::spawn(async move {
-                        let service = service_fn(|req: hyper::Request<hyper::body::Incoming>| {
+                        let http_svc = service_fn(|req: hyper::Request<hyper::body::Incoming>| {
                             let shared_context = shared_context.clone();
                             async move {
-                                let path = req.uri().path().to_string();
-                                let method = req.method().to_string();
-
-                                // matching mapping router
-                                let router = shared_context.router.clone();
-                                let task_locals = shared_context.task_locals.clone();
-                                let middlewares = shared_context.middlewares.clone();
-                                let extra_headers = shared_context.extra_headers.clone();
-
-                                let route = {
-                                    let router = router.read().unwrap();
-                                    router.find_matching_route_py(&path, &method).unwrap()
-                                };
-
-                                match route {
-                                    Some(route) => {
-                                        let function = route.function;
-                                        let task_locals = Arc::clone(&task_locals);
-                                        let middlewares = Arc::clone(&middlewares);
-                                        let extra_headers = Arc::clone(&extra_headers);
-                                        let response = mapping_method(
-                                            req,
-                                            function,
-                                            task_locals,
-                                            middlewares,
-                                            extra_headers,
-                                        )
-                                        .await;
-                                        return Ok(response);
-                                    }
-                                    None => {
-                                        return HyperResponse::builder()
-                                            .status(StatusCode::NOT_FOUND)
-                                            .body(full(NOTFOUND));
-                                    }
-                                }
+                                let response = http_service(req, shared_context).await;
+                                Ok::<_, hyper::Error>(response)
                             }
                         });
 
-                        let trace_layer = TraceLayer::new_for_http().on_response(
-                            DefaultOnResponse::new()
-                                .level(Level::INFO)
-                                .latency_unit(LatencyUnit::Millis),
-                        );
+                        let ws_svc = service_fn(|req: hyper::Request<Incoming>| {
+                            let shared_context = shared_context.clone();
+                            async move {
+                                let response =
+                                    websocket_service(req, shared_context.ws_router).await;
+                                Ok::<_, hyper::Error>(response)
+                            }
+                        });
 
-                        let svc = ServiceBuilder::new()
-                            .layer(
-                                TraceLayer::new_for_http().on_response(
-                                    DefaultOnResponse::new()
-                                        .level(Level::INFO)
-                                        .latency_unit(LatencyUnit::Millis),
-                                ),
-                            )
-                            .service(service);
-
-                        if let Err(err) = http1::Builder::new().serve_connection(io, service).await
+                        if let Err(err) = http1::Builder::new()
+                            .keep_alive(true)
+                            .serve_connection(io, ws_svc)
+                            .with_upgrades()
+                            .await
                         {
                             println!("Failed to serve connection: {:?}", err);
                         }
@@ -304,6 +275,77 @@ impl Server {
         }
         Ok(())
     }
+}
+
+async fn http_service(
+    req: HyperRequest<Incoming>,
+    shared_context: SharedContext,
+) -> HyperResponse<BoxBody> {
+    let path = req.uri().path().to_string();
+    let method = req.method().to_string();
+    let version = req.version();
+    let user_agent = req
+        .headers()
+        .get("user-agent")
+        .cloned()
+        .unwrap_or(HeaderValue::from_str("unknown").unwrap());
+    let start_time = Instant::now();
+
+    // matching mapping router
+    let route = {
+        let router = shared_context.router.read().unwrap();
+        router.find_matching_route_py(&path, &method).unwrap()
+    };
+
+    let response = match route {
+        Some(route) => {
+            let function = route.function;
+            let response = mapping_method(
+                req,
+                function,
+                shared_context.task_locals,
+                shared_context.middlewares,
+                shared_context.extra_headers,
+            )
+            .await;
+            response
+        }
+        None => HyperResponse::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(full(NOTFOUND))
+            .unwrap(),
+    };
+    // logging
+    info!(
+        "{:?} {:?} {:?} {:?} {:?} {:?}",
+        version,
+        method,
+        path,
+        user_agent,
+        start_time.elapsed(),
+        response.status(),
+    );
+
+    return response;
+}
+
+async fn websocket_service(
+    req: HyperRequest<Incoming>,
+    websocket_router: Arc<WebsocketRouter>,
+) -> HyperResponse<Full<Bytes>> {
+    let path = req.uri().path().to_string();
+    let route = websocket_router.find_route(&path);
+
+    println!("{:?}", route);
+    let response = match route {
+        Some(route) => {
+            let handler = route.handler.clone();
+            let response = websocket_handler(handler, req).await;
+            response.unwrap()
+        }
+        None => HyperResponse::new(Full::new(Bytes::from("Not a websocket request"))),
+    };
+    return response;
 }
 
 async fn inject_database(request_id: Arc<String>) {
