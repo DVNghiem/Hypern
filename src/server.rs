@@ -12,12 +12,10 @@ use crate::{
         middleware::MiddlewareReturn,
         request::Request,
     },
-    ws::{self, router::WebsocketRouter, socket::SocketHeld, websocket::websocket_handler},
+    ws::{router::WebsocketRouter, socket::SocketHeld, websocket::websocket_handler},
 };
-use bytes::Bytes;
 use dashmap::DashMap;
 use futures::future::join_all;
-use http_body_util::Full;
 use hyper::{
     body::Incoming, server::conn::http1, service::service_fn, Request as HyperRequest, StatusCode,
 };
@@ -25,6 +23,7 @@ use hyper::{header::HeaderValue, Response as HyperResponse};
 use hyper_util::rt::TokioIo;
 use pyo3::prelude::*;
 use pyo3_asyncio::TaskLocals;
+use tower::ServiceBuilder;
 use std::{
     collections::HashMap,
     sync::{
@@ -38,7 +37,6 @@ use std::{
     process::exit,
     sync::{atomic::AtomicBool, Arc},
 };
-use tower::ServiceBuilder;
 
 use tracing::{debug, info};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -223,26 +221,22 @@ impl Server {
                     let io = TokioIo::new(stream);
                     let shared_context = shared_context.clone();
                     tokio::task::spawn(async move {
-                        let http_svc = service_fn(|req: hyper::Request<hyper::body::Incoming>| {
+                        let svc = service_fn(|req: hyper::Request<hyper::body::Incoming>| {
                             let shared_context = shared_context.clone();
                             async move {
+                                if hyper_tungstenite::is_upgrade_request(&req) {
+                                    let response =
+                                        websocket_service(req, shared_context.ws_router).await;
+                                    return Ok::<_, hyper::Error>(response);
+                                }
                                 let response = http_service(req, shared_context).await;
-                                Ok::<_, hyper::Error>(response)
-                            }
-                        });
-
-                        let ws_svc = service_fn(|req: hyper::Request<Incoming>| {
-                            let shared_context = shared_context.clone();
-                            async move {
-                                let response =
-                                    websocket_service(req, shared_context.ws_router).await;
                                 Ok::<_, hyper::Error>(response)
                             }
                         });
 
                         if let Err(err) = http1::Builder::new()
                             .keep_alive(true)
-                            .serve_connection(io, ws_svc)
+                            .serve_connection(io, svc)
                             .with_upgrades()
                             .await
                         {
@@ -332,18 +326,17 @@ async fn http_service(
 async fn websocket_service(
     req: HyperRequest<Incoming>,
     websocket_router: Arc<WebsocketRouter>,
-) -> HyperResponse<Full<Bytes>> {
+) -> HyperResponse<BoxBody> {
     let path = req.uri().path().to_string();
     let route = websocket_router.find_route(&path);
 
-    println!("{:?}", route);
     let response = match route {
         Some(route) => {
             let handler = route.handler.clone();
             let response = websocket_handler(handler, req).await;
             response.unwrap()
         }
-        None => HyperResponse::new(Full::new(Bytes::from("Not a websocket request"))),
+        None => HyperResponse::new(full("Not a websocket request")),
     };
     return response;
 }
