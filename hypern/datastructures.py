@@ -1,6 +1,6 @@
 from typing import Optional
 from enum import Enum
-from pydantic import BaseModel, AnyUrl, EmailStr
+from pydantic import BaseModel, AnyUrl
 
 
 class BaseModelWithConfig(BaseModel):
@@ -10,7 +10,7 @@ class BaseModelWithConfig(BaseModel):
 class Contact(BaseModelWithConfig):
     name: Optional[str] = None
     url: Optional[AnyUrl] = None
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
 
 
 class License(BaseModelWithConfig):

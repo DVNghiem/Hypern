@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use axum::http::HeaderMap;
+use hyper::HeaderMap;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyString};
 

@@ -9,10 +9,10 @@ mod router;
 mod types;
 mod ws;
 mod executor;
-mod di;
 mod middlewares;
 mod database;
 mod mem_pool;
+mod di;
 
 #[pymodule]
 fn hypern(_py: Python<'_>, m: &PyModule) -> PyResult<()>  {

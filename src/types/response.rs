@@ -1,14 +1,12 @@
-use axum::{
-    body::Body,
-    http::{HeaderName, Response as ServerResponse, StatusCode},
-};
 use dashmap::DashMap;
 use pyo3::{
     prelude::*,
     types::{PyBytes, PyDict, PyString},
 };
 
-use super::header::Header;
+use hyper::{header::HeaderName, Response as HyperResponse, StatusCode};
+
+use super::{body::{full, BoxBody}, header::Header};
 
 fn get_description_from_pyobject(description: &PyAny) -> PyResult<Vec<u8>> {
     if let Ok(s) = description.downcast::<PyString>() {
@@ -34,12 +32,12 @@ pub struct Response {
 }
 
 impl Response {
-    pub fn to_axum_response(
+    pub fn to_response(
         &self,
         extra_headers: &DashMap<String, String>,
-    ) -> axum::http::Response<Body> {
+    ) -> HyperResponse<BoxBody> {
         let mut builder =
-            ServerResponse::builder().status(StatusCode::from_u16(self.status_code).unwrap());
+        HyperResponse::builder().status(StatusCode::from_u16(self.status_code).unwrap());
 
         for (key, value) in self.headers.headers.iter() {
             if let Ok(name) = HeaderName::from_bytes(key.as_bytes()) {
@@ -53,7 +51,7 @@ impl Response {
             }
         }
 
-        builder.body(Body::from(self.description.clone())).unwrap()
+        builder.body(full(self.description.clone())).unwrap()
     }
 }
 impl ToPyObject for Response {

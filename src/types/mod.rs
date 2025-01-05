@@ -6,3 +6,4 @@ pub mod query;
 pub mod url;
 pub mod http;
 pub mod middleware;
+pub mod body;
