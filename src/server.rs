@@ -1,7 +1,10 @@
 use crate::{
     database::{
-        context::{get_session_database, get_sql_connect, insert_sql_session, remove_sql_session},
-        sql::config::DatabaseConfig,
+        context::{
+            get_session_database, get_sql_connect, insert_sql_session, remove_sql_session,
+            set_sql_connect,
+        },
+        sql::{config::DatabaseConfig, connection::DatabaseConnection},
     },
     executor::{execute_http_function, execute_middleware_function, execute_startup_handler},
     middlewares::base::{Middleware, MiddlewareConfig},
@@ -23,7 +26,6 @@ use hyper::{header::HeaderValue, Response as HyperResponse};
 use hyper_util::rt::TokioIo;
 use pyo3::prelude::*;
 use pyo3_asyncio::TaskLocals;
-use tower::ServiceBuilder;
 use std::{
     collections::HashMap,
     sync::{
@@ -184,7 +186,7 @@ impl Server {
         let task_locals = Arc::new(pyo3_asyncio::TaskLocals::new(event_loop).copy_context(py)?);
         let task_local_copy = Arc::clone(&task_locals);
 
-        let _database_config: Option<DatabaseConfig> = self.database_config.clone();
+        let database_config: Option<DatabaseConfig> = self.database_config.clone();
 
         let shared_context = SharedContext::new(
             self.router.clone(),
@@ -215,6 +217,14 @@ impl Server {
                 let _ = execute_startup_handler(startup_handler, &Arc::clone(&task_locals)).await;
 
                 let listener = tokio::net::TcpListener::from_std(raw_socket.into()).unwrap();
+
+                match database_config {
+                    Some(config) => {
+                        let database = DatabaseConnection::new(config).await;
+                        set_sql_connect(database);
+                    }
+                    None => {}
+                };
 
                 loop {
                     let (stream, _) = listener.accept().await.unwrap();
