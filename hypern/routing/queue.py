@@ -128,7 +128,7 @@ class QueuedHTTPEndpoint(HTTPEndpoint):
             self._metrics["processed_requests"] += 1
             self._metrics["queued_requests"] -= 1
 
-    async def dispatch(self, request: Request) -> Response:
+    async def dispatch(self, request: Request, inject: Dict[str, Any]) -> Response:
         """
         Enhanced dispatch method with request queuing.
         """

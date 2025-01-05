@@ -12,6 +12,7 @@ mod executor;
 mod middlewares;
 mod database;
 mod mem_pool;
+mod di;
 
 #[pymodule]
 fn hypern(_py: Python<'_>, m: &PyModule) -> PyResult<()>  {

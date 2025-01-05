@@ -6,6 +6,7 @@ use crate::{
         },
         sql::{config::DatabaseConfig, connection::DatabaseConnection},
     },
+    di::DependencyInjection,
     executor::{execute_http_function, execute_middleware_function, execute_startup_handler},
     middlewares::base::{Middleware, MiddlewareConfig},
     router::router::Router,
@@ -24,7 +25,7 @@ use hyper::{
 };
 use hyper::{header::HeaderValue, Response as HyperResponse};
 use hyper_util::rt::TokioIo;
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyDict};
 use pyo3_asyncio::TaskLocals;
 use std::{
     collections::HashMap,
@@ -52,6 +53,7 @@ struct SharedContext {
     task_locals: Arc<TaskLocals>,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
+    dependencies: Arc<DependencyInjection>,
 }
 
 impl SharedContext {
@@ -61,6 +63,7 @@ impl SharedContext {
         task_locals: Arc<TaskLocals>,
         middlewares: Arc<Middleware>,
         extra_headers: Arc<DashMap<String, String>>,
+        dependencies: Arc<DependencyInjection>,
     ) -> Self {
         Self {
             router,
@@ -68,6 +71,7 @@ impl SharedContext {
             task_locals,
             middlewares,
             extra_headers,
+            dependencies,
         }
     }
 
@@ -78,6 +82,7 @@ impl SharedContext {
             task_locals: Arc::clone(&self.task_locals),
             middlewares: Arc::clone(&self.middlewares),
             extra_headers: Arc::clone(&self.extra_headers),
+            dependencies: Arc::clone(&self.dependencies),
         }
     }
 }
@@ -91,6 +96,7 @@ pub struct Server {
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
     database_config: Option<DatabaseConfig>,
+    dependencies: Arc<DependencyInjection>,
 }
 
 #[pymethods]
@@ -105,7 +111,16 @@ impl Server {
             middlewares: Arc::new(Middleware::new()),
             extra_headers: Arc::new(DashMap::new()),
             database_config: None,
+            dependencies: Arc::new(DependencyInjection::default()),
         }
+    }
+
+    pub fn inject(&mut self, key: &str, value: Py<PyAny>) {
+        let _ = self.dependencies.add_dependency(key, value);
+    }
+
+    pub fn set_dependencies(&mut self, dependencies: Py<PyDict>) {
+        self.dependencies = Arc::new(DependencyInjection::from_object(dependencies));
     }
 
     pub fn set_router(&mut self, router: Router) {
@@ -194,6 +209,7 @@ impl Server {
             task_locals.clone(),
             self.middlewares.clone(),
             self.extra_headers.clone(),
+            self.dependencies.clone(),
         );
 
         thread::spawn(move || {
@@ -310,6 +326,7 @@ async fn http_service(
                 shared_context.task_locals,
                 shared_context.middlewares,
                 shared_context.extra_headers,
+                shared_context.dependencies,
             )
             .await;
             response
@@ -379,10 +396,11 @@ async fn execute_request(
     function: FunctionInfo,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
+    dependencies: Arc<DependencyInjection>,
 ) -> HyperResponse<BoxBody> {
-    let response_builder = HyperResponse::builder();
-
     let mut request = Request::from_request(req).await;
+
+    let response_builder = HyperResponse::builder();
     let request_id = Arc::new(request.context_id.clone());
 
     inject_database(Arc::clone(&request_id)).await;
@@ -431,7 +449,9 @@ async fn execute_request(
     }
 
     // Execute the main handler
-    let mut response = execute_http_function(&request, &function).await.unwrap();
+    let mut response = execute_http_function(&request, &function, Some(dependencies))
+        .await
+        .unwrap();
 
     // mapping context id
     response.context_id = request.context_id;
@@ -469,10 +489,11 @@ async fn mapping_method(
     task_locals: Arc<pyo3_asyncio::TaskLocals>,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
+    dependencies: Arc<DependencyInjection>,
 ) -> HyperResponse<BoxBody> {
     pyo3_asyncio::tokio::scope(
         task_locals.as_ref().to_owned(),
-        execute_request(req, function, middlewares, extra_headers),
+        execute_request(req, function, middlewares, extra_headers, dependencies),
     )
     .await
 }

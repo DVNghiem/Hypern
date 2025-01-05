@@ -83,6 +83,14 @@ class Hypern:
                 """
             ),
         ] = None,
+        dependencies: Annotated[
+            dict[str, Any] | None,
+            Doc(
+                """
+                A dictionary of global dependencies that can be accessed by all routes.
+                """
+            ),
+        ] = None,
         title: Annotated[
             str,
             Doc(
@@ -223,6 +231,7 @@ class Hypern:
         super().__init__(*args, **kwargs)
         self.router = Router(path="/")
         self.websocket_router = WebsocketRouter(path="/")
+        self.dependencies = dependencies or {}
         self.scheduler = scheduler
         self.middleware_before_request = []
         self.middleware_after_request = []
@@ -295,6 +304,20 @@ class Hypern:
 
         self.add_route(HTTPMethod.GET, openapi_url, schema)
         self.add_route(HTTPMethod.GET, docs_url, template_render)
+
+    def inject(self, key: str, value: Any):
+        """
+        Injects a key-value pair into the injectables dictionary.
+
+        Args:
+            key (str): The key to be added to the injectables dictionary.
+            value (Any): The value to be associated with the key.
+
+        Returns:
+            self: Returns the instance of the class to allow method chaining.
+        """
+        self.dependencies[key] = value
+        return self
 
     def add_response_header(self, key: str, value: str):
         """
@@ -398,6 +421,7 @@ class Hypern:
         server = Server()
         server.set_router(router=self.router)
         server.set_websocket_router(websocket_router=self.websocket_router)
+        server.set_dependencies(dependencies=self.dependencies)
         server.set_before_hooks(hooks=self.middleware_before_request)
         server.set_after_hooks(hooks=self.middleware_after_request)
         server.set_response_headers(headers=self.response_headers)
