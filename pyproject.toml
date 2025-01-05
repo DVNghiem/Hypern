@@ -50,7 +50,7 @@ description = "A Fast Async Python backend with a Rust runtime."
 authors = ["Martin Dang <vannghiem848@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = "^3.10"
 sqlalchemy = {extras = ["asyncio"], version = "^2.0.31"}
 pydantic = {extras = ["email"], version = "^2.9.2"}
 passlib = "^1.7.4"
