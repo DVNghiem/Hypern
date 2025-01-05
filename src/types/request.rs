@@ -187,7 +187,6 @@ impl Request {
                 }
             }
             t if t.starts_with("multipart/form-data") => {
-
                 let boundary = request
                     .headers()
                     .get(CONTENT_TYPE)
@@ -249,7 +248,10 @@ impl Request {
                 }
 
                 let json_bytes = serde_json::to_string(&json).unwrap().into_bytes();
-                BodyData { json: json_bytes, files }
+                BodyData {
+                    json: json_bytes,
+                    files,
+                }
             }
             _ => default_body,
         };
@@ -345,7 +347,7 @@ impl PyRequest {
 
                 Ok(dict.into_py(py))
             }
-            _ => Err(PyValueError::new_err("Invalid JSON object")),
+            _ => Ok(PyDict::new(py).into()),
         }
     }
 }
