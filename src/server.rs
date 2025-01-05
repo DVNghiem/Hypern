@@ -423,7 +423,7 @@ async fn execute_request(
     for result in before_results {
         match result {
             Ok(MiddlewareReturn::Request(r)) => request = r,
-            Ok(MiddlewareReturn::Response(r)) => return r.to_axum_response(&extra_headers),
+            Ok(MiddlewareReturn::Response(r)) => return r.to_response(&extra_headers),
             Err(e) => {
                 return response_builder
                     .body(full(format!("Error: {}", e)))
@@ -437,7 +437,7 @@ async fn execute_request(
         if config.is_conditional {
             match execute_middleware_function(&request, &middleware).await {
                 Ok(MiddlewareReturn::Request(r)) => request = r,
-                Ok(MiddlewareReturn::Response(r)) => return r.to_axum_response(&extra_headers),
+                Ok(MiddlewareReturn::Response(r)) => return r.to_response(&extra_headers),
                 Err(e) => {
                     return HyperResponse::builder()
                         .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -480,7 +480,7 @@ async fn execute_request(
 
     free_database(request_id.to_string());
 
-    response.to_axum_response(&extra_headers)
+    response.to_response(&extra_headers)
 }
 
 async fn mapping_method(

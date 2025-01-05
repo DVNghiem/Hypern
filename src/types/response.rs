@@ -32,7 +32,7 @@ pub struct Response {
 }
 
 impl Response {
-    pub fn to_axum_response(
+    pub fn to_response(
         &self,
         extra_headers: &DashMap<String, String>,
     ) -> HyperResponse<BoxBody> {
