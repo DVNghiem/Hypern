@@ -35,8 +35,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install poetry maturin
           poetry config virtualenvs.create false
-          poetry install --no-dev --no-root
-          pip install -e .
+          poetry install
       - name: Setup Rust part of the project
         run: |
           maturin build -i python${{ matrix.python-version }} --release --out dist
