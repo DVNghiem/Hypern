@@ -274,7 +274,7 @@ class UploadedFile:
     path: str
     size: int
     content: bytes
-    filename: str
+    file_name: str
 
 @dataclass
 class BodyData:

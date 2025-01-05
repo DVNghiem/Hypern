@@ -1,5 +1,7 @@
-use http_body_util::BodyExt;
+use futures::StreamExt;
+use http_body_util::{BodyExt, BodyStream};
 use hyper::body::Incoming;
+use hyper::header::CONTENT_TYPE;
 use hyper::{header, Request as HyperRequest};
 use multer::Multipart;
 use pyo3::types::{PyBytes, PyDict, PyList, PyString};
@@ -18,7 +20,7 @@ pub struct UploadedFile {
     path: std::path::PathBuf,
     size: u64,
     content: Vec<u8>,
-    filename: String,
+    file_name: String,
 }
 
 impl ToPyObject for UploadedFile {
@@ -28,7 +30,7 @@ impl ToPyObject for UploadedFile {
         let path = self.path.clone();
         let size = self.size;
         let content = PyBytes::new(py, &self.content).into_py(py);
-        let filename = self.filename.clone();
+        let file_name = self.file_name.clone();
 
         let uploaded_file = PyUploadedFile {
             name,
@@ -36,7 +38,7 @@ impl ToPyObject for UploadedFile {
             path,
             size,
             content,
-            filename,
+            file_name,
         };
         Py::new(py, uploaded_file).unwrap().as_ref(py).into()
     }
@@ -61,7 +63,7 @@ pub struct PyUploadedFile {
     content: Py<PyBytes>,
 
     #[pyo3(get)]
-    filename: String,
+    file_name: String,
 }
 #[derive(Debug, Default, Clone, FromPyObject)]
 pub struct BodyData {
@@ -185,54 +187,69 @@ impl Request {
                 }
             }
             t if t.starts_with("multipart/form-data") => {
-                let body_stream = BodyExt::into_data_stream(request.into_body());
-                let mut multipart = Multipart::new(body_stream, "content_type");
+
+                let boundary = request
+                    .headers()
+                    .get(CONTENT_TYPE)
+                    .and_then(|ct| ct.to_str().ok())
+                    .and_then(|ct| multer::parse_boundary(ct).ok());
+
+                let body_stream =
+                    BodyStream::new(request.into_body()).filter_map(|result| async move {
+                        result.map(|frame| frame.into_data().ok()).transpose()
+                    });
+
+                let mut multipart = Multipart::new(body_stream, boundary.unwrap());
 
                 let mut files = vec![];
-                let mut json = vec![];
+                let mut json = HashMap::new();
 
                 while let Some(field) = multipart.next_field().await.unwrap() {
-                    let name = field.name().unwrap_or("").to_string();
+                    let name = field.name().map(|n| n.to_string());
 
-                    let content_type = field.content_type().unwrap().to_string();
+                    // Get the field's file_name if provided in "Content-Disposition" header.
+                    let file_name = field.file_name().map(|f| f.to_string());
 
-                    if name == "json" {
-                        let data: Result<bytes::Bytes, multer::Error> = field.bytes().await;
-                        json = match Some(serde_json::from_slice(&data.unwrap()).map_err(|e| e)) {
-                            Some(Ok(json)) => json,
-                            _ => vec![],
+                    // Get the "Content-Type" header as `mime::Mime` type.
+                    let content_type = field.content_type().map(|ct| ct.to_string());
+
+                    let data: Result<bytes::Bytes, multer::Error> = field.bytes().await;
+
+                    match content_type {
+                        Some(content_type) => {
+                            let mut temp_file = NamedTempFile::new().map_err(|e| e);
+
+                            match temp_file {
+                                Ok(ref mut file) => {
+                                    let _ = file.write(&data.unwrap()).map_err(|e| e);
+                                    let file_content = file.reopen().map_err(|e| e);
+                                    files.push(UploadedFile {
+                                        name: name.unwrap().to_string(),
+                                        content_type: content_type.to_string(),
+                                        path: file.path().to_path_buf(),
+                                        size: file.path().metadata().unwrap().len(),
+                                        content: {
+                                            let mut buffer = Vec::new();
+                                            file_content.unwrap().read_to_end(&mut buffer).unwrap();
+                                            buffer
+                                        },
+                                        file_name: file_name.unwrap().to_string(),
+                                    });
+                                }
+                                Err(e) => {
+                                    eprintln!("Error: {:?}", e);
+                                }
+                            }
                         }
-                    } else {
-                        let filename = field.file_name().unwrap_or("").to_string();
-                        let data: Result<bytes::Bytes, multer::Error> = field.bytes().await;
-
-                        let mut temp_file = NamedTempFile::new().map_err(|e| e);
-
-                        match temp_file {
-                            Ok(ref mut file) => {
-                                let _ = file.write(&data.unwrap()).map_err(|e| e);
-                                let file_content = file.reopen().map_err(|e| e);
-                                files.push(UploadedFile {
-                                    name,
-                                    content_type,
-                                    path: file.path().to_path_buf(),
-                                    size: file.path().metadata().unwrap().len(),
-                                    content: {
-                                        let mut buffer = Vec::new();
-                                        file_content.unwrap().read_to_end(&mut buffer).unwrap();
-                                        buffer
-                                    },
-                                    filename,
-                                });
-                            }
-                            Err(e) => {
-                                eprintln!("Error: {:?}", e);
-                            }
+                        None => {
+                            let value = String::from_utf8_lossy(&data.unwrap()).to_string();
+                            json.insert(name.unwrap(), value);
                         }
                     }
                 }
 
-                BodyData { json, files }
+                let json_bytes = serde_json::to_string(&json).unwrap().into_bytes();
+                BodyData { json: json_bytes, files }
             }
             _ => default_body,
         };
