@@ -83,6 +83,14 @@ class Hypern:
                 """
             ),
         ] = None,
+        dependencies: Annotated[
+            dict[str, Any] | None,
+            Doc(
+                """
+                A dictionary of global dependencies that can be accessed by all routes.
+                """
+            ),
+        ] = None,
         title: Annotated[
             str,
             Doc(
@@ -209,22 +217,6 @@ class Hypern:
                 """
             ),
         ] = None,
-        default_injectables: Annotated[
-            dict[str, Any] | None,
-            Doc(
-                """
-                A dictionary of default injectables to be passed to all routes.
-                """
-            ),
-        ] = None,
-        auto_compression: Annotated[
-            bool,
-            Doc(
-                """
-                Enable automatic compression of responses.
-                """
-            ),
-        ] = False,
         database_config: Annotated[
             DatabaseConfig | None,
             Doc(
@@ -239,15 +231,14 @@ class Hypern:
         super().__init__(*args, **kwargs)
         self.router = Router(path="/")
         self.websocket_router = WebsocketRouter(path="/")
+        self.dependencies = dependencies or {}
         self.scheduler = scheduler
-        self.injectables = default_injectables or {}
         self.middleware_before_request = []
         self.middleware_after_request = []
         self.response_headers = {}
         self.args = ArgsConfig()
         self.start_up_handler = None
         self.shutdown_handler = None
-        self.auto_compression = auto_compression
         self.database_config = database_config
         self.thread_config = ThreadConfigurator().get_config()
 
@@ -255,7 +246,8 @@ class Hypern:
             self.router.extend_route(route(app=self).routes)
 
         for websocket_route in websockets or []:
-            self.websocket_router.add_route(websocket_route)
+            for route in websocket_route.routes:
+                self.websocket_router.add_route(route)
 
         if openapi_url and docs_url:
             self.__add_openapi(
@@ -313,6 +305,20 @@ class Hypern:
         self.add_route(HTTPMethod.GET, openapi_url, schema)
         self.add_route(HTTPMethod.GET, docs_url, template_render)
 
+    def inject(self, key: str, value: Any):
+        """
+        Injects a key-value pair into the injectables dictionary.
+
+        Args:
+            key (str): The key to be added to the injectables dictionary.
+            value (Any): The value to be associated with the key.
+
+        Returns:
+            self: Returns the instance of the class to allow method chaining.
+        """
+        self.dependencies[key] = value
+        return self
+
     def add_response_header(self, key: str, value: str):
         """
         Adds a response header to the response headers dictionary.
@@ -366,20 +372,6 @@ class Hypern:
 
         return decorator
 
-    def inject(self, key: str, value: Any):
-        """
-        Injects a key-value pair into the injectables dictionary.
-
-        Args:
-            key (str): The key to be added to the injectables dictionary.
-            value (Any): The value to be associated with the key.
-
-        Returns:
-            self: Returns the instance of the class to allow method chaining.
-        """
-        self.injectables[key] = value
-        return self
-
     def add_middleware(self, middleware: Middleware):
         """
         Adds middleware to the application.
@@ -429,12 +421,10 @@ class Hypern:
         server = Server()
         server.set_router(router=self.router)
         server.set_websocket_router(websocket_router=self.websocket_router)
-        server.set_injected(injected=self.injectables)
+        server.set_dependencies(dependencies=self.dependencies)
         server.set_before_hooks(hooks=self.middleware_before_request)
         server.set_after_hooks(hooks=self.middleware_after_request)
         server.set_response_headers(headers=self.response_headers)
-        server.set_auto_compression(enabled=self.auto_compression)
-        server.set_mem_pool_capacity(min_capacity=self.args.min_capacity, max_capacity=self.args.max_capacity)
 
         if self.database_config:
             server.set_database_config(config=self.database_config)
