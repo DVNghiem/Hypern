@@ -16,7 +16,6 @@ classifiers = [
 ]
 dependencies=[
     "sqlalchemy[asyncio] == 2.0.31",
-    "pydantic[email]==2.8.2",
     "passlib==1.7.4",
     "pyjwt==2.8.0",
     "pydash==8.0.3",
@@ -52,7 +51,7 @@ authors = ["Martin Dang <vannghiem848@gmail.com>"]
 [tool.poetry.dependencies]
 python = "^3.10"
 sqlalchemy = {extras = ["asyncio"], version = "^2.0.31"}
-pydantic = {extras = ["email"], version = "^2.9.2"}
+pydantic = {version = "^2.9.2"}
 passlib = "^1.7.4"
 pyjwt = "^2.8.0"
 pydash = "^8.0.3"
