@@ -55,6 +55,12 @@ class ArgsConfig:
             help="It sets the number of workers and max-blocking-threads automatically.",
         )
 
+        parser.add_argument(
+            "--http2",
+            action="store_true",
+            help="Enable HTTP/2 support.",
+        )
+
         args, _ = parser.parse_known_args()
 
         self.host = args.host or "127.0.0.1"
@@ -64,3 +70,4 @@ class ArgsConfig:
         self.workers = args.workers or 1
         self.reload = args.reload or False
         self.auto_workers = args.auto_workers
+        self.http2 = args.http2 or False

@@ -8,7 +8,8 @@ use crate::{
     },
     di::DependencyInjection,
     executor::{execute_http_function, execute_middleware_function, execute_startup_handler},
-    middlewares::base::{Middleware, MiddlewareConfig},
+    instants::TokioExecutor,
+    middlewares::base::{Middleware, MiddlewareConfig}, 
     router::router::Router,
     types::{
         body::{full, BoxBody},
@@ -21,7 +22,10 @@ use crate::{
 use dashmap::DashMap;
 use futures::future::join_all;
 use hyper::{
-    body::Incoming, server::conn::http1, service::service_fn, Request as HyperRequest, StatusCode,
+    body::Incoming,
+    server::conn::{http1, http2},
+    service::service_fn,
+    Request as HyperRequest, StatusCode,
 };
 use hyper::{header::HeaderValue, Response as HyperResponse};
 use hyper_util::rt::TokioIo;
@@ -54,6 +58,7 @@ struct SharedContext {
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
     dependencies: Arc<DependencyInjection>,
+    http2: bool,
 }
 
 impl SharedContext {
@@ -64,6 +69,7 @@ impl SharedContext {
         middlewares: Arc<Middleware>,
         extra_headers: Arc<DashMap<String, String>>,
         dependencies: Arc<DependencyInjection>,
+        http2: bool,
     ) -> Self {
         Self {
             router,
@@ -72,6 +78,7 @@ impl SharedContext {
             middlewares,
             extra_headers,
             dependencies,
+            http2,
         }
     }
 
@@ -83,6 +90,7 @@ impl SharedContext {
             middlewares: Arc::clone(&self.middlewares),
             extra_headers: Arc::clone(&self.extra_headers),
             dependencies: Arc::clone(&self.dependencies),
+            http2: self.http2,
         }
     }
 }
@@ -97,6 +105,7 @@ pub struct Server {
     extra_headers: Arc<DashMap<String, String>>,
     database_config: Option<DatabaseConfig>,
     dependencies: Arc<DependencyInjection>,
+    http2: bool,
 }
 
 #[pymethods]
@@ -112,6 +121,7 @@ impl Server {
             extra_headers: Arc::new(DashMap::new()),
             database_config: None,
             dependencies: Arc::new(DependencyInjection::default()),
+            http2: false,
         }
     }
 
@@ -162,6 +172,10 @@ impl Server {
         self.database_config = Some(config);
     }
 
+    pub fn enable_http2(&mut self) {
+        self.http2 = true;
+    }
+
     pub fn start(
         &mut self,
         py: Python,
@@ -210,6 +224,7 @@ impl Server {
             self.middlewares.clone(),
             self.extra_headers.clone(),
             self.dependencies.clone(),
+            self.http2,
         );
 
         thread::spawn(move || {
@@ -260,13 +275,26 @@ impl Server {
                             }
                         });
 
-                        if let Err(err) = http1::Builder::new()
-                            .keep_alive(true)
-                            .serve_connection(io, svc)
-                            .with_upgrades()
-                            .await
-                        {
-                            println!("Failed to serve connection: {:?}", err);
+                        match shared_context.http2 {
+                            true => {
+                                if let Err(err) = http2::Builder::new(TokioExecutor)
+                                    .keep_alive_timeout(Duration::from_secs(60))
+                                    .serve_connection(io, svc)
+                                    .await
+                                {
+                                    debug!("Failed to serve connection: {:?}", err);
+                                }
+                            }
+                            false => {
+                                if let Err(err) = http1::Builder::new()
+                                    .keep_alive(true)
+                                    .serve_connection(io, svc)
+                                    .with_upgrades()
+                                    .await
+                                {
+                                    debug!("Failed to serve connection: {:?}", err);
+                                }
+                            }
                         }
                     });
                 }
