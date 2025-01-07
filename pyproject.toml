@@ -29,6 +29,7 @@ dependencies=[
     "psutil==6.1.0",
     "msgpack==1.1.0",
     "redis==5.2.1",
+    "pydantic==2.10.4",
 ]
 [tool.maturin]
 features = ["pyo3/extension-module"]
@@ -43,7 +44,6 @@ authors = ["Martin Dang <vannghiem848@gmail.com>"]
 [tool.poetry.dependencies]
 python = "^3.10"
 sqlalchemy = {extras = ["asyncio"], version = "^2.0.31"}
-pydantic = {version = "^2.9.2"}
 pyjwt = "^2.8.0"
 pydash = "^8.0.3"
 sentry-sdk = "^2.11.0"
@@ -59,6 +59,7 @@ aiohttp = "^3.11.10"
 psutil = "^6.1.0"
 msgpack = "^1.1.0"
 redis = "^5.2.1"
+pydantic = "^2.10.4"
 
 [tool.poetry.group.test.dependencies]
 pytest = "7.2.1"
