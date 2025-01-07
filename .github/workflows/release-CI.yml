@@ -111,7 +111,7 @@ jobs:
             { version: "3.11", abi: "cp311-cp311" },
             { version: "3.12", abi: "cp312-cp312" },
           ]
-        target: [aarch64, armv7]
+        target: [aarch64]
     steps:
       - uses: actions/checkout@v3
       - name: Build Wheels
@@ -135,7 +135,7 @@ jobs:
             apt install -y software-properties-common libffi-dev
             add-apt-repository -y ppa:deadsnakes/ppa
             apt update -y
-            apt install -y gcc musl-dev python${{ matrix.python.version }}-dev python${{ matrix.python.version }} python${{ matrix.python.version }}-venv python${{ matrix.python.version }}-distutils
+            apt install -y gcc musl-dev python3-dev python${{ matrix.python.version }} python${{ matrix.python.version }}-venv
           run: |
             ls -lrth /artifacts
             python${{ matrix.python.version }} -m venv venv
