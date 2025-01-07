@@ -5,7 +5,7 @@ build-backend = "maturin"
 
 [project]
 name = "hypern"
-version = "0.3.8"
+version = "0.3.9"
 description = "A Fast Async Python backend with a Rust runtime."
 authors = [{ name = "Martin Dang", email = "vannghiem848@gmail.com" }]
 requires-python = ">=3.10"
@@ -24,7 +24,6 @@ dependencies=[
     "celery==5.4.0",
     "psycopg==3.2.3",
     "pyyaml == 6.0.2",
-    "argon2-cffi==23.1.0",
     "bcrypt==4.2.0",
     "orjson==3.10.11",
     "multiprocess==0.70.17",
@@ -41,7 +40,7 @@ module-name = "hypern"
 
 [tool.poetry]
 name = "hypern"
-version = "0.3.8"
+version = "0.3.9"
 description = "A Fast Async Python backend with a Rust runtime."
 authors = ["Martin Dang <vannghiem848@gmail.com>"]
 
@@ -58,7 +57,6 @@ celery = "^5.4.0"
 psycopg = "^3.2.3"
 maturin = "^1.7.4"
 pyyaml = "^6.0.2"
-argon2-cffi = "^23.1.0"
 bcrypt = "^4.2.0"
 orjson = "^3.10.11"
 multiprocess = "^0.70.17"
