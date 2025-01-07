@@ -89,7 +89,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: auto
-          args: -i python${{ matrix.python-version }} --release --out dist --compatibility manylinux_2_28,musllinux_1_2
+          args: -i python${{ matrix.python-version }} --release --out dist --compatibility manylinux
       - name: Install build wheel
         if: matrix.target == 'x86_64'
         run: |
