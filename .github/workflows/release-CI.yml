@@ -135,7 +135,7 @@ jobs:
             apt install -y software-properties-common libffi-dev
             add-apt-repository -y ppa:deadsnakes/ppa
             apt update -y
-            apt install -y gcc musl-dev build-base python${{ matrix.python.version }}-dev python${{ matrix.python.version }} python${{ matrix.python.version }}-venv python${{ matrix.python.version }}-distutils
+            apt install -y gcc musl-dev python${{ matrix.python.version }}-dev python${{ matrix.python.version }} python${{ matrix.python.version }}-venv python${{ matrix.python.version }}-distutils
           run: |
             ls -lrth /artifacts
             python${{ matrix.python.version }} -m venv venv
