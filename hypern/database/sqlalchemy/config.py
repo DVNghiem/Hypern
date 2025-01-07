@@ -7,8 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_scoped_sessi
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.expression import Delete, Insert, Update
 
-from .repository import Model, PostgresRepository
-
 
 class SqlalchemyConfig:
     def __init__(self, default_engine: AsyncEngine | None = None, reader_engine: AsyncEngine | None = None, writer_engine: AsyncEngine | None = None):
@@ -66,6 +64,3 @@ class SqlalchemyConfig:
 
     def init_app(self, app):
         app.inject("get_session", self.get_session)
-
-
-__all__ = ["Model", "PostgresRepository", "SqlalchemyConfig"]

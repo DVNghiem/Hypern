@@ -111,7 +111,7 @@ jobs:
             { version: "3.11", abi: "cp311-cp311" },
             { version: "3.12", abi: "cp312-cp312" },
           ]
-        target: [aarch64]
+        target: [aarch64, armv7]
     steps:
       - uses: actions/checkout@v3
       - name: Build Wheels

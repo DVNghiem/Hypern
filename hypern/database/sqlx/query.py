@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Any, Dict, List, Tuple, Union
-from hypern.database.sql.field import ForeignKeyField
+from hypern.database.sqlx.field import ForeignKeyField
 
 
 class JoinType(Enum):
