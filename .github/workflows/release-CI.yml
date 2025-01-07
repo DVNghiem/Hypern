@@ -132,10 +132,10 @@ jobs:
             --volume "${PWD}/dist:/artifacts"
           install: |
             apt update -y
-            apt install -y software-properties-common libffi-dev
+            apt install -y software-properties-common 
             add-apt-repository -y ppa:deadsnakes/ppa
             apt update -y
-            apt install -y gcc musl-dev python3-dev python${{ matrix.python.version }} python${{ matrix.python.version }}-venv
+            apt install -y gcc musl-dev build-base openssl-dev libffi-dev python3-dev python${{ matrix.python.version }} python${{ matrix.python.version }}-venv
           run: |
             ls -lrth /artifacts
             python${{ matrix.python.version }} -m venv venv
