@@ -169,8 +169,9 @@ jobs:
       - name: Install build wheel
         if: matrix.target == 'x86_64'
         run: |
-          pip install --force-reinstall dist/*.whl
-          cd ~ && python -c 'import hypern'
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace python:${{ matrix.python-version }}-alpine sh -c "
+            pip install --force-reinstall dist/*.whl && \
+            python -c 'import hypern'"
       - name: Upload wheels
         uses: actions/upload-artifact@v3
         with:
