@@ -150,22 +150,27 @@ jobs:
   #         path: dist
   alpine:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+        target: [x86_64, i686]
     steps:
       - uses: actions/checkout@v4
-      - name: Set up and Install build wheel
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Build Wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: auto
+          args: -i python${{ matrix.python-version }} --release --sdist --out dist --compatibility musllinux_1_2
+      - name: Install build wheel
+        if: matrix.target == 'x86_64'
         run: |
-          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace python:3.12-alpine sh -c "
-          apk add --no-cache \
-            build-base \
-            python3-dev \
-            rust \
-            cargo \
-            musl-dev \
-            libffi-dev && \
-          pip install --upgrade pip setuptools maturin[patchelf] && \
-          maturin build --release --sdist --out dist && \
-          pip install --force-reinstall dist/*.whl && \
-          python -c 'import hypern'"
+          pip install --force-reinstall dist/*.whl
+          cd ~ && python -c 'import hypern'
       - name: Upload wheels
         uses: actions/upload-artifact@v3
         with:
