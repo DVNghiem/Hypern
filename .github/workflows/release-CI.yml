@@ -154,7 +154,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Set up Alpine environment
         run: |
-          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace python:3.12-alpine sh -c "
+          docker run --name alpine -v ${{ github.workspace }}:/workspace -w /workspace python:3.12-alpine sh -c "
           apk add --no-cache \
             build-base \
             python3-dev \
@@ -165,13 +165,14 @@ jobs:
           pip install --upgrade pip setuptools maturin"
       - name: Build wheels
         run: |
-          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace python:3.12-alpine sh -c "
+          docker run --name alpine -v ${{ github.workspace }}:/workspace -w /workspace python:3.12-alpine sh -c "
           maturin build --release --sdist --out dist"
       - name: Install build wheel
         run: |
-          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace python:3.12-alpine sh -c "
+          docker run --name alpine -v ${{ github.workspace }}:/workspace -w /workspace python:3.12-alpine sh -c "
           pip install --force-reinstall dist/*.whl && \
           python -c 'import hypern'"
+          docker rm alpine
       - name: Upload wheels
         uses: actions/upload-artifact@v3
         with:
