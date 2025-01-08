@@ -162,7 +162,7 @@ jobs:
             cargo \
             musl-dev \
             libffi-dev && \
-          pip install --upgrade pip setuptools maturin && \
+          pip install --upgrade pip setuptools maturin[patchelf] && \
           maturin build --release --sdist --out dist && \
           pip install --force-reinstall dist/*.whl && \
           python -c 'import hypern'"
