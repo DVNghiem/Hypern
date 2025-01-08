@@ -166,7 +166,6 @@ jobs:
           maturin build --release --sdist --out dist && \
           pip install --force-reinstall dist/*.whl && \
           python -c 'import hypern'"
-          docker rm alpine
       - name: Upload wheels
         uses: actions/upload-artifact@v3
         with:
