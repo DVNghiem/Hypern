@@ -135,7 +135,7 @@ jobs:
             apt install -y software-properties-common
             add-apt-repository -y ppa:deadsnakes/ppa
             apt update -y
-            apt install -y gcc musl-dev python${{ matrix.python.version }}-dev python${{ matrix.python.version }} python${{ matrix.python.version }}-venv
+            apt install -y gcc g++ musl-dev python${{ matrix.python.version }}-dev python${{ matrix.python.version }} python${{ matrix.python.version }}-venv
           run: |
             ls -lrth /artifacts
             python${{ matrix.python.version }} -m venv venv
