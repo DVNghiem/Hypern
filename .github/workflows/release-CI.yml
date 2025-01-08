@@ -24,7 +24,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: x86_64
-          args: -i python --release --out dist
+          args: -i python --release --sdist --out dist
       - name: Install build wheel - x86_64
         run: |
           pip install --force-reinstall dist/*.whl
@@ -32,7 +32,7 @@ jobs:
       - name: Build wheels - universal2
         uses: PyO3/maturin-action@v1
         with:
-          args: -i python --release --target universal2-apple-darwin --out dist
+          args: -i python --release --sdist --target universal2-apple-darwin --out dist
       - name: Install build wheel - universal2
         run: |
           pip install --force-reinstall dist/*_universal2.whl
@@ -59,7 +59,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: -i python --release --out dist
+          args: -i python --release --sdist --out dist
       - name: Install build wheel
         shell: bash
         run: |
@@ -87,7 +87,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: auto
-          args: -i python${{ matrix.python-version }} --release --out dist
+          args: -i python${{ matrix.python-version }} --release --sdist --out dist
       - name: Install build wheel
         if: matrix.target == 'x86_64'
         run: |
@@ -119,7 +119,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: auto
-          args: -i python${{matrix.python.version}} --release --out dist
+          args: -i python${{matrix.python.version}} --release --sdist --out dist
       - uses: uraimo/run-on-arch-action@v2
         name: Install build wheel
         with:
