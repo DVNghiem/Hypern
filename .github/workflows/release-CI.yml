@@ -38,7 +38,7 @@ jobs:
           pip install --force-reinstall dist/*_universal2.whl
           cd ~ && python -c 'import hypern'
       - name: Upload wheels
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: wheels
           path: dist
@@ -66,7 +66,7 @@ jobs:
           pip install --force-reinstall dist/*.whl
           cd ~ && python -c 'import hypern'
       - name: Upload wheels
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: wheels
           path: dist
@@ -94,7 +94,7 @@ jobs:
           pip install --force-reinstall dist/*.whl
           cd ~ && python -c 'import hypern'
       - name: Upload wheels
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: wheels
           path: dist
@@ -111,7 +111,7 @@ jobs:
           ]
         target: [aarch64, armv7]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Build Wheels
         uses: PyO3/maturin-action@v1
         env:
@@ -142,7 +142,7 @@ jobs:
             python -m pip install --force-reinstall /artifacts/hypern*.whl
             cd ~ && python -c 'import hypern'
       - name: Upload wheels
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: wheels
           path: dist
@@ -152,7 +152,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [macos, windows, linux, linux-cross]
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: wheels
       - uses: actions/setup-python@v5
