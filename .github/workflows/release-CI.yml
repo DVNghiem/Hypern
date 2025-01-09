@@ -160,7 +160,7 @@ jobs:
       - name: Setup latest Alpine Linux
         run: |
           docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace alpine:latest sh -c "
-            apk add --no-cache build-base python3-dev python${{ matrix.python-version }}-pip  rust cargo musl-dev libffi-dev
+            apk add --no-cache build-base python3-dev python${{ matrix.python-version }} python${{ matrix.python-version }}-pip  rust cargo musl-dev libffi-dev
             pip3 install --upgrade pip maturin[patchelf]
             maturin build --release --out dist --sdist
             pip3 install --force-reinstall dist/*.whl
