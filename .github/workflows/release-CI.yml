@@ -165,12 +165,12 @@ jobs:
 
       - name: Build Wheels
         run: |
-          sudo apk add --no-cache build-base python${{ matrix.python-version }}-dev python${{ matrix.python-version }}-venv python${{ matrix.python-version }} rust cargo musl-dev libffi-dev
+          apk add --no-cache build-base python${{ matrix.python-version }}-dev python${{ matrix.python-version }}-venv python${{ matrix.python-version }} rust cargo musl-dev libffi-dev
           python${{ matrix.python-version }} -m venv venv
           source venv/bin/activate
           pip install --upgrade pip maturin
           maturin build --release --out dist --sdist
-        shell: alpine.sh {0}
+        shell: alpine.sh --root {0}
 
       - name: Upload wheels
         uses: actions/upload-artifact@v3
