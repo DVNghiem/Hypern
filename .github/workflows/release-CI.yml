@@ -170,7 +170,7 @@ jobs:
       
       - name: Install Maturin
         run: |
-          pip install --no-cache-dir maturin
+          pip install --no-cache-dir maturin[patchelf]
           
       - name: Build wheels
         run: |
