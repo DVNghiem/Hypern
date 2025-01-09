@@ -158,20 +158,16 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Setup latest Alpine Linux
-        uses: jirutka/setup-alpine@v1
-        with:
-          arch: ${{ matrix.target }}
-          branch: v3.15
-
-      - name: Build Wheels
         run: |
-          apk add --no-cache build-base python${{ matrix.python-version }}-dev python${{ matrix.python-version }}-venv python${{ matrix.python-version }} rust cargo musl-dev libffi-dev
-          python${{ matrix.python-version }} -m venv venv
-          source venv/bin/activate
-          pip install --upgrade pip maturin
-          maturin build --release --out dist --sdist
-        shell: alpine.sh --root {0}
-
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace python:${{ matrix.python-version }}-alpine sh -c "
+            apk add --no-cache build-base python${{ matrix.python-version }}-dev python${{ matrix.python-version }}-venv rust cargo musl-dev libffi-dev
+            python${{ matrix.python-version }} -m venv venv
+            source venv/bin/activate
+            pip install --upgrade pip maturin
+            maturin build --release --out dist --sdist
+            pip install --force-reinstall dist/*.whl
+            python -c 'import hypern'
+          "
       - name: Upload wheels
         uses: actions/upload-artifact@v3
         with:
