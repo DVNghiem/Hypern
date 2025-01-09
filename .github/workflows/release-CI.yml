@@ -151,35 +151,21 @@ jobs:
 
   alpine:
     runs-on: ubuntu-latest
-    container:
-      image: python:3.10-alpine
-      
+    strategy:
+      matrix:
+        python-version: ["3.10"]
+        target: [x86_64]
     steps:
       - uses: actions/checkout@v3
-      
-      - name: Install system dependencies
+      - name: Setup latest Alpine Linux
         run: |
-          apk add --no-cache \
-            cargo \
-            rust \
-            gcc \
-            musl-dev \
-            python3-dev \
-            libffi-dev \
-            openssl-dev
-      
-      - name: Install Maturin
-        run: |
-          pip install --no-cache-dir maturin[patchelf]
-          
-      - name: Build wheels
-        run: |
-          maturin build --release --out dist 
-
-      - name: Install and test package
-        run: |
-          pip install dist/*.whl
-          python -c "import hypern"
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace python:${{ matrix.python-version }}-alpine sh -c "
+            apk add --no-cache build-base python3-dev  rust cargo musl-dev libffi-dev
+            pip install --upgrade pip maturin[patchelf]
+            maturin build --release --out dist --sdist
+            pip install --force-reinstall dist/*.whl
+            python -c 'import hypern'
+          "
       - name: Upload wheels
         uses: actions/upload-artifact@v3
         with:
