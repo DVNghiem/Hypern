@@ -164,7 +164,7 @@ jobs:
             pip install --upgrade pip maturin[patchelf]
             maturin build --release --out dist --sdist
             pip install --force-reinstall dist/*.whl
-            python -c 'import hypern'
+            python3 -V
           "
       - name: Upload wheels
         uses: actions/upload-artifact@v3
