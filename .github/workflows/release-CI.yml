@@ -165,7 +165,7 @@ jobs:
 
       - name: Build Wheels
         run: |
-          apk add --no-cache build-base python${{ matrix.python-version }}-dev python${{ matrix.python-version }}-venv python${{ matrix.python-version }} rust cargo musl-dev libffi-dev
+          sudo apk add --no-cache build-base python${{ matrix.python-version }}-dev python${{ matrix.python-version }}-venv python${{ matrix.python-version }} rust cargo musl-dev libffi-dev
           python${{ matrix.python-version }} -m venv venv
           source venv/bin/activate
           pip install --upgrade pip maturin
