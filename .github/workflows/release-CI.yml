@@ -75,7 +75,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-musllinux-${{ matrix.platform.target }}
+          name: wheels-musllinux-${{ matrix.target }}
           path: dist
   # windows:
   #   runs-on: ${{ matrix.platform.runner }}
