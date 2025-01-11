@@ -68,7 +68,7 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
-          target: ${{ matrix.platform.target }}
+          target: ${{ matrix.target }}
           args: -i python${{ matrix.python-version }} --release --sdist --out dist
           sccache: 'true'
           manylinux: musllinux_1_2
