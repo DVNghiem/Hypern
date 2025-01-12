@@ -7,10 +7,8 @@ name: CI
 
 on:
   push:
-    branches:
-      - feat/alpine
-    # tags:
-    #   - '*'
+    tags:
+      - 'v*'
   pull_request:
   workflow_dispatch:
 
