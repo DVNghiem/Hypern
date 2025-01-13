@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import typing
 from urllib.parse import quote
-from hypern.hypern import Response as InternalResponse, Header
+from hypern.hypern import Response as InternalResponse, Header, BackgroundTask, BackgroundTasks
 import orjson
 import msgpack
-
-from hypern.background import BackgroundTask, BackgroundTasks
 
 
 class BaseResponse:

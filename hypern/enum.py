@@ -11,3 +11,15 @@ class ErrorCode(Enum):
     METHOD_NOT_ALLOW = "METHOD_NOT_ALLOW"
     UNAUTHORIZED = "UNAUTHORIZED"
     VALIDATION_ERROR = "VALIDATION_ERROR"
+
+
+class HTTPMethod(Enum):
+    GET = "GET"
+    POST = "POST"
+    PUT = "PUT"
+    DELETE = "DELETE"
+    PATCH = "PATCH"
+    OPTIONS = "OPTIONS"
+    HEAD = "HEAD"
+    TRACE = "TRACE"
+    CONNECT = "CONNECT"

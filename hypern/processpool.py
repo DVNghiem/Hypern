@@ -120,8 +120,6 @@ def initialize_event_loop(max_blocking_threads: int = 100) -> asyncio.AbstractEv
         loop = uvloop.new_event_loop()
         asyncio.set_event_loop(loop)
 
-    loop.slow_callback_duration = 0.1  # Log warnings for slow callbacks
-    loop.set_debug(False)  # Disable debug mode
     return loop
 
 
