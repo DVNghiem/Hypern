@@ -342,7 +342,7 @@ async fn http_service(
     // matching mapping router
     let route = {
         let router = shared_context.router.read().unwrap();
-        router.find_matching_route_py(&path, &method).unwrap()
+        router.find_matching_route(&path, &method)
     };
 
     let response = match route {

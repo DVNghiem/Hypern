@@ -243,7 +243,7 @@ class Hypern:
         self.thread_config = ThreadConfigurator().get_config()
 
         for route in routes or []:
-            self.router.extend_route(route(app=self).routes)
+            self.router.extend_route(route())
 
         for websocket_route in websockets or []:
             for route in websocket_route.routes:
