@@ -5,6 +5,9 @@ from hypern.ws import WebsocketRoute, WebSocketSession
 from .application import Hypern
 from .hypern import Request, Response
 from .response import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from .hypern import BackgroundTask
+from .hypern import BackgroundTasks
+from .hypern import Scheduler
 
 __all__ = [
     "Hypern",
@@ -21,4 +24,7 @@ __all__ = [
     "PlainTextResponse",
     "RedirectResponse",
     "logger",
+    "BackgroundTask",
+    "BackgroundTasks",
+    "Scheduler",
 ]

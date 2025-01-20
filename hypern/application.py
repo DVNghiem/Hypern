@@ -10,8 +10,9 @@ import psutil
 from typing_extensions import Annotated, Doc
 
 from hypern.args_parser import ArgsConfig
-from hypern.datastructures import Contact, HTTPMethod, Info, License
-from hypern.hypern import DatabaseConfig, FunctionInfo, MiddlewareConfig, Router, Server, WebsocketRouter
+from hypern.datastructures import Contact, Info, License
+from hypern.enum import HTTPMethod
+from hypern.hypern import DatabaseConfig, FunctionInfo, MiddlewareConfig, Router, Server, WebsocketRouter, Scheduler
 from hypern.hypern import Route as InternalRoute
 from hypern.logging import logger
 from hypern.middleware import Middleware
@@ -19,7 +20,6 @@ from hypern.openapi import SchemaGenerator, SwaggerUI
 from hypern.processpool import run_processes
 from hypern.response import HTMLResponse, JSONResponse
 from hypern.routing import Route
-from hypern.scheduler import Scheduler
 from hypern.ws import WebsocketRoute
 
 AppType = TypeVar("AppType", bound="Hypern")

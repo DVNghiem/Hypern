@@ -1,5 +1,4 @@
 from typing import Optional
-from enum import Enum
 from pydantic import BaseModel, AnyUrl
 
 
@@ -26,15 +25,3 @@ class Info(BaseModelWithConfig):
     contact: Optional[Contact] = None
     license: Optional[License] = None
     version: str
-
-
-class HTTPMethod(Enum):
-    GET = "GET"
-    POST = "POST"
-    PUT = "PUT"
-    DELETE = "DELETE"
-    PATCH = "PATCH"
-    OPTIONS = "OPTIONS"
-    HEAD = "HEAD"
-    TRACE = "TRACE"
-    CONNECT = "CONNECT"
