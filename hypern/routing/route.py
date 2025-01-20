@@ -10,7 +10,7 @@ from pydantic.fields import FieldInfo
 
 from hypern.auth.authorization import Authorization
 from hypern.datastructures import HTTPMethod
-from hypern.hypern import FunctionInfo, Request, Router
+from hypern.hypern import FunctionInfo, Request
 from hypern.hypern import Route as InternalRoute
 
 from .dispatcher import dispatch
@@ -18,6 +18,16 @@ from .dispatcher import dispatch
 
 def get_field_type(field):
     return field.outer_type_
+
+
+def join_url_paths(*parts):
+    first = parts[0]
+    parts = [part.strip("/") for part in parts]
+    starts_with_slash = first.startswith("/") if first else False
+    joined = "/".join(part for part in parts if part)
+    if starts_with_slash:
+        joined = "/" + joined
+    return joined
 
 
 def pydantic_to_swagger(model: type[BaseModel] | dict):
@@ -216,18 +226,16 @@ class Route:
         func_info = FunctionInfo(handler=handler, is_async=is_async)
         return InternalRoute(path=path, function=func_info, method=method)
 
-    def __call__(self, app, *args: Any, **kwds: Any) -> Any:
-        router = Router(self.path)
+    def __call__(self, *args: Any, **kwds: Any) -> Any:
+        routes = []
 
         # Validate handlers
         if not self.endpoint and not self.functional_handlers:
             raise ValueError(f"No handler found for route: {self.path}")
 
         # Handle functional routes
-        for route in self.functional_handlers:
-            router.add_route(route=route)
         if not self.endpoint:
-            return router
+            return self.functional_handlers
 
         # Handle class-based routes
         for name, func in self.endpoint.__dict__.items():
@@ -235,15 +243,15 @@ class Route:
                 sig = inspect.signature(func)
                 doc = self.swagger_generate(sig, func.__doc__)
                 endpoint_obj = self.endpoint()
-                route = self.make_internal_route(path="/", handler=endpoint_obj.dispatch, method=name.upper())
+                route = self.make_internal_route(path=self.path, handler=endpoint_obj.dispatch, method=name.upper())
                 route.doc = doc
-                router.add_route(route=route)
+                routes.append(route)
                 del endpoint_obj  # free up memory
-        return router
+        return routes
 
     def add_route(
         self,
-        path: str,
+        func_path: str,
         method: str,
     ) -> Callable:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -251,7 +259,7 @@ class Route:
                 return await dispatch(func, request, inject)
 
             sig = inspect.signature(func)
-            route = self.make_internal_route(path=path, handler=functional_wrapper, method=method.upper())
+            route = self.make_internal_route(path=join_url_paths(self.path, func_path), handler=functional_wrapper, method=method.upper())
             route.doc = self.swagger_generate(sig, func.__doc__)
 
             self.functional_handlers.append(route)
