@@ -36,7 +36,7 @@ class ParamParser:
         return {k: v[0] for k, v in query_params.items()}
 
     def _parse_path_params(self) -> dict:
-        return lambda: dict(self.request.path_params.items())
+        return dict(self.request.path_params.items())
 
     def _parse_form_data(self) -> dict:
         return self.request.json()
@@ -50,6 +50,7 @@ class InputHandler:
     async def parse_pydantic_model(self, param_name: str, model_class: typing.Type[BaseModel]) -> BaseModel:
         try:
             data = self.param_parser.parse_data_by_name(param_name)
+            print(data)
             return model_class(**data)
         except ValidationError as e:
             invalid_fields = orjson.loads(e.json())

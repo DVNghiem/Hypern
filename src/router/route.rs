@@ -41,11 +41,6 @@ impl Route {
             self.path, self.method))
     }
 
-    // Check if route matches given path and method
-    pub fn matches(&self, path: &str, method: &str) -> bool {
-        self.path == path && self.method.to_uppercase() == method.to_uppercase()
-    }
-
     // Update the route path
     pub fn update_path(&mut self, new_path: &str) {
         self.path = new_path.to_string();
@@ -108,5 +103,30 @@ impl Route {
             "OPTIONS" => 7,
             _ => 99
         }
+    }
+
+    pub fn matches(&self, path: &str, method: &str) -> bool {
+        if self.method.to_uppercase() != method.to_uppercase() {
+            return false;
+        }
+
+        let route_parts: Vec<&str> = self.path.split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+        let path_parts: Vec<&str> = path.split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if route_parts.len() != path_parts.len() {
+            return false;
+        }
+
+        for (route_part, path_part) in route_parts.iter().zip(path_parts.iter()) {
+            if !route_part.starts_with(':') && route_part != path_part {
+                return false;
+            }
+        }
+
+        true
     }
 }

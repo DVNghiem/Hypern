@@ -6,16 +6,11 @@ use std::collections::HashMap;
 #[pyclass]
 #[derive(Clone)]
 pub struct RadixNode {
-    // Part of the path this node represents
-    path: String,
-    // Whether this node represents a complete path
-    is_endpoint: bool,
-    // Store routes indexed by HTTP method
-    routes: HashMap<String, Route>,
-    // Child nodes indexed by their first character
-    children: HashMap<char, RadixNode>,
-    // Parameter name if this is a parameter node (e.g., :id)
-    param_name: Option<String>,
+    pub path: String,
+    pub children: HashMap<char, RadixNode>,
+    pub is_endpoint: bool,
+    pub routes: HashMap<String, Route>,
+    pub param_name: Option<String>,
 }
 
 impl Default for RadixNode {
@@ -23,155 +18,143 @@ impl Default for RadixNode {
         Self::new()
     }
 }
-
 impl RadixNode {
     pub fn new() -> Self {
-        RadixNode {
+        Self {
             path: String::new(),
+            children: HashMap::new(),
             is_endpoint: false,
             routes: HashMap::new(),
-            children: HashMap::new(),
             param_name: None,
         }
     }
 
     pub fn insert(&mut self, path: &str, route: Route) {
-        if path.is_empty() {
+        // Normalize the path first
+        let normalized_path = if path == "/" {
+            String::new()
+        } else {
+            path.trim_end_matches('/').to_string()
+        };
+
+        // For root path or empty path after normalization
+        if normalized_path.is_empty() {
             self.is_endpoint = true;
-            self.routes.insert(route.method.clone(), route);
+            self.routes.insert(route.method.to_uppercase(), route);
             return;
         }
 
-        let path_chars: Vec<char> = path.chars().collect();
-        let current_pos = 0;
+        let segments: Vec<&str> = normalized_path.split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+        
+        self._insert_segments(&segments, 0, route);
+    }
 
-        // Handle path parameters
-        if path_chars[0] == ':' {
-            let param_end = path_chars
-                .iter()
-                .position(|&c| c == '/' || c == '?')
-                .unwrap_or(path_chars.len());
-
-            let param_name = path[1..param_end].to_string();
-            let remaining_path = &path[param_end..];
-
-            self.param_name = Some(param_name);
-            if !remaining_path.is_empty() {
-                self.insert(remaining_path, route);
-            } else {
-                self.is_endpoint = true;
-                self.routes.insert(route.method.clone(), route);
-            }
+    fn _insert_segments(&mut self, segments: &[&str], index: usize, route: Route) {
+        if index >= segments.len() {
+            self.is_endpoint = true;
+            self.routes.insert(route.method.to_uppercase(), route);
             return;
         }
 
-        // Find matching prefix
-        while current_pos < path_chars.len() {
-            let c = path_chars[current_pos];
-            if let Some(child) = self.children.get_mut(&c) {
-                let mut i = 0;
-                while i < child.path.len()
-                    && current_pos + i < path_chars.len()
-                    && child.path.chars().nth(i) == Some(path_chars[current_pos + i])
-                {
-                    i += 1;
-                }
-
-                if i < child.path.len() {
-                    // Split existing node
-                    let mut new_node = RadixNode::new();
-                    new_node.path = child.path[i..].to_string();
-                    new_node.children = std::mem::take(&mut child.children);
-                    new_node.is_endpoint = child.is_endpoint;
-                    new_node.routes = std::mem::take(&mut child.routes);
-
-                    child.path = child.path[..i].to_string();
-                    child
-                        .children
-                        .insert(new_node.path.chars().next().unwrap(), new_node);
-                    child.is_endpoint = false;
-                }
-
-                if current_pos + i < path_chars.len() {
-                    // Insert remaining path
-                    let remaining = &path[current_pos + i..];
-                    child.insert(remaining, route);
-                } else {
-                    // Path complete
-                    child.is_endpoint = true;
-                    child.routes.insert(route.method.clone(), route);
-                }
-                return;
-            }
-
-            // Create new node
-            let mut node = RadixNode::new();
-            node.path = path[current_pos..].to_string();
-            node.is_endpoint = true;
-            node.routes.insert(route.method.clone(), route);
-            self.children.insert(path_chars[current_pos], node);
+        let segment = segments[index];
+        
+        // For parameter segments
+        if segment.starts_with(':') {
+            let param_name = segment[1..].to_string();
+            let param_node = self.children
+                .entry(':')
+                .or_insert_with(|| {
+                    let mut node = RadixNode::new();
+                    node.param_name = Some(param_name.clone());
+                    node
+                });
+            param_node._insert_segments(segments, index + 1, route);
             return;
+        }
+
+        // For static segments
+        let first_char = segment.chars().next().unwrap();
+        let node = self.children
+            .entry(first_char)
+            .or_insert_with(|| {
+                let mut node = RadixNode::new();
+                node.path = segment.to_string();
+                node
+            });
+
+        if node.path == segment {
+            node._insert_segments(segments, index + 1, route);
+        } else {
+            // Create new node for different path
+            let mut new_node = RadixNode::new();
+            new_node.path = segment.to_string();
+            new_node._insert_segments(segments, index + 1, route);
+            self.children.insert(first_char, new_node);
         }
     }
 
     pub fn find(&self, path: &str, method: &str) -> Option<(&Route, HashMap<String, String>)> {
-        let mut params = HashMap::new();
-        self._find(path, method, &mut params)
-    }
+        let normalized_path = if path == "/" {
+            String::new()
+        } else {
+            path.trim_end_matches('/').to_string()
+        };
 
-    fn _find<'a>(
-        &'a self,
-        path: &str,
-        method: &str,
-        params: &mut HashMap<String, String>,
-    ) -> Option<(&'a Route, HashMap<String, String>)> {
-        if path.is_empty() {
+        let mut params = HashMap::new();
+        if normalized_path.is_empty() {
             return if self.is_endpoint {
-                self.routes.get(method).map(|route| (route, params.clone()))
+                self.routes.get(&method.to_uppercase()).map(|r| (r, params))
             } else {
                 None
             };
         }
 
-        let path_chars: Vec<char> = path.chars().collect();
+        let segments: Vec<&str> = normalized_path.split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
 
-        // Handle parameter nodes
-        if let Some(param_name) = &self.param_name {
-            let param_end = path_chars
-                .iter()
-                .position(|&c| c == '/' || c == '?')
-                .unwrap_or(path_chars.len());
+        self._find_segments(&segments, 0, method, &mut params)
+    }
 
-            let param_value = &path[..param_end];
-            params.insert(param_name.clone(), param_value.to_string());
+    fn _find_segments<'a>(
+        &'a self,
+        segments: &[&str],
+        index: usize,
+        method: &str,
+        params: &mut HashMap<String, String>,
+    ) -> Option<(&'a Route, HashMap<String, String>)> {
+        if index >= segments.len() {
+            return if self.is_endpoint {
+                self.routes.get(&method.to_uppercase()).map(|r| (r, params.clone()))
+            } else {
+                None
+            };
+        }
 
-            let remaining_path = &path[param_end..];
-            if remaining_path.is_empty() && self.is_endpoint {
-                return self.routes.get(method).map(|route| (route, params.clone()));
-            }
+        let segment = segments[index];
 
-            for child in self.children.values() {
-                if let Some(result) = child._find(remaining_path, method, params) {
+        // Try exact static match first
+        for (_, child) in self.children.iter() {
+            if child.path == segment {
+                if let Some(result) = child._find_segments(segments, index + 1, method, params) {
                     return Some(result);
                 }
             }
         }
 
-        // Regular path matching
-        let first_char = path_chars[0];
-        if let Some(child) = self.children.get(&first_char) {
-            let mut i = 0;
-            while i < child.path.len()
-                && i < path.len()
-                && child.path.chars().nth(i) == path.chars().nth(i)
-            {
-                i += 1;
-            }
-
-            if i == child.path.len() {
-                return child._find(&path[i..], method, params);
+        // Try parameter match
+        if let Some(param_node) = self.children.get(&':') {
+            if let Some(param_name) = &param_node.param_name {
+                params.insert(param_name.clone(), segment.to_string());
+                if let Some(result) = param_node._find_segments(segments, index + 1, method, params) {
+                    return Some(result);
+                }
+                params.remove(param_name);
             }
         }
+
         None
     }
 }

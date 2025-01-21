@@ -126,11 +126,13 @@ impl Router {
 
     // Find most specific matching route for a path
     pub fn find_matching_route(&self, path: &str, method: &str) -> Option<Route> {
-        if let Some((route, _)) = self.radix_tree.find(path, method) {
+        if let Some((route, params)) = self.radix_tree.find(path, method) {
+            println!("Params: {:?}", params);
             return Some(route.clone());
         }
         None
     }
+    
 }
 
 impl Router {
