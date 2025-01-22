@@ -346,10 +346,12 @@ async fn http_service(
     };
 
     let response = match route {
-        Some(route) => {
+        Some((route, path_params)) => {
             let function = route.function;
+            let mut request = Request::from_request(req).await;
+            request.path_params = path_params;
             let response = mapping_method(
-                req,
+                request,
                 function,
                 shared_context.task_locals,
                 shared_context.middlewares,
@@ -420,13 +422,12 @@ fn free_database(request_id: String) {
 }
 
 async fn execute_request(
-    req: HyperRequest<Incoming>,
+    mut request: Request,
     function: FunctionInfo,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
     dependencies: Arc<DependencyInjection>,
 ) -> HyperResponse<BoxBody> {
-    let mut request = Request::from_request(req).await;
 
     let response_builder = HyperResponse::builder();
     let request_id = Arc::new(request.context_id.clone());
@@ -512,7 +513,7 @@ async fn execute_request(
 }
 
 async fn mapping_method(
-    req: HyperRequest<Incoming>,
+    req: Request,
     function: FunctionInfo,
     task_locals: Arc<pyo3_asyncio::TaskLocals>,
     middlewares: Arc<Middleware>,

@@ -5,7 +5,7 @@ use hyper::header::CONTENT_TYPE;
 use hyper::{header, Request as HyperRequest};
 use multer::Multipart;
 use pyo3::types::{PyBytes, PyDict, PyList, PyString};
-use pyo3::{exceptions::PyValueError, prelude::*};
+use pyo3::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{Read, Write};

@@ -36,7 +36,7 @@ class ParamParser:
         return {k: v[0] for k, v in query_params.items()}
 
     def _parse_path_params(self) -> dict:
-        return lambda: dict(self.request.path_params.items())
+        return dict(self.request.path_params.items())
 
     def _parse_form_data(self) -> dict:
         return self.request.json()
