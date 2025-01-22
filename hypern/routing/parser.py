@@ -50,7 +50,6 @@ class InputHandler:
     async def parse_pydantic_model(self, param_name: str, model_class: typing.Type[BaseModel]) -> BaseModel:
         try:
             data = self.param_parser.parse_data_by_name(param_name)
-            print(data)
             return model_class(**data)
         except ValidationError as e:
             invalid_fields = orjson.loads(e.json())

@@ -992,7 +992,6 @@ dependencies = [
  "chrono-tz",
  "cron",
  "dashmap",
- "form_urlencoded",
  "futures",
  "http-body-util",
  "hyper",

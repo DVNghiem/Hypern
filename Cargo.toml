@@ -38,7 +38,6 @@ multer = "3.1.0"
 tungstenite = "0.26.1"
 hyper-tungstenite = "0.17.0"
 tokio-tungstenite = "0.26.1"
-form_urlencoded = "1.2.1"
 
 [profile.release]
 codegen-units = 1

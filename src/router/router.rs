@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::radix::RadixNode;
 use super::route::Route;
 use pyo3::exceptions::PyValueError;
@@ -125,10 +127,9 @@ impl Router {
     }
 
     // Find most specific matching route for a path
-    pub fn find_matching_route(&self, path: &str, method: &str) -> Option<Route> {
+    pub fn find_matching_route(&self, path: &str, method: &str) -> Option<(Route, HashMap<String, String>)> {
         if let Some((route, params)) = self.radix_tree.find(path, method) {
-            println!("Params: {:?}", params);
-            return Some(route.clone());
+            return Some((route.clone(), params));
         }
         None
     }

@@ -5,7 +5,7 @@ use hyper::header::CONTENT_TYPE;
 use hyper::{header, Request as HyperRequest};
 use multer::Multipart;
 use pyo3::types::{PyBytes, PyDict, PyList, PyString};
-use pyo3::{exceptions::PyValueError, prelude::*};
+use pyo3::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -164,27 +164,20 @@ impl Request {
         .unwrap();
         let context_id = uuid::Uuid::new_v4().to_string();
 
-        let (part, incoming) = request.into_parts();
-
-        let body_data = incoming.collect().await.unwrap().to_bytes();
-
-        let path_params = form_urlencoded::parse(body_data.as_ref())
-            .into_owned()
-            .collect::<HashMap<String, String>>();
-        
         // parse the header to python header object
-        let path = part.uri.path().to_string();
-        let headers = Header::from_hyper_headers(&part.headers);
-        let method = part.method.to_string();
-        let content_type = part
-            .headers
+        let path = request.uri().path().to_string();
+        let headers = Header::from_hyper_headers(request.headers());
+        let method = request.method().to_string();
+        let content_type = request
+            .headers()
             .get(header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         let default_body = BodyData::default();
         let body = match content_type {
             t if t.starts_with("application/json") => {
-                let json = serde_json::from_slice::<Value>(&body_data);
+                let body = request.collect().await.unwrap().to_bytes();
+                let json = serde_json::from_slice::<Value>(&body);
                 match json {
                     Ok(json) => BodyData {
                         json: json.to_string().as_bytes().to_vec(),
@@ -194,15 +187,15 @@ impl Request {
                 }
             }
             t if t.starts_with("multipart/form-data") => {
-                let boundary = part
-                    .headers
+                let boundary = request
+                    .headers()
                     .get(CONTENT_TYPE)
                     .and_then(|ct| ct.to_str().ok())
                     .and_then(|ct| multer::parse_boundary(ct).ok());
 
-                let body_stream = futures::stream::once(async { Ok::<_, std::io::Error>(body_data) })
-                    .filter_map(|result| async move {
-                        result.map(|frame: bytes::Bytes| frame.into()).transpose()
+                let body_stream =
+                    BodyStream::new(request.into_body()).filter_map(|result| async move {
+                        result.map(|frame| frame.into_data().ok()).transpose()
                     });
 
                 let mut multipart = Multipart::new(body_stream, boundary.unwrap());
@@ -268,7 +261,7 @@ impl Request {
             query_params,
             headers: headers.clone(),
             method,
-            path_params,
+            path_params: HashMap::new(),
             body,
             remote_addr,
             timestamp,

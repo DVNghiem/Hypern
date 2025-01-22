@@ -11,7 +11,6 @@ mod ws;
 mod executor;
 mod middlewares;
 mod database;
-mod mem_pool;
 mod di;
 
 #[pymodule]
