@@ -438,6 +438,7 @@ class Hypern:
             self.args.max_blocking_threads = self.thread_config.max_blocking_threads
 
         if self.args.http2:
+            logger.info("HTTP/2 enabled")
             server.enable_http2()
 
         run_processes(
