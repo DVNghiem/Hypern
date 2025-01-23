@@ -6,6 +6,60 @@ import typing
 import orjson
 
 
+from typing import Dict, Optional
+from dataclasses import dataclass, field
+
+
+@dataclass
+class OAuth2Flow:
+    authorizationUrl: Optional[str] = None
+    tokenUrl: Optional[str] = None
+    refreshUrl: Optional[str] = None
+    scopes: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class OAuth2Config:
+    flows: Dict[str, OAuth2Flow]
+    description: str = "OAuth2 authentication"
+
+
+@dataclass
+class SwaggerConfig:
+    title: str = "Hypern API"
+    version: str = "1.0.0"
+    description: str = ""
+    oauth2_config: Optional[OAuth2Config] = None
+
+    def get_security_schemes(self) -> Dict:
+        if not self.oauth2_config:
+            return {}
+
+        security_schemes = {"oauth2": {"type": "oauth2", "description": self.oauth2_config.description, "flows": {}}}
+
+        for flow_name, flow in self.oauth2_config.flows.items():
+            flow_config = {}
+            if flow.authorizationUrl:
+                flow_config["authorizationUrl"] = flow.authorizationUrl
+            if flow.tokenUrl:
+                flow_config["tokenUrl"] = flow.tokenUrl
+            if flow.refreshUrl:
+                flow_config["refreshUrl"] = flow.refreshUrl
+            flow_config["scopes"] = flow.scopes
+            security_schemes["oauth2"]["flows"][flow_name] = flow_config
+
+        return security_schemes
+
+    def get_openapi_schema(self) -> Dict:
+        schema = {
+            "openapi": "3.0.3",
+            "info": {"title": self.title, "version": self.version, "description": self.description},
+            "components": {"securitySchemes": self.get_security_schemes()},
+            "security": [{"oauth2": []}] if self.oauth2_config else [],
+        }
+        return schema
+
+
 class EndpointInfo(typing.NamedTuple):
     path: str
     http_method: str
