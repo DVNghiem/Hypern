@@ -10,7 +10,7 @@ import psutil
 from typing_extensions import Annotated, Doc
 
 from hypern.args_parser import ArgsConfig
-from hypern.datastructures import Contact, Info, License
+from hypern.datastructures import SwaggerConfig
 from hypern.enum import HTTPMethod
 from hypern.hypern import DatabaseConfig, FunctionInfo, MiddlewareConfig, Router, Server, WebsocketRouter, Scheduler
 from hypern.hypern import Route as InternalRoute
@@ -91,121 +91,11 @@ class Hypern:
                 """
             ),
         ] = None,
-        title: Annotated[
-            str,
+        swagger_config: Annotated[
+            SwaggerConfig | None,
             Doc(
                 """
-                The title of the API.
-
-                It will be added to the generated OpenAPI (e.g. visible at `/docs`).
-
-                Read more in the
-                """
-            ),
-        ] = "Hypern",
-        summary: Annotated[
-            str | None,
-            Doc(
-                """"
-                A short summary of the API.
-
-                It will be added to the generated OpenAPI (e.g. visible at `/docs`).
-                """
-            ),
-        ] = None,
-        description: Annotated[
-            str,
-            Doc(
-                """
-                A description of the API. Supports Markdown (using
-                [CommonMark syntax](https://commonmark.org/)).
-
-                It will be added to the generated OpenAPI (e.g. visible at `/docs`).
-                """
-            ),
-        ] = "",
-        version: Annotated[
-            str,
-            Doc(
-                """
-                The version of the API.
-
-                **Note** This is the version of your application, not the version of
-                the OpenAPI specification nor the version of Application being used.
-
-                It will be added to the generated OpenAPI (e.g. visible at `/docs`).
-                """
-            ),
-        ] = "0.0.1",
-        contact: Annotated[
-            Contact | None,
-            Doc(
-                """
-                A dictionary with the contact information for the exposed API.
-
-                It can contain several fields.
-
-                * `name`: (`str`) The name of the contact person/organization.
-                * `url`: (`str`) A URL pointing to the contact information. MUST be in
-                    the format of a URL.
-                * `email`: (`str`) The email address of the contact person/organization.
-                    MUST be in the format of an email address.            
-                """
-            ),
-        ] = None,
-        openapi_url: Annotated[
-            str | None,
-            Doc(
-                """
-                The URL where the OpenAPI schema will be served from.
-
-                If you set it to `None`, no OpenAPI schema will be served publicly, and
-                the default automatic endpoints `/docs` and `/redoc` will also be
-                disabled.
-            """
-            ),
-        ] = "/openapi.json",
-        docs_url: Annotated[
-            str | None,
-            Doc(
-                """
-                The path to the automatic interactive API documentation.
-                It is handled in the browser by Swagger UI.
-
-                The default URL is `/docs`. You can disable it by setting it to `None`.
-
-                If `openapi_url` is set to `None`, this will be automatically disabled.
-            """
-            ),
-        ] = "/docs",
-        license_info: Annotated[
-            License | None,
-            Doc(
-                """
-                A dictionary with the license information for the exposed API.
-
-                It can contain several fields.
-
-                * `name`: (`str`) **REQUIRED** (if a `license_info` is set). The
-                    license name used for the API.
-                * `identifier`: (`str`) An [SPDX](https://spdx.dev/) license expression
-                    for the API. The `identifier` field is mutually exclusive of the `url`
-                    field. Available since OpenAPI 3.1.0
-                * `url`: (`str`) A URL to the license used for the API. This MUST be
-                    the format of a URL.
-
-                It will be added to the generated OpenAPI (e.g. visible at `/docs`).
-
-                **Example**
-
-                ```python
-                app = Hypern(
-                    license_info={
-                        "name": "Apache 2.0",
-                        "url": "https://www.apache.org/licenses/LICENSE-2.0.html",
-                    }
-                )
-                ```
+                A dictionary with the configuration for the Swagger UI documentation.
                 """
             ),
         ] = None,
@@ -241,6 +131,7 @@ class Hypern:
         self.shutdown_handler = None
         self.database_config = database_config
         self.thread_config = ThreadConfigurator().get_config()
+        self.swagger_config = swagger_config
 
         for route in routes or []:
             self.router.extend_route(route())
@@ -249,25 +140,12 @@ class Hypern:
             for route in websocket_route.routes:
                 self.websocket_router.add_route(route)
 
-        if openapi_url and docs_url:
-            self.__add_openapi(
-                info=Info(
-                    title=title,
-                    summary=summary,
-                    description=description,
-                    version=version,
-                    contact=contact,
-                    license=license_info,
-                ),
-                openapi_url=openapi_url,
-                docs_url=docs_url,
-            )
+        if swagger_config:
+            self.__add_openapi(config=swagger_config)
 
     def __add_openapi(
         self,
-        info: Info,
-        openapi_url: str,
-        docs_url: str,
+        config: SwaggerConfig,
     ):
         """
         Adds OpenAPI schema and documentation routes to the application.
@@ -285,25 +163,19 @@ class Hypern:
         """
 
         def schema(*args, **kwargs):
-            schemas = SchemaGenerator(
-                {
-                    "openapi": "3.0.0",
-                    "info": info.model_dump(),
-                    "components": {"securitySchemes": {}},
-                }
-            )
+            schemas = SchemaGenerator(config=config)
             return JSONResponse(content=orjson.dumps(schemas.get_schema(self)))
 
         def template_render(*args, **kwargs):
             swagger = SwaggerUI(
                 title="Swagger",
-                openapi_url=openapi_url,
+                openapi_url=config.openapi_url,
             )
             template = swagger.get_html_content()
             return HTMLResponse(template)
 
-        self.add_route(HTTPMethod.GET, openapi_url, schema)
-        self.add_route(HTTPMethod.GET, docs_url, template_render)
+        self.add_route(HTTPMethod.GET, config.openapi_url, schema)
+        self.add_route(HTTPMethod.GET, config.docs_url, template_render)
 
     def inject(self, key: str, value: Any):
         """
