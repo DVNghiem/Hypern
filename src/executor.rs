@@ -23,7 +23,6 @@ where
 {
     let handler = function.handler.as_ref(py);
 
-    // Use pooled PyDict instead of creating new one
     let kwargs = PyDict::new(py);
 
     // Add dependencies to kwargs if provided
