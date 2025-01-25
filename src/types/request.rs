@@ -147,6 +147,7 @@ impl Request {
             }
         }
 
+        // gettting the remote address
         let remote_addr = request
             .headers()
             .get(header::FORWARDED)
@@ -162,6 +163,8 @@ impl Request {
                 .as_secs() as u32,
         )
         .unwrap();
+
+        // generate a unique context id
         let context_id = uuid::Uuid::new_v4().to_string();
 
         // parse the header to python header object
@@ -220,6 +223,8 @@ impl Request {
 
                             match temp_file {
                                 Ok(ref mut file) => {
+
+                                    // write the file to the temp file for getting the information about the file
                                     let _ = file.write(&data.unwrap()).map_err(|e| e);
                                     let file_content = file.reopen().map_err(|e| e);
                                     files.push(UploadedFile {
@@ -234,6 +239,9 @@ impl Request {
                                         },
                                         file_name: file_name.unwrap().to_string(),
                                     });
+                                    // remove the file from the temp file
+                                    let _ = temp_file.unwrap().close().map_err(|e| e);
+                                    
                                 }
                                 Err(e) => {
                                     eprintln!("Error: {:?}", e);
