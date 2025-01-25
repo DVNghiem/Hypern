@@ -8,7 +8,6 @@ import orjson
 from pydantic import BaseModel, ValidationError
 from pydash import get
 
-from hypern.auth.authorization import Authorization
 from hypern.exceptions import BadRequestException
 from hypern.exceptions import ValidationException
 from hypern.hypern import Request
@@ -82,11 +81,6 @@ class InputHandler:
             # Handle Pydantic models
             if isinstance(ptype, type) and issubclass(ptype, BaseModel):
                 kwargs[name] = await self.parse_pydantic_model(name, ptype)
-                continue
-
-            # Handle Authorization
-            if isinstance(ptype, type) and issubclass(ptype, Authorization):
-                kwargs[name] = await ptype().validate(self.request)
                 continue
 
             # Handle special parameters

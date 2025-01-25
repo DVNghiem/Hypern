@@ -109,6 +109,7 @@ pub struct Request {
     pub remote_addr: String,
     pub timestamp: u32,
     pub context_id: String,
+    pub auth: HashMap<String, String>,
 }
 
 impl ToPyObject for Request {
@@ -117,6 +118,7 @@ impl ToPyObject for Request {
         let headers: Py<Header> = self.headers.clone().into_py(py).extract(py).unwrap();
         let path_params = self.path_params.clone().into_py(py).extract(py).unwrap();
         let body = self.body.clone().to_object(py).extract(py).unwrap();
+        let auth = self.auth.clone().into_py(py).extract(py).unwrap();
 
         let request = PyRequest {
             path: self.path.clone(),
@@ -124,10 +126,12 @@ impl ToPyObject for Request {
             path_params,
             headers,
             body,
+            auth,
             method: self.method.clone(),
             remote_addr: self.remote_addr.clone(),
             timestamp: self.timestamp.clone(),
             context_id: self.context_id.clone(),
+
         };
         Py::new(py, request).unwrap().as_ref(py).into()
     }
@@ -269,11 +273,12 @@ impl Request {
             query_params,
             headers: headers.clone(),
             method,
-            path_params: HashMap::new(),
             body,
             remote_addr,
             timestamp,
             context_id,
+            path_params: HashMap::new(),
+            auth: HashMap::new(),
         }
     }
 }
@@ -299,6 +304,8 @@ pub struct PyRequest {
     pub timestamp: u32,
     #[pyo3(get)]
     pub context_id: String,
+    #[pyo3(get, set)]
+    pub auth: Py<PyDict>,
 }
 
 #[pymethods]
@@ -315,6 +322,7 @@ impl PyRequest {
         context_id: String,
         remote_addr: String,
         timestamp: u32,
+        auth: Py<PyDict>,
     ) -> Self {
         Self {
             path,
@@ -326,6 +334,7 @@ impl PyRequest {
             remote_addr,
             timestamp,
             context_id,
+            auth
         }
     }
 

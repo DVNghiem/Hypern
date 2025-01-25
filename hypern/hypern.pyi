@@ -294,6 +294,7 @@ class Request:
     remote_addr: str
     timestamp: float
     context_id: str
+    auth: Dict[str, Any]
 
     def json(self) -> Dict[str, Any]: ...
     def set_body(self, body: BodyData) -> None: ...
