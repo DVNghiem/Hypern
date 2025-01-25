@@ -1,2 +1,0 @@
-class Authorization:
-    pass

@@ -8,8 +8,6 @@ import yaml  # type: ignore
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from hypern.auth.authorization import Authorization
-
 from hypern.enum import HTTPMethod
 from hypern.hypern import FunctionInfo, Request
 
@@ -176,11 +174,6 @@ class Route:
         }
         self.functional_handlers = []
 
-    def _process_authorization(self, item: type, docs: Dict) -> None:
-        if isinstance(item, type) and issubclass(item, Authorization):
-            auth_obj = item()
-            docs["security"] = [{auth_obj.name: []}]
-
     def _process_model_params(self, key: str, item: type, docs: Dict) -> None:
         if not (isinstance(item, type) and issubclass(item, BaseModel)):
             return
@@ -210,7 +203,6 @@ class Route:
         _docs: Dict = {"summary": summary, "tags": self.tags, "responses": [], "name": self.name}
 
         for key, item in _inputs_dict.items():
-            self._process_authorization(item, _docs)
             self._process_model_params(key, item, _docs)
 
         self._process_response(signature.return_annotation, _docs)
