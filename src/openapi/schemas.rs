@@ -28,14 +28,14 @@ fn yaml_to_json(yaml: &Yaml) -> Value {
 #[pyclass(subclass)]
 pub struct BaseSchemaGenerator {
     #[pyo3(get, set)]
-    base_schema: Py<PyDict>,
+    config: Py<PyAny>,
 }
 
 #[pymethods]
 impl BaseSchemaGenerator {
     #[new]
-    fn new(base_schema: Py<PyDict>) -> Self {
-        BaseSchemaGenerator { base_schema }
+    fn new(config: Py<PyAny>) -> Self {
+        BaseSchemaGenerator { config }
     }
 
     fn remove_converter(&self, path: String) -> String {

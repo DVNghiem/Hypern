@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from hypern.hypern import BaseSchemaGenerator, Route as InternalRoute
+from hypern.datastructures import SwaggerConfig
 import typing
 import orjson
 
@@ -13,8 +14,8 @@ class EndpointInfo(typing.NamedTuple):
 
 
 class SchemaGenerator(BaseSchemaGenerator):
-    def __init__(self, base_schema: dict[str, typing.Any]) -> None:
-        self.base_schema = base_schema
+    def __init__(self, config: SwaggerConfig) -> None:
+        self.config = config
 
     def get_endpoints(self, routes: list[InternalRoute]) -> list[EndpointInfo]:
         """
@@ -35,7 +36,7 @@ class SchemaGenerator(BaseSchemaGenerator):
         return endpoints_info
 
     def get_schema(self, app) -> dict[str, typing.Any]:
-        schema = dict(self.base_schema)
+        schema = self.config.get_openapi_schema()
         schema.setdefault("paths", {})
         for route in app.router.routes:
             parsed = self.parse_docstring(route.doc)
