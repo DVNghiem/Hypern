@@ -56,7 +56,7 @@ jobs:
           
       # GitGuardian - Scan for secrets
       - name: GitGuardian scan
-        uses: GitGuardian/ggshield/actions/secret@v1.34.0
+        uses: GitGuardian/ggshield/actions/secret@v1.36.0
         with:
           fetch-depth: 0
         env:
