@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from enum import Enum
+
+@dataclass
+class RustLogger:
+    def __init__(self, level: str, format: str, text_format: Optional[str]) -> None: ... 
+
+    def log(self, level: str, message: str, attributes: Dict[str, str]) -> None: ...
 
 @dataclass
 class BaseSchemaGenerator:

@@ -92,6 +92,7 @@ def init_processpool(
         process.start()
         process_pool.append(process)
 
+    logger.info(f"Server started with {workers} workers {processes} processes")
     return process_pool
 
 

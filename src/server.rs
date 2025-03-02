@@ -45,8 +45,6 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
-use tracing::{debug, info};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 static NOTFOUND: &[u8] = b"Not Found";
@@ -183,18 +181,6 @@ impl Server {
         workers: usize,
         max_blocking_threads: usize,
     ) -> PyResult<()> {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "debug".into()),
-            )
-            .with(
-                fmt::layer()
-                    .with_target(false)
-                    .with_level(true)
-                    .with_file(true),
-            )
-            .init();
 
         if STARTED
             .compare_exchange(false, true, SeqCst, Relaxed)
@@ -237,11 +223,6 @@ impl Server {
                 .enable_all()
                 .build()
                 .unwrap();
-            debug!(
-                "Server start with {} workers and {} max blockingthreads",
-                workers, max_blocking_threads
-            );
-            debug!("Waiting for process to start...");
 
             rt.block_on(async move {
                 // excute startup handler
@@ -282,7 +263,7 @@ impl Server {
                                     .serve_connection(io, svc)
                                     .await
                                 {
-                                    debug!("Failed to serve connection: {:?}", err);
+                                    println!("Failed to serve connection: {:?}", err);
                                 }
                             }
                             false => {
@@ -292,7 +273,7 @@ impl Server {
                                     .with_upgrades()
                                     .await
                                 {
-                                    debug!("Failed to serve connection: {:?}", err);
+                                    println!("Failed to serve connection: {:?}", err);
                                 }
                             }
                         }
@@ -366,16 +347,6 @@ async fn http_service(
             .body(full(NOTFOUND))
             .unwrap(),
     };
-    // logging
-    info!(
-        "{:?} {:?} {:?} {:?} {:?} {:?}",
-        version,
-        method,
-        path,
-        user_agent,
-        start_time.elapsed(),
-        response.status(),
-    );
 
     return response;
 }

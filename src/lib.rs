@@ -12,6 +12,7 @@ mod executor;
 mod middlewares;
 mod database;
 mod di;
+mod logger;
 
 #[pymodule]
 fn hypern(_py: Python<'_>, m: &PyModule) -> PyResult<()>  {
@@ -46,6 +47,8 @@ fn hypern(_py: Python<'_>, m: &PyModule) -> PyResult<()>  {
     m.add_class::<database::sql::transaction::DatabaseTransaction>()?;
 
     m.add_function(wrap_pyfunction!(database::context::get_session_database, m)?)?;
+
+    m.add_class::<logger::RustLogger>()?;
 
     pyo3::prepare_freethreaded_python();
     Ok(())
