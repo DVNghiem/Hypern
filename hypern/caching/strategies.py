@@ -29,7 +29,13 @@ class CacheStrategy(ABC, Generic[T]):
 class CacheEntry(Generic[T]):
     """Represents a cached item with metadata"""
 
-    def __init__(self, value: T, created_at: float, ttl: int, revalidate_after: Optional[int] = None):
+    def __init__(
+        self,
+        value: T,
+        created_at: float,
+        ttl: int,
+        revalidate_after: Optional[int] = None,
+    ):
         self.value = value
         self.created_at = created_at
         self.ttl = ttl
@@ -39,7 +45,9 @@ class CacheEntry(Generic[T]):
     def is_stale(self) -> bool:
         """Check if entry is stale and needs revalidation"""
         now = time.time()
-        return self.revalidate_after is not None and now > (self.created_at + self.revalidate_after)
+        return self.revalidate_after is not None and now > (
+            self.created_at + self.revalidate_after
+        )
 
     def is_expired(self) -> bool:
         """Check if entry has completely expired"""
@@ -62,7 +70,12 @@ class CacheEntry(Generic[T]):
     def from_json(cls, data: bytes) -> "CacheEntry[T]":
         """Deserialize entry from JSON"""
         parsed = orjson.loads(data)
-        return cls(value=parsed["value"], created_at=parsed["created_at"], ttl=parsed["ttl"], revalidate_after=parsed["revalidate_after"])
+        return cls(
+            value=parsed["value"],
+            created_at=parsed["created_at"],
+            ttl=parsed["ttl"],
+            revalidate_after=parsed["revalidate_after"],
+        )
 
 
 class StaleWhileRevalidateStrategy(CacheStrategy[T]):
@@ -71,7 +84,13 @@ class StaleWhileRevalidateStrategy(CacheStrategy[T]):
     Allows serving stale content while revalidating in the background.
     """
 
-    def __init__(self, backend: BaseBackend, revalidate_after: int, ttl: int, revalidate_fn: Callable[..., T]):
+    def __init__(
+        self,
+        backend: BaseBackend,
+        revalidate_after: int,
+        ttl: int,
+        revalidate_fn: Callable[..., T],
+    ):
         """
         Initialize the caching strategy.
 
@@ -117,7 +136,12 @@ class StaleWhileRevalidateStrategy(CacheStrategy[T]):
         return entry.value
 
     async def set(self, key: str, value: T, ttl: Optional[int] = None) -> None:
-        entry = CacheEntry(value=value, created_at=time.time(), ttl=ttl or self.ttl, revalidate_after=self.revalidate_after)
+        entry = CacheEntry(
+            value=value,
+            created_at=time.time(),
+            ttl=ttl or self.ttl,
+            revalidate_after=self.revalidate_after,
+        )
         await self.backend.set(key, entry.to_json(), ttl=ttl)
 
     async def delete(self, key: str) -> None:
@@ -146,7 +170,13 @@ class CacheAsideStrategy(CacheStrategy[T]):
     Data is loaded into cache only when requested.
     """
 
-    def __init__(self, backend: BaseBackend, load_fn: Callable[[str], T], ttl: int, write_through: bool = False):
+    def __init__(
+        self,
+        backend: BaseBackend,
+        load_fn: Callable[[str], T],
+        ttl: int,
+        write_through: bool = False,
+    ):
         self.backend = backend
         self.load_fn = load_fn
         self.ttl = ttl
@@ -182,7 +212,9 @@ class CacheAsideStrategy(CacheStrategy[T]):
             await self.load_fn.write(key, value)
 
 
-def cache_with_strategy(strategy: CacheStrategy, key_prefix: str | None = None, ttl: int = 3600):
+def cache_with_strategy(
+    strategy: CacheStrategy, key_prefix: str | None = None, ttl: int = 3600
+):
     """
     Decorator for using cache strategies
     """

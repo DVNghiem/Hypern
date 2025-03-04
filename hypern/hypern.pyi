@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Tuple
 from enum import Enum
+from typing import Any, Callable, Dict, List, Tuple
 
 @dataclass
 class BaseSchemaGenerator:
@@ -37,29 +37,10 @@ class BackgroundTask:
     timeout_secs: int
     cancelled: bool
 
-    def get_id(self) -> str:
-        """
-        Get the task ID
-        """
-        pass
-
-    def cancel(self) -> None:
-        """
-        Cancel the task
-        """
-        pass
-
-    def is_cancelled(self) -> bool:
-        """
-        Check if the task is cancelled
-        """
-        pass
-
-    def execute(self) -> Any:
-        """
-        Execute the task
-        """
-        pass
+    def get_id(self) -> str: ...
+    def cancel(self) -> None: ...
+    def is_cancelled(self) -> bool: ...
+    def execute(self) -> Any: ...
 
 @dataclass
 class BackgroundTasks:
@@ -69,29 +50,10 @@ class BackgroundTasks:
     **Note**: Only set tasks. pool, sender, receiver are set by the framework
     """
 
-    def add_task(self, task: BackgroundTask) -> str:
-        """
-        Add a task to the collection
-        """
-        pass
-
-    def cancel_task(self, task_id: str) -> bool:
-        """
-        Cancel a task in the collection
-        """
-        pass
-
-    def execute_all(self) -> None:
-        """
-        Execute all tasks in the collection
-        """
-        pass
-
-    def execute_task(self, task_id: str) -> None:
-        """
-        Execute a task in the collection
-        """
-        pass
+    def add_task(self, task: BackgroundTask) -> str: ...
+    def cancel_task(self, task_id: str) -> bool: ...
+    def execute_all(self) -> None: ...
+    def execute_task(self, task_id: str) -> None: ...
 
 class Scheduler:
     def add_job(
@@ -125,37 +87,13 @@ class Scheduler:
         return:
         str: The ID of the job
         """
-        pass
+        ...
 
-    def remove_job(self, job_id: str) -> None:
-        """
-        Remove a job from the scheduler
-        """
-        pass
-
-    def start(self) -> None:
-        """
-        Start the scheduler
-        """
-        pass
-
-    def stop(self) -> None:
-        """
-        Stop the scheduler
-        """
-        pass
-
-    def get_job_status(self, job_id: str) -> Tuple[float, float, List[str], int]:
-        """
-        Get the status of a job
-        """
-        pass
-
-    def get_next_run(self, job_id: str) -> float:
-        """
-        Get the next run time of a job
-        """
-        pass
+    def remove_job(self, job_id: str) -> None: ...
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+    def get_job_status(self, job_id: str) -> Tuple[float, float, List[str], int]: ...
+    def get_next_run(self, job_id: str) -> float: ...
 
 @dataclass
 class FunctionInfo:
@@ -172,15 +110,20 @@ class FunctionInfo:
 
 @dataclass
 class Server:
+
     router: Router
     websocket_router: Any
     startup_handler: Any
     shutdown_handler: Any
 
+    def __init__(self) -> None: ...
+
     def add_route(self, route: Route) -> None: ...
     def set_router(self, router: Router) -> None: ...
     def set_websocket_router(self, websocket_router: WebsocketRouter) -> None: ...
-    def start(self, socket: SocketHeld, worker: int, max_blocking_threads: int) -> None: ...
+    def start(
+        self, socket: SocketHeld, worker: int, max_blocking_threads: int
+    ) -> None: ...
     def set_before_hooks(self, hooks: List[FunctionInfo]) -> None: ...
     def set_after_hooks(self, hooks: List[FunctionInfo]) -> None: ...
     def set_response_headers(self, headers: Dict[str, str]) -> None: ...
@@ -196,6 +139,7 @@ class Route:
     method: str
     doc: str | None = None
 
+    def __init__(self, path: str, function: FunctionInfo, method: str) -> None: ...
     def matches(self, path: str, method: str) -> str: ...
     def clone_route(self) -> Route: ...
     def update_path(self, new_path: str) -> None: ...
@@ -207,8 +151,10 @@ class Route:
     def same_handler(self, other: Route) -> bool: ...
 
 class Router:
+    path: str
     routes: List[Route]
 
+    def __init__(self, path) -> None: ...
     def add_route(self, route: Route) -> None: ...
     def remove_route(self, path: str, method: str) -> bool: ...
     def get_route(self, path: str, method) -> Route | None: ...
@@ -238,6 +184,7 @@ class WebsocketRouter:
     path: str
     routes: List[WebsocketRoute]
 
+    def __init__(self, path: str) -> None: ...
     def add_route(self, route: WebsocketRoute) -> None: ...
     def remove_route(self, path: str) -> None: ...
     def extend_route(self, route: WebsocketRoute) -> None: ...
@@ -262,6 +209,8 @@ class Response:
     description: str
     file_path: str | None
     context_id: str
+
+    def __init__(self, status_code, description, headers) -> None: ...
 
 @dataclass
 class QueryParams:
@@ -305,7 +254,7 @@ class MiddlewareConfig:
     is_conditional: bool = True
 
     @staticmethod
-    def default(self) -> MiddlewareConfig: ...
+    def default() -> MiddlewareConfig: ...
 
 class DatabaseType(Enum):
     Postgres: str
@@ -326,8 +275,12 @@ class DatabaseConfig:
 class DatabaseTransaction:
     def execute(self, query: str, params: List[Any]) -> int: ...
     def fetch_all(self, query: str, params: List[Any]) -> List[Dict[str, Any]]: ...
-    def stream_data(self, query: str, params: List[Any], chunk_size: int) -> Dict[str, Any]: ...
-    def bulk_change(self, query: str, params: List[List[Any]], batch_size: int) -> int | None: ...
+    def stream_data(
+        self, query: str, params: List[Any], chunk_size: int
+    ) -> Dict[str, Any]: ...
+    def bulk_change(
+        self, query: str, params: List[List[Any]], batch_size: int
+    ) -> int | None: ...
     def commit(self) -> None: ...
     def rollback(self) -> None: ...
 

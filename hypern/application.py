@@ -12,9 +12,15 @@ from typing_extensions import Annotated, Doc
 from hypern.args_parser import ArgsConfig
 from hypern.datastructures import SwaggerConfig
 from hypern.enum import HTTPMethod
-from hypern.hypern import DatabaseConfig, FunctionInfo, MiddlewareConfig, Router, Server, WebsocketRouter, Scheduler
-from hypern.hypern import Route as InternalRoute
+from hypern.hypern import DatabaseConfig, FunctionInfo, Scheduler, Server
 from hypern.logging import logger
+from hypern.manager import (
+    ConfigManager,
+    DependencyManager,
+    MiddlewareManager,
+    RouterManager,
+    WebsocketManager,
+)
 from hypern.middleware import Middleware
 from hypern.openapi import SchemaGenerator, SwaggerUI
 from hypern.processpool import run_processes
@@ -36,12 +42,14 @@ class ThreadConfigurator:
         self._cpu_count = psutil.cpu_count(logical=True)
         self._memory_gb = psutil.virtual_memory().total / (1024**3)
 
-    def get_config(self, concurrent_requests: int = None) -> ThreadConfig:
+    def get_config(self, concurrent_requests: int | None = None) -> ThreadConfig:
         """Calculate optimal thread configuration based on system resources."""
-        workers = max(2, self._cpu_count)
+        workers = max(2, self._cpu_count or 2)
 
         if concurrent_requests:
-            max_blocking = min(max(32, concurrent_requests * 2), workers * 4, int(self._memory_gb * 8))
+            max_blocking = min(
+                max(32, concurrent_requests * 2), workers * 4, int(self._memory_gb * 8)
+            )
         else:
             max_blocking = min(workers * 4, int(self._memory_gb * 8), 256)
 
@@ -119,29 +127,34 @@ class Hypern:
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.router = Router(path="/")
-        self.websocket_router = WebsocketRouter(path="/")
-        self.dependencies = dependencies or {}
+        self.router_manager = RouterManager()
+        self.websocket_manager = WebsocketManager()
+        self.middleware_manager = MiddlewareManager()
+        self.dependency_manager = DependencyManager()
+        self.config_manager = ConfigManager()
         self.scheduler = scheduler
-        self.middleware_before_request = []
-        self.middleware_after_request = []
         self.response_headers = {}
         self.args = ArgsConfig()
         self.start_up_handler = None
         self.shutdown_handler = None
-        self.database_config = database_config
         self.thread_config = ThreadConfigurator().get_config()
-        self.swagger_config = swagger_config
 
-        for route in routes or []:
-            self.router.extend_route(route())
+        for caller_route in routes or []:
+            self.router_manager.extend_route(caller_route())
 
         for websocket_route in websockets or []:
             for route in websocket_route.routes:
-                self.websocket_router.add_route(route)
+                self.websocket_manager.add_websocket(route)
+
+        if database_config:
+            self.config_manager.set_database_config(database_config)
+
+        for key, value in (dependencies or {}).items():
+            self.dependency_manager.inject(key, value)
 
         if swagger_config:
-            self.__add_openapi(config=swagger_config)
+            self.config_manager.set_swagger_config(swagger_config)
+            self.__add_openapi(swagger_config)
 
     def __add_openapi(
         self,
@@ -188,7 +201,7 @@ class Hypern:
         Returns:
             self: Returns the instance of the class to allow method chaining.
         """
-        self.dependencies[key] = value
+        self.dependency_manager.inject(key, value)
         return self
 
     def add_response_header(self, key: str, value: str):
@@ -200,49 +213,6 @@ class Hypern:
             value (str): The header field value.
         """
         self.response_headers[key] = value
-
-    def before_request(self):
-        """
-        A decorator to register a function to be executed before each request.
-
-        This decorator can be used to add middleware functions that will be
-        executed before the main request handler. The function can be either
-        synchronous or asynchronous.
-
-        Returns:
-            function: The decorator function that registers the middleware.
-        """
-
-        logger.warning("This functin will be deprecated in version 0.4.0. Please use the middleware class instead.")
-
-        def decorator(func):
-            is_async = asyncio.iscoroutinefunction(func)
-            func_info = FunctionInfo(handler=func, is_async=is_async)
-            self.middleware_before_request.append((func_info, MiddlewareConfig.default()))
-            return func
-
-        return decorator
-
-    def after_request(self):
-        """
-        Decorator to register a function to be called after each request.
-
-        This decorator can be used to register both synchronous and asynchronous functions.
-        The registered function will be wrapped in a FunctionInfo object and appended to the
-        middleware_after_request list.
-
-        Returns:
-            function: The decorator function that registers the given function.
-        """
-        logger.warning("This functin will be deprecated in version 0.4.0. Please use the middleware class instead.")
-
-        def decorator(func):
-            is_async = asyncio.iscoroutinefunction(func)
-            func_info = FunctionInfo(handler=func, is_async=is_async)
-            self.middleware_after_request.append((func_info, MiddlewareConfig.default()))
-            return func
-
-        return decorator
 
     def add_middleware(self, middleware: Middleware):
         """
@@ -257,26 +227,7 @@ class Hypern:
         Returns:
             self: The application instance with the middleware added.
         """
-        setattr(middleware, "app", self)
-        before_request = getattr(middleware, "before_request", None)
-        after_request = getattr(middleware, "after_request", None)
-
-        is_async = asyncio.iscoroutinefunction(before_request)
-        before_request = FunctionInfo(handler=before_request, is_async=is_async)
-        self.middleware_before_request.append((before_request, middleware.config))
-
-        is_async = asyncio.iscoroutinefunction(after_request)
-        after_request = FunctionInfo(handler=after_request, is_async=is_async)
-        self.middleware_after_request.append((after_request, middleware.config))
-
-    def set_database_config(self, config: DatabaseConfig):
-        """
-        Sets the database configuration for the application.
-
-        Args:
-            config (DatabaseConfig): The database configuration to be set.
-        """
-        self.database_config = config
+        self.middleware_manager.add_middleware(middleware)
 
     def start(
         self,
@@ -291,15 +242,17 @@ class Hypern:
             self.scheduler.start()
 
         server = Server()
-        server.set_router(router=self.router)
-        server.set_websocket_router(websocket_router=self.websocket_router)
-        server.set_dependencies(dependencies=self.dependencies)
-        server.set_before_hooks(hooks=self.middleware_before_request)
-        server.set_after_hooks(hooks=self.middleware_after_request)
+        server.set_router(router=self.router_manager.router)
+        server.set_websocket_router(
+            websocket_router=self.websocket_manager.websocket_router
+        )
+        server.set_dependencies(dependencies=self.dependency_manager.dependencies)
+        server.set_before_hooks(hooks=self.middleware_manager.before_request)
+        server.set_after_hooks(hooks=self.middleware_manager.after_request)
         server.set_response_headers(headers=self.response_headers)
 
-        if self.database_config:
-            server.set_database_config(config=self.database_config)
+        if self.config_manager.database_config:
+            server.set_database_config(config=self.config_manager.database_config)
         if self.start_up_handler:
             server.set_startup_handler(self.start_up_handler)
         if self.shutdown_handler:
@@ -333,10 +286,7 @@ class Hypern:
             handler (Callable[..., Any]): The function that handles requests to the route.
 
         """
-        is_async = asyncio.iscoroutinefunction(handler)
-        func_info = FunctionInfo(handler=handler, is_async=is_async)
-        route = InternalRoute(path=endpoint, function=func_info, method=method.name)
-        self.router.add_route(route=route)
+        self.router_manager.add_route(method, endpoint, handler)
 
     def add_websocket(self, ws_route: WebsocketRoute):
         """
@@ -346,7 +296,7 @@ class Hypern:
             ws_route (WebsocketRoute): The WebSocket route to be added to the router.
         """
         for route in ws_route.routes:
-            self.websocket_router.add_route(route=route)
+            self.websocket_manager.add_websocket(route)
 
     def on_startup(self, handler: Callable[..., Any]):
         """
@@ -356,7 +306,9 @@ class Hypern:
             handler (Callable[..., Any]): The function to be executed on application startup.
         """
         # decorator
-        self.start_up_handler = FunctionInfo(handler=handler, is_async=asyncio.iscoroutinefunction(handler))
+        self.start_up_handler = FunctionInfo(
+            handler=handler, is_async=asyncio.iscoroutinefunction(handler)
+        )
 
     def on_shutdown(self, handler: Callable[..., Any]):
         """
@@ -365,4 +317,13 @@ class Hypern:
         Args:
             handler (Callable[..., Any]): The function to be executed on application shutdown.
         """
-        self.shutdown_handler = FunctionInfo(handler=handler, is_async=asyncio.iscoroutinefunction(handler))
+        self.shutdown_handler = FunctionInfo(
+            handler=handler, is_async=asyncio.iscoroutinefunction(handler)
+        )
+
+    def route(self, method: HTTPMethod, endpoint: str):
+        def decorator(handler):
+            self.router_manager.add_route(method, endpoint, handler)
+            return handler
+
+        return decorator

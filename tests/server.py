@@ -129,19 +129,5 @@ app = Hypern(routes=routes)
 app.inject("global_dependencies", "global_dependencies")
 app.inject("router_dependencies", "router_dependencies")
 
-
-# --- Global ---
-@app.before_request()
-def global_before_request(request: Request):
-    request.headers.set("global_before", "global_before_request")
-    return request
-
-
-@app.after_request()
-def global_after_request(response: Response):
-    response.headers.set("global_after", "global_after_request")
-    return response
-
-
 if __name__ == "__main__":
     app.start()

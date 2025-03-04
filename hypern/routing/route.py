@@ -11,6 +11,7 @@ from pydantic.fields import FieldInfo
 from hypern.enum import HTTPMethod
 from hypern.hypern import FunctionInfo, Request
 
+
 from hypern.hypern import Route as InternalRoute
 
 from .dispatcher import dispatch
@@ -220,7 +221,7 @@ class Route:
         func_info = FunctionInfo(handler=handler, is_async=is_async)
         return InternalRoute(path=path, function=func_info, method=method)
 
-    def __call__(self, *args: Any, **kwds: Any) -> Any:
+    def __call__(self, *args: Any, **kwds: Any) -> List[InternalRoute]:
         routes = []
 
         # Validate handlers
