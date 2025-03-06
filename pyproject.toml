@@ -15,21 +15,22 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies=[
-    "sqlalchemy[asyncio] == 2.0.31",
+    "sqlalchemy[asyncio] (>=2.0.38,<3.0.0)",
     "pyjwt==2.8.0",
-    "pydash==8.0.3",
+    "pydash (>=8.0.5,<9.0.0)",
     "sentry-sdk==2.11.0",
-    "celery==5.4.0",
-    "psycopg==3.2.3",
+    "celery (>=5.4.0,<6.0.0)",
+    "psycopg (>=3.2.5,<4.0.0)",
     "pyyaml == 6.0.2",
-    "orjson==3.10.11",
-    "multiprocess==0.70.17",
+    "orjson (>=3.10.15,<4.0.0)",
+    "multiprocess (>=0.70.17,<0.71.0)",
     "uvloop==0.21.0; sys_platform != 'win32' and platform_python_implementation == 'CPython' and platform_machine != 'armv7l'",
     "watchdog==6.0.0",
     "psutil==6.1.0",
     "msgpack==1.1.0",
-    "redis==5.2.1",
-    "pydantic==2.10.4",
+    "redis (>=5.2.1,<6.0.0)",
+    "pydantic (>=2.10.6,<3.0.0)",
+    "cryptography (>=44.0.2,<45.0.0)",
 ]
 [tool.maturin]
 features = ["pyo3/extension-module"]
