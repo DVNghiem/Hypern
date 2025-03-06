@@ -1,4 +1,3 @@
-# src/hypern/cache/backends/redis.py
 import pickle
 from typing import Any, Optional
 
@@ -10,7 +9,13 @@ from .backend import BaseBackend
 
 
 class RedisBackend(BaseBackend):
-    def __init__(self, url: str = "redis://localhost:6379", encoding: str = "utf-8", decode_responses: bool = False, **kwargs):
+    def __init__(
+        self,
+        url: str = "redis://localhost:6379",
+        encoding: str = "utf-8",
+        decode_responses: bool = False,
+        **kwargs,
+    ):
         """
         Initialize Redis backend with aioredis
 
@@ -20,7 +25,9 @@ class RedisBackend(BaseBackend):
             decode_responses: Whether to decode response bytes to strings
             **kwargs: Additional arguments passed to aioredis.from_url
         """
-        self.redis = aioredis.from_url(url, encoding=encoding, decode_responses=decode_responses, **kwargs)
+        self.redis = aioredis.from_url(
+            url, encoding=encoding, decode_responses=decode_responses, **kwargs
+        )
         self._encoding = encoding
 
     async def get(self, key: str) -> Optional[Any]:
@@ -95,7 +102,7 @@ class RedisBackend(BaseBackend):
             keys = await self.redis.keys(pattern)
             if keys:
                 return await self.redis.delete(*keys)
-            return 0
+            return len(keys)
         except Exception as e:
             logger.error(f"Error deleting keys matching {pattern}: {e}")
             return 0
@@ -132,7 +139,7 @@ class RedisBackend(BaseBackend):
             logger.error(f"Error getting TTL for key {key}: {e}")
             return -2
 
-    async def incr(self, key: str, amount: int = 1) -> Optional[int]:
+    async def incr(self, key: str, amount: int = 1) -> int | None:
         """
         Increment value by amount
 

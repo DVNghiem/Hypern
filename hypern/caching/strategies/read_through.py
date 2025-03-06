@@ -1,5 +1,4 @@
-import asyncio
-from typing import Callable, Optional, TypeVar
+from typing import Any, Callable, Coroutine, Optional, TypeVar
 
 import orjson
 
@@ -13,7 +12,12 @@ T = TypeVar("T")
 class ReadThroughStrategy(CacheStrategy[T]):
     """Read-Through: load from cache if available, otherwise load from backend"""
 
-    def __init__(self, backend: BaseBackend, load_fn: Callable[[str], T], ttl: int):
+    def __init__(
+        self,
+        backend: BaseBackend,
+        load_fn: Callable[[str], Coroutine[Any, Any, T]],
+        ttl: int,
+    ):
         self.backend = backend
         self.load_fn = load_fn
         self.ttl = ttl

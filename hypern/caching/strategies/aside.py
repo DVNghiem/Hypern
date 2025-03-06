@@ -1,4 +1,4 @@
-from typing import Callable, Optional, TypeVar
+from typing import Any, Callable, Coroutine, Optional, TypeVar
 
 import orjson
 
@@ -15,7 +15,12 @@ class CacheAsideStrategy(CacheStrategy[T]):
     Data is loaded into cache only when requested.
     """
 
-    def __init__(self, backend: BaseBackend, load_fn: Callable[[str], T], ttl: int):
+    def __init__(
+        self,
+        backend: BaseBackend,
+        load_fn: Callable[[str], Coroutine[Any, Any, T]],
+        ttl: int,
+    ):
         self.backend = backend
         self.load_fn = load_fn
         self.ttl = ttl

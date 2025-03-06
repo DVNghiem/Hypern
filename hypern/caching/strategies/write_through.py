@@ -1,5 +1,5 @@
 import asyncio
-from typing import Callable, Optional, TypeVar
+from typing import Any, Callable, Coroutine, Optional, TypeVar
 
 import orjson
 
@@ -14,7 +14,10 @@ class WriteThroughStrategy(CacheStrategy[T]):
     """Write-Through: write to cache and backend at the same time"""
 
     def __init__(
-        self, backend: BaseBackend, write_fn: Callable[[str, T], None], ttl: int
+        self,
+        backend: BaseBackend,
+        write_fn: Callable[[str, T], Coroutine[Any, Any, T]],
+        ttl: int,
     ):
         self.backend = backend
         self.write_fn = write_fn

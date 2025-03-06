@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Callable, Dict, Optional, TypeVar
+from typing import Any, Callable, Dict, Optional, TypeVar, Coroutine
 
 from hypern.caching.backend import BaseBackend
 from hypern.caching.entry import CacheEntry
@@ -20,7 +20,7 @@ class StaleWhileRevalidateStrategy(CacheStrategy[T]):
         backend: BaseBackend,
         revalidate_after: int,
         ttl: int,
-        revalidate_fn: Callable[[str], T],
+        revalidate_fn: Callable[[str], Coroutine[Any, Any, T]],
     ):
         """
         Initialize the caching strategy.
