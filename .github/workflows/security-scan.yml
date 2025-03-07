@@ -11,7 +11,7 @@ jobs:
   security-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@main
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
@@ -35,9 +35,11 @@ jobs:
           bandit -r ./hypern -f json -o bandit-results.json --exit-zero
           
       # Safety - Check dependencies for security vulnerabilities
-      - name: Run Safety Check
-        run: |
-          safety check -r requirements.txt --json > safety-results.json
+      - name: Run Safety CLI to check for vulnerabilities
+        uses: pyupio/safety-action@v1
+        with:
+          api-key: ${{ secrets.SAFETY_API_KEY }}
+          args: --detailed-output
 
       # OWASP Dependency-Check
       - name: OWASP Dependency Check
