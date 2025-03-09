@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 
 #[pyclass]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FunctionInfo {
     #[pyo3(get, set)]
     pub handler: Py<PyAny>,

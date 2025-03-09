@@ -14,7 +14,8 @@ pub struct Header {
 #[pymethods]
 impl Header {
     #[new]
-    pub fn new(default_headers: Option<&PyDict>) -> Self {
+    #[pyo3(signature = (default_headers=None))]
+    pub fn new(default_headers: Option<Bound<PyDict>>) -> Self {
         match default_headers {
             Some(default_headers) => {
                 let mut headers = HashMap::new();
@@ -55,7 +56,7 @@ impl Header {
         self.headers.contains_key(&key.to_lowercase())
     }
 
-    pub fn populate_from_dict(&mut self, headers: &PyDict) {
+    pub fn populate_from_dict(&mut self, headers: &Bound<PyDict>) {
         for (key, value) in headers {
             let key = key.to_string().to_lowercase();
             let value = value.to_string();
@@ -63,11 +64,9 @@ impl Header {
         }
     }
 
-    pub fn update(&mut self, headers: Py<PyDict>) {
-        Python::with_gil(|py| {
-            let headers = headers.as_ref(py);
-            self.populate_from_dict(headers);
-        });
+    pub fn update(&mut self, headers: &Bound<PyDict>) {
+        let headers = headers.into();
+        self.populate_from_dict(headers);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -111,5 +110,25 @@ impl Header {
             );
         }
         Header { headers }
+    }
+
+    pub fn from_pydict(py_headers: &Bound<PyDict>) -> Self {
+        let mut headers = HashMap::new();
+        for (key, value) in py_headers {
+            let key = key.to_string().to_lowercase();
+            let value = value.to_string();
+            headers.insert(key, value);
+        }
+        Header { headers }
+    }
+
+    pub fn to_pydict(&self, py: Python) -> Py<PyDict> {
+        let dict = PyDict::new(py);
+        for (key, value) in &self.headers {
+            let key = PyString::new(py, key);
+            let value = PyString::new(py, value);
+            dict.set_item(key, value).unwrap();
+        }
+        dict.into()
     }
 }

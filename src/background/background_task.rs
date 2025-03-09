@@ -41,7 +41,7 @@ impl BackgroundTask {
         Python::with_gil(|py| {
             let inspect = py.import("inspect")?;
             let is_coroutine = inspect
-                .call_method1("iscoroutinefunction", (function.clone(),))?
+                .call_method1("iscoroutinefunction", (function.clone_ref(py),))?
                 .extract::<bool>()?;
             if is_coroutine {
                 return Err(PyTypeError::new_err(
@@ -77,7 +77,7 @@ impl BackgroundTask {
 
     pub fn execute(&self, py: Python<'_>) -> PyResult<PyObject> {
         // Clone necessary data outside of async block
-        let function = self.function.clone();
+        let function = self.function.clone_ref(py);
         let cancelled = self.cancelled.clone();
         let timeout_secs = self.timeout_secs;
 
@@ -89,7 +89,7 @@ impl BackgroundTask {
         // Prepare arguments
         let args = match &self.args {
             Some(args) => PyTuple::new(py, args),
-            None => PyTuple::empty(py),
+            None => Ok(PyTuple::empty(py)),
         };
 
         // Prepare keyword arguments

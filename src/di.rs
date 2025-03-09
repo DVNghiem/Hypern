@@ -10,7 +10,7 @@ impl Default for DependencyInjection {
     fn default() -> Self {
         Python::with_gil(|py| {
             let deps = PyDict::new(py);
-            DependencyInjection(Arc::new(Mutex::new(deps.into_py(py))))
+            DependencyInjection(Arc::new(Mutex::new(deps.into())))
         })
     }
 }
@@ -21,7 +21,7 @@ impl DependencyInjection {
     pub fn new() -> Self {
         Python::with_gil(|py| {
             let deps = PyDict::new(py);
-            DependencyInjection(Arc::new(Mutex::new(deps.into_py(py))))
+            DependencyInjection(Arc::new(Mutex::new(deps.into())))
         })
     }
 
@@ -29,7 +29,7 @@ impl DependencyInjection {
     pub fn add_dependency(&self, key: &str, value: Py<PyAny>) -> PyResult<()> {
         Python::with_gil(|py| {
             let deps = self.0.lock().unwrap();
-            deps.as_ref(py).set_item(key, value)?;
+            deps.bind(py).set_item(key, value)?;
             Ok(())
         })
     }
@@ -38,7 +38,7 @@ impl DependencyInjection {
     pub fn get_dependency(&self, key: &str) -> Option<Py<PyAny>> {
         Python::with_gil(|py| {
             let deps = self.0.lock().unwrap();
-            deps.as_ref(py).get_item(key).ok().map(|x| x.into_py(py))
+            deps.bind(py).get_item(key).ok().map(|x| x.unwrap().into())
         })
     }
 
@@ -46,14 +46,14 @@ impl DependencyInjection {
     pub fn remove_dependency(&self, key: &str) -> PyResult<()> {
         Python::with_gil(|py| {
             let deps = self.0.lock().unwrap();
-            deps.as_ref(py).del_item(key)?;
+            deps.bind(py).del_item(key)?;
             Ok(())
         })
     }
 
     // Convert DependencyInjection to a Python object
     pub fn to_object(&self, py: Python) -> Py<PyDict> {
-        self.0.lock().unwrap().clone().extract(py).unwrap()
+        self.0.lock().unwrap().clone_ref(py).extract(py).unwrap()
     }
 
     // Convert a Python object to DependencyInjection

@@ -9,8 +9,8 @@ name = "hypern"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-pyo3 = { version = "0.20.0", features = ["extension-module"] }
-pyo3-asyncio = { version="0.20.0" , features = ["tokio-runtime"] }
+pyo3 = { version = "=0.23", features = ["anyhow", "extension-module", "generate-import-lib"] }
+# pyo3-asyncio = { version="0.20.0" , features = ["tokio-runtime"] }
 redis = "*"
 yaml-rust = "0.4"
 regex = "1.10.6"
@@ -30,7 +30,7 @@ dashmap = "6.1.0"
 sqlx = { version = "0.8", features = ["runtime-async-std", "postgres", "mysql", "sqlite", "chrono", "json"] }
 lazy_static = "1.5.0"
 parking_lot = "0.12.3"
-hyper = { version = "1.5.2", features = ["server", "http1", "http2"] }
+hyper = { version = "1.6", features = ["server", "http1", "http2"] }
 http-body-util = "0.1.2"
 hyper-util = { version = "0.1.10", features = ["tokio"]}
 bytes = "1.9.0"
@@ -38,6 +38,7 @@ multer = "3.1.0"
 tungstenite = "0.26.1"
 hyper-tungstenite = "0.17.0"
 tokio-tungstenite = "0.26.1"
+crossbeam-channel = "0.5.14"
 
 [profile.release]
 codegen-units = 1

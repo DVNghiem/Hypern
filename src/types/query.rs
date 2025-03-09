@@ -22,6 +22,7 @@ impl QueryParams {
         self.queries.entry(key).or_default().push(value);
     }
 
+    #[pyo3(signature = (key, default=None))]
     pub fn get(&self, key: String, default: Option<String>) -> Option<String> {
         match self.queries.get(&key) {
             Some(values) => values.last().cloned(),
@@ -60,7 +61,7 @@ impl QueryParams {
         let dict = PyDict::new(py);
         for (key, values) in self.queries.iter() {
             let values = PyList::new(py, values.iter());
-            dict.set_item(key, values)?;
+            dict.set_item(key, values.unwrap())?;
         }
         Ok(dict.into())
     }
@@ -89,9 +90,9 @@ impl QueryParams {
         multimap
     }
 
-    pub fn from_py_dict(dict: &PyDict) -> Self {
+    pub fn from_py_dict(dict: &Bound<PyDict>) -> Self {
         let mut multimap = QueryParams::new();
-        for (key, value) in dict.iter() {
+        for (key, value) in dict {
             let key = key.extract::<String>().unwrap();
             let value = value.extract::<String>().unwrap();
             multimap.set(key, value);

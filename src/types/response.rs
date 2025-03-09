@@ -8,7 +8,7 @@ use hyper::{header::HeaderName, Response as HyperResponse, StatusCode};
 
 use super::{body::{full, BoxBody}, header::Header};
 
-fn get_description_from_pyobject(description: &PyAny) -> PyResult<Vec<u8>> {
+fn get_description_from_pyobject(description: &Bound<PyAny>) -> PyResult<Vec<u8>> {
     if let Ok(s) = description.downcast::<PyString>() {
         Ok(s.to_string().into_bytes())
     } else if let Ok(b) = description.downcast::<PyBytes>() {
@@ -54,8 +54,13 @@ impl Response {
         builder.body(full(self.description.clone())).unwrap()
     }
 }
-impl ToPyObject for Response {
-    fn to_object(&self, py: Python) -> PyObject {
+impl<'py> IntoPyObject<'py> for Response {
+
+    type Target = PyResponse; 
+    type Output = Bound<'py, Self::Target>; // in most cases this will be `Bound`
+    type Error = std::convert::Infallible;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
         let headers = self.headers.clone().into_py(py).extract(py).unwrap();
         // The description should only be either string or binary.
         // it should raise an exception otherwise
@@ -72,21 +77,21 @@ impl ToPyObject for Response {
             file_path: self.file_path.clone(),
             context_id: self.context_id.clone(),
         };
-        Py::new(py, response).unwrap().as_ref(py).into()
+        Ok(Py::new(py, response).unwrap().into_bound(py))
     }
 }
 
 #[pyclass(name = "Response")]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PyResponse {
     #[pyo3(get)]
     pub status_code: u16,
     #[pyo3(get)]
     pub response_type: String,
     #[pyo3(get, set)]
-    pub headers: Py<Header>,
+    pub headers: Header,
     #[pyo3(get)]
-    pub description: Py<PyAny>,
+    pub description: PyObject,
     #[pyo3(get)]
     pub file_path: Option<String>,
 
@@ -101,15 +106,15 @@ impl PyResponse {
     pub fn new(
         py: Python,
         status_code: u16,
-        headers: &PyAny,
-        description: Py<PyAny>,
+        headers: Bound<PyAny>,
+        description: Bound<PyAny>,
     ) -> PyResult<Self> {
-        let headers_output: Py<Header> = if let Ok(headers_dict) = headers.downcast::<PyDict>() {
+        let headers_output: Header = if let Ok(headers_dict) = headers.downcast::<PyDict>() {
             // Here you'd have logic to create a Headers instance from a PyDict
             // For simplicity, let's assume you have a method `from_dict` on Headers for this
-            let headers = Header::new(Some(headers_dict)); // Hypothetical method
-            Py::new(py, headers)?
-        } else if let Ok(headers) = headers.extract::<Py<Header>>() {
+            let headers = Header::from_pydict(headers_dict); // Hypothetical method
+            headers
+        } else if let Ok(headers) = headers.extract::<Header>() {
             // If it's already a Py<Headers>, use it directly
             headers
         } else {
@@ -123,7 +128,7 @@ impl PyResponse {
             // we should be handling based on headers but works for now
             response_type: "text".to_string(),
             headers: headers_output,
-            description,
+            description: description.into(),
             file_path: None,
             context_id: "".to_string(),
         })
@@ -135,13 +140,8 @@ impl PyResponse {
         Ok(())
     }
 
-    pub fn set_cookie(&mut self, py: Python, key: &str, value: &str) -> PyResult<()> {
-        let headers = self.headers.as_ref(py).to_object(py);
-        let key = PyString::new(py, key);
-        let value = PyString::new(py, value);
-        let headers_dict: &PyDict = headers.downcast::<PyDict>(py)?;
-        headers_dict.set_item(key, value)?;
-        self.headers = headers.extract(py)?;
+    pub fn set_cookie(&mut self, py: Python, key: String, value: String) -> PyResult<()> {
+        self.headers.set(key, value);
         Ok(())
     }
 }
