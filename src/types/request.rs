@@ -4,8 +4,8 @@ use hyper::body::Incoming;
 use hyper::header::CONTENT_TYPE;
 use hyper::{header, Request as HyperRequest};
 use multer::Multipart;
-use pyo3::types::{PyBytes, PyDict, PyList, PyString};
 use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyDict, PyList, PyString};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -131,7 +131,6 @@ impl ToPyObject for Request {
             remote_addr: self.remote_addr.clone(),
             timestamp: self.timestamp.clone(),
             context_id: self.context_id.clone(),
-
         };
         Py::new(py, request).unwrap().as_ref(py).into()
     }
@@ -227,7 +226,6 @@ impl Request {
 
                             match temp_file {
                                 Ok(ref mut file) => {
-
                                     // write the file to the temp file for getting the information about the file
                                     let _ = file.write(&data.unwrap()).map_err(|e| e);
                                     let file_content = file.reopen().map_err(|e| e);
@@ -245,7 +243,6 @@ impl Request {
                                     });
                                     // remove the file from the temp file
                                     let _ = temp_file.unwrap().close().map_err(|e| e);
-                                    
                                 }
                                 Err(e) => {
                                     eprintln!("Error: {:?}", e);
@@ -282,7 +279,47 @@ impl Request {
         }
     }
 }
-
+fn json_value_to_py(value: &Value, py: Python) -> PyResult<PyObject> {
+    match value {
+        Value::Null => Ok(py.None()),
+        Value::Bool(b) => Ok(b.into_py(py)),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(i.into_py(py))
+            } else if let Some(u) = n.as_u64() {
+                Ok(u.into_py(py))
+            } else if let Some(f) = n.as_f64() {
+                Ok(f.into_py(py))
+            } else {
+                // In case the number is very large and does not fit into i64 or u64, convert it to string and then parse it.
+                let s = n.to_string();
+                if s.contains('.') {
+                    Ok(s.parse::<f64>().unwrap().into_py(py))
+                } else {
+                    Ok(s.parse::<i64>().unwrap().into_py(py))
+                }
+            }
+        }
+        Value::String(s) => Ok(s.into_py(py)),
+        Value::Array(arr) => {
+            let py_list = PyList::empty(py);
+            for item in arr {
+                let py_item = json_value_to_py(item, py)?;
+                py_list.append(py_item)?;
+            }
+            Ok(py_list.into_py(py))
+        }
+        Value::Object(obj) => {
+            let py_dict = PyDict::new(py);
+            for (key, val) in obj {
+                let py_key = key.into_py(py);
+                let py_val = json_value_to_py(val, py)?;
+                py_dict.set_item(py_key, py_val)?;
+            }
+            Ok(py_dict.into_py(py))
+        }
+    }
+}
 #[pyclass(name = "Request")]
 #[derive(Clone)]
 pub struct PyRequest {
@@ -334,7 +371,7 @@ impl PyRequest {
             remote_addr,
             timestamp,
             context_id,
-            auth
+            auth,
         }
     }
 
@@ -343,28 +380,14 @@ impl PyRequest {
         self.body = body;
         Ok(())
     }
-
     pub fn json(&self, py: Python) -> PyResult<PyObject> {
         let body = self.body.json.clone();
         let body_bytes: &[u8] = &body.as_ref(py).as_bytes();
-        let body = PyString::new(py, &String::from_utf8_lossy(body_bytes));
-        match serde_json::from_str(body.extract()?) {
-            Ok(Value::Object(map)) => {
-                let dict = PyDict::new(py);
-
-                for (key, value) in map.iter() {
-                    let py_key = key.to_string().into_py(py);
-                    let py_value = match value {
-                        Value::String(s) => s.as_str().into_py(py),
-                        _ => value.to_string().into_py(py),
-                    };
-
-                    dict.set_item(py_key, py_value)?;
-                }
-
-                Ok(dict.into_py(py))
-            }
-            _ => Ok(PyDict::new(py).into()),
+        let json_str = String::from_utf8_lossy(body_bytes);
+        match serde_json::from_str(&json_str) {
+            Ok(value) => json_value_to_py(&value, py),
+            Err(_) => Ok(PyDict::new(py).into()), // return empty dict if error
         }
     }
 }
+
