@@ -9,7 +9,7 @@ name = "hypern"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-pyo3 = { version = "=0.23", features = ["anyhow", "extension-module", "generate-import-lib"] }
+pyo3 = { version = "=0.24", features = ["anyhow", "extension-module", "generate-import-lib", "auto-initialize"] }
 # pyo3-asyncio = { version="0.20.0" , features = ["tokio-runtime"] }
 redis = "*"
 yaml-rust = "0.4"

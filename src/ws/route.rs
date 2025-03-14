@@ -10,6 +10,15 @@ pub struct WebsocketRoute {
     pub handler: PyObject,
 }
 
+impl <'py>FromPyObject<'py> for WebsocketRoute {
+    fn extract_bound(ob: &Bound<'py, PyAny>) -> PyResult<Self> {
+        let path = ob.getattr("path")?.extract::<String>()?;
+        let handler = ob.getattr("handler")?;
+        Ok(WebsocketRoute { path, handler: handler.into() })
+    }
+    
+}
+
 #[pymethods]
 impl WebsocketRoute {
     #[new]

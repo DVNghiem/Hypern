@@ -55,7 +55,7 @@ impl WebSocketSession {
         }
     }
 
-    fn send(&self, message: &PyAny) -> PyResult<()> {
+    fn send(&self, message: Bound<PyAny>) -> PyResult<()> {
         if *self.is_closed.lock().unwrap() {
             return Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
                 "WebSocket closed",
@@ -198,23 +198,23 @@ async fn handle_socket(python_handler: PyObject, ws: WebSocketStream<TokioIo<Upg
 
                         let inspect = py.import("inspect")?;
                         let is_coroutine = inspect
-                            .call_method1("iscoroutinefunction", (python_handler.as_ref(py),))?
-                            .is_true()?;
+                            .call_method1("iscoroutinefunction", (python_handler,))?
+                            .is_truthy()?;
 
                         let kwargs = PyDict::new(py);
                         kwargs.set_item("message", text.to_object(py))?;
 
-                        let args = PyTuple::new(py, &[PyCell::new(py, session)?]);
+                        let args = PyTuple::new(py, [session]);
 
                         if is_coroutine {
                             let asyncio = py.import("asyncio")?;
-                            let coro = python_handler.call(py, args, Some(kwargs))?;
+                            let coro = python_handler.call(py, args.into(), Some(&kwargs.into()))?;
                             let loop_obj = asyncio.call_method0("new_event_loop")?;
                             let result = loop_obj.call_method1("run_until_complete", (coro,))?;
                             loop_obj.call_method0("close")?;
                             Ok(result.into())
                         } else {
-                            Ok(python_handler.call(py, args, Some(kwargs))?)
+                            Ok(python_handler.call(py, args.into(), Some(&kwargs.into()))?)
                         }
                     });
                 }

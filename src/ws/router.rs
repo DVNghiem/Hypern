@@ -19,18 +19,8 @@ impl WebsocketRouter {
     }
 }
 
-impl ToPyObject for WebsocketRouter {
-    fn to_object(&self, py: Python) -> PyObject {
-        let router = PyWebsocketRouter {
-            path: self.path.to_string(),
-            routes: self.routes.clone(),
-        };
-        Py::new(py, router).unwrap().as_ref(py).into()
-    }
-}
-
-impl FromPyObject<'_> for WebsocketRouter {
-    fn extract(ob: &PyAny) -> PyResult<Self> {
+impl<'py> FromPyObject<'py> for WebsocketRouter {
+    fn extract_bound(ob: &Bound<'py, PyAny>) -> PyResult<Self> {
         let router = ob.extract::<PyWebsocketRouter>()?;
         Ok(Self {
             path: router.path,
@@ -43,10 +33,7 @@ impl FromPyObject<'_> for WebsocketRouter {
 #[pyclass(name = "WebsocketRouter")]
 #[derive(Debug, Default, FromPyObject)]
 pub struct PyWebsocketRouter {
-    #[pyo3(get, set)]
     path: String,
-
-    #[pyo3(get, set)]
     routes: Vec<WebsocketRoute>,
 }
 
@@ -107,15 +94,15 @@ impl PyWebsocketRouter {
         }
     }
 
-    /// Get all routes for a specific path
-    #[pyo3(name = "get_routes_by_path")]
-    pub fn get_routes_by_path_py(&self, path: &str) -> Vec<WebsocketRoute> {
-        self.routes
-            .iter()
-            .filter(|r| r.path == path)
-            .cloned()
-            .collect()
-    }
+    // /// Get all routes for a specific path
+    // #[pyo3(name = "get_routes_by_path")]
+    // pub fn get_routes_by_path_py(&self, path: &str) -> Vec<WebsocketRoute> {
+    //     self.routes
+    //         .iter()
+    //         .filter(|r| r.path == path)
+    //         .cloned()
+    //         .collect()
+    // }
 
     /// Clear all routes
     pub fn clear_routes(&mut self) {

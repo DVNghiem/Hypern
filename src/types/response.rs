@@ -104,7 +104,7 @@ impl PyResponse {
     // To do: Add check for content-type in header and change response_type accordingly
     #[new]
     pub fn new(
-        py: Python,
+        _py: Python,
         status_code: u16,
         headers: Bound<PyAny>,
         description: Bound<PyAny>,
