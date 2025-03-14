@@ -31,7 +31,6 @@ impl MiddlewareConfig {
     }
 }
 
-#[derive(Clone)]
 pub struct Middleware {
     before_hooks: Vec<(FunctionInfo, MiddlewareConfig)>,
     after_hooks: Vec<(FunctionInfo, MiddlewareConfig)>,
@@ -61,14 +60,6 @@ impl Middleware {
             .sort_by(|a, b| b.1.priority.cmp(&a.1.priority));
         self.after_hooks
             .sort_by(|a, b| b.1.priority.cmp(&a.1.priority));
-    }
-
-    pub fn get_before_hooks(&self) -> Vec<(FunctionInfo, MiddlewareConfig)> {
-        self.before_hooks.clone()
-    }
-
-    pub fn get_after_hooks(&self) -> Vec<(FunctionInfo, MiddlewareConfig)> {
-        self.after_hooks.clone()
     }
 
     pub fn set_before_hooks(&mut self, hooks: Vec<(FunctionInfo, MiddlewareConfig)>) {

@@ -1,15 +1,13 @@
 use crate::router::route::Route;
-use pyo3::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug)]
-#[pyclass]
-#[derive(Clone)]
 pub struct RadixNode {
     pub path: String,
-    pub children: HashMap<char, RadixNode>,
+    pub children: Arc<HashMap<char, RadixNode>>,
     pub is_endpoint: bool,
-    pub routes: HashMap<String, Route>,
+    pub routes: Arc<HashMap<String, Route>>,
     pub param_name: Option<String>,
 }
 
@@ -23,9 +21,9 @@ impl RadixNode {
     pub fn new() -> Self {
         Self {
             path: String::new(),
-            children: HashMap::new(),
+            children: Arc::new(HashMap::new()),
             is_endpoint: false,
-            routes: HashMap::new(),
+            routes: Arc::new(HashMap::new()),
             param_name: None,
         }
     }
@@ -47,29 +45,36 @@ impl RadixNode {
 
         if normalized_path.is_empty() {
             self.is_endpoint = true;
-            self.routes.insert(route.method.to_uppercase(), route);
+            Arc::get_mut(&mut self.routes)
+                .unwrap()
+                .insert(route.method.to_uppercase(), route);
             return;
         }
 
-        let segments: Vec<&str> = normalized_path.split('/')
+        let segments: Vec<&str> = normalized_path
+            .split('/')
             .filter(|s| !s.is_empty())
             .collect();
-        
+
         self._insert_segments(&segments, 0, route);
     }
 
     fn _insert_segments(&mut self, segments: &[&str], index: usize, route: Route) {
         if index >= segments.len() {
             self.is_endpoint = true;
-            self.routes.insert(route.method.to_uppercase(), route);
+            Arc::get_mut(&mut self.routes)
+                .unwrap()
+                .insert(route.method.to_uppercase(), route);
             return;
         }
 
         let segment = segments[index];
-        
+
         if segment.starts_with(':') {
             let param_name = segment[1..].to_string();
-            let param_node = self.children
+
+            let param_node = Arc::get_mut(&mut self.children)
+                .unwrap()
                 .entry(':')
                 .or_insert_with(|| {
                     let mut node = RadixNode::new();
@@ -85,9 +90,12 @@ impl RadixNode {
             None => return, // Empty segment, shouldn't happen due to normalization
         };
 
-        if let Some(existing_node) = self.children.get_mut(&first_char) {
+        if let Some(existing_node) = Arc::get_mut(&mut self.children)
+            .unwrap()
+            .get_mut(&first_char)
+        {
             let common_prefix = Self::find_common_prefix(&existing_node.path, segment);
-            
+
             if common_prefix == existing_node.path {
                 // Full match of existing node's path, check remaining segment
                 let remaining = &segment[common_prefix.len()..];
@@ -99,7 +107,8 @@ impl RadixNode {
                     let mut new_node = RadixNode::new();
                     new_node.path = remaining.to_string();
                     new_node._insert_segments(segments, index + 1, route);
-                    existing_node.children
+                    Arc::get_mut(&mut existing_node.children)
+                        .unwrap()
                         .entry(remaining.chars().next().unwrap())
                         .or_insert(new_node);
                 }
@@ -127,10 +136,14 @@ impl RadixNode {
 
                 // Attach children to new parent
                 if let Some(c) = existing_child.path.chars().next() {
-                    new_parent.children.insert(c, existing_child);
+                    Arc::get_mut(&mut new_parent.children)
+                        .unwrap()
+                        .insert(c, existing_child);
                 }
                 if let Some(c) = new_child.path.chars().next() {
-                    new_parent.children.insert(c, new_child);
+                    Arc::get_mut(&mut new_parent.children)
+                        .unwrap()
+                        .insert(c, new_child);
                 }
 
                 // Replace existing node with new parent
@@ -140,18 +153,22 @@ impl RadixNode {
                 let mut new_node = RadixNode::new();
                 new_node.path = segment.to_string();
                 new_node._insert_segments(segments, index + 1, route);
-                self.children.insert(first_char, new_node);
+                Arc::get_mut(&mut self.children)
+                    .unwrap()
+                    .insert(first_char, new_node);
             }
         } else {
             // No existing node, create new
             let mut new_node = RadixNode::new();
             new_node.path = segment.to_string();
             new_node._insert_segments(segments, index + 1, route);
-            self.children.insert(first_char, new_node);
+            Arc::get_mut(&mut self.children)
+                .unwrap()
+                .insert(first_char, new_node);
         }
     }
 
-    pub fn find(&self, path: &str, method: &str) -> Option<(&Route, HashMap<String, String>)> {
+    pub fn find(&mut self, path: &str, method: &str) -> Option<(&Route, HashMap<String, String>)> {
         let normalized_path = if path == "/" {
             String::new()
         } else {
@@ -161,13 +178,17 @@ impl RadixNode {
         let mut params = HashMap::new();
         if normalized_path.is_empty() {
             return if self.is_endpoint {
-                self.routes.get(&method.to_uppercase()).map(|r| (r, params))
+                Arc::get_mut(&mut self.routes)
+                    .unwrap()
+                    .get(&method.to_uppercase())
+                    .map(|r| (r, params.clone()))
             } else {
                 None
             };
         }
 
-        let segments: Vec<&str> = normalized_path.split('/')
+        let segments: Vec<&str> = normalized_path
+            .split('/')
             .filter(|s| !s.is_empty())
             .collect();
 
@@ -183,7 +204,9 @@ impl RadixNode {
     ) -> Option<(&'a Route, HashMap<String, String>)> {
         if index >= segments.len() {
             return if self.is_endpoint {
-                self.routes.get(&method.to_uppercase()).map(|r| (r, params.clone()))
+                self.routes
+                    .get(&method.to_uppercase())
+                    .map(|r| (r, params.clone()))
             } else {
                 None
             };
@@ -192,29 +215,30 @@ impl RadixNode {
         let segment = segments[index];
 
         // Check static nodes
+        // Check static nodes
         if let Some(first_char) = segment.chars().next() {
             if let Some(child) = self.children.get(&first_char) {
                 if let Some(remaining) = segment.strip_prefix(&child.path) {
-                    if remaining.is_empty() {
-                        // Full match, proceed to next segment
-                        if let Some(result) = child._find_segments(segments, index + 1, method, params) {
-                            return Some(result);
-                        }
+                    // Full match, proceed to next segment
+                    if let Some(result) = child._find_segments(segments, index + 1, method, params)
+                    {
+                        return Some(result);
                     } else {
                         // Check if remaining part matches any child
-                        if let Some(result) = child._find_segments(&[remaining], 0, method, params) {
+                        if let Some(result) = child._find_segments(&[remaining], 0, method, params)
+                        {
                             return Some(result);
                         }
                     }
                 }
             }
         }
-
+        // Check parameter node
         // Check parameter node
         if let Some(param_node) = self.children.get(&':') {
             if let Some(param_name) = &param_node.param_name {
-                params.insert(param_name.clone(), segment.to_string());
-                if let Some(result) = param_node._find_segments(segments, index + 1, method, params) {
+                if let Some(result) = param_node._find_segments(segments, index + 1, method, params)
+                {
                     return Some(result);
                 }
                 params.remove(param_name);

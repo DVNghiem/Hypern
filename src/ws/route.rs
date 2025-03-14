@@ -31,11 +31,6 @@ impl WebsocketRoute {
             self.path, self.handler))
     }
 
-    // Create a copy of the route
-    pub fn clone_route(&self) -> WebsocketRoute {
-        self.clone()
-    }
-
     // Update the route path
     pub fn update_path(&mut self, new_path: &str) {
         self.path = new_path.to_string();
@@ -54,28 +49,6 @@ impl WebsocketRoute {
             path = format!("/{}", path);
         }
         path
-    }
-
-    // Compare routes for equality based only on path and method
-    fn __eq__(&self, other: &PyAny) -> PyResult<bool> {
-        // Try to extract other as Route
-        if let Ok(other_route) = other.extract::<PyRef<WebsocketRoute>>() {
-            // Compare only path and method, not the function
-            Ok(self.path == other_route.path && 
-               self.path.to_uppercase() == other_route.path.to_uppercase())
-        } else {
-            Ok(false)
-        }
-    }
-
-    // Generate hash for the route based only on path and method
-    fn __hash__(&self) -> PyResult<isize> {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        
-        let mut hasher = DefaultHasher::new();
-        self.path.hash(&mut hasher);
-        Ok(hasher.finish() as isize)
     }
 
     // Check if routes have the same handler function

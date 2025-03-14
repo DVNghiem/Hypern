@@ -7,15 +7,10 @@ use pyo3::prelude::*;
 
 /// Contains the thread safe hashmaps of different routes
 #[pyclass]
-#[derive(Debug, Default, FromPyObject)]
+#[derive(Debug, Default)]
 pub struct Router {
     #[pyo3(get, set)]
     path: String,
-
-    #[pyo3(get, set)]
-    routes: Vec<Route>,
-
-    #[pyo3(get, set)]
     radix_tree: RadixNode,
 }
 
@@ -25,7 +20,6 @@ impl Router {
     fn new(path: &str) -> Self {
         Self {
             path: path.to_string(),
-            routes: Vec::new(),
             radix_tree: RadixNode::new(),
         }
     }
@@ -40,10 +34,10 @@ impl Router {
         let full_path = self.get_full_path(&route.path);
 
         // Add to radix tree
-        self.radix_tree.insert(&full_path, route.clone());
+        self.radix_tree.insert(&full_path, route);
         
         // Keep the routes vector for backwards compatibility and iteration
-        self.routes.push(route);
+        // self.routes.push(route);
         
         Ok(())
     }
@@ -56,41 +50,6 @@ impl Router {
         Ok(())
     }
 
-    /// Remove a route by path and method
-    pub fn remove_route(&mut self, path: &str, method: &str) -> PyResult<bool> {
-        if let Some(index) = self
-            .routes
-            .iter()
-            .position(|r| r.path == path && r.method.to_uppercase() == method.to_uppercase())
-        {
-            self.routes.remove(index);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    /// Get route by path and method
-    #[pyo3(name = "get_route")]
-    pub fn get_route_py(&self, path: &str, method: &str) -> PyResult<Option<Route>> {
-        Ok(self
-            .routes
-            .iter()
-            .find(|r| r.matches(path, method))
-            .cloned())
-    }
-
-    /// Get all routes for a specific path
-    #[pyo3(name = "get_routes_by_path")]
-    pub fn get_routes_by_path_py(&self, path: &str) -> Vec<Route> {
-        self.routes
-            .iter()
-            .filter(|r| r.path == path)
-            .cloned()
-            .collect()
-    }
-
-   
     pub fn get_full_path(&self, route_path: &str) -> String {
         let base = self.path.trim_end_matches('/');
         let route = route_path.trim_start_matches('/');
@@ -102,42 +61,14 @@ impl Router {
             format!("{}/{}", base, route)
         }
     }
-
-    /// Get string representation of router
-    fn __str__(&self) -> PyResult<String> {
-        Ok(format!(
-            "Router(base_path='{}', routes={})",
-            self.path,
-            self.routes.len()
-        ))
-    }
-
-    /// Get detailed representation of router
-    fn __repr__(&self) -> PyResult<String> {
-        let routes_str: Vec<String> = self
-            .routes
-            .iter()
-            .map(|r| format!("\n  {} {}", r.method, r.path))
-            .collect();
-        Ok(format!(
-            "Router(base_path='{}', routes:[{}]\n])",
-            self.path,
-            routes_str.join("")
-        ))
-    }
-
-    // Find most specific matching route for a path
-    pub fn find_matching_route(&self, path: &str, method: &str) -> Option<(Route, HashMap<String, String>)> {
-        if let Some((route, params)) = self.radix_tree.find(path, method) {
-            return Some((route.clone(), params));
-        }
-        None
-    }
-    
 }
 
 impl Router {
-    pub fn iter(&self) -> std::slice::Iter<Route> {
-        self.routes.iter()
+    // Find most specific matching route for a path
+    pub fn find_matching_route(&mut self, path: &str, method: &str) -> Option<(&Route, HashMap<String, String>)> {
+        if let Some((route, params)) = self.radix_tree.find(path, method) {
+            return Some((route, params));
+        }
+        None
     }
 }

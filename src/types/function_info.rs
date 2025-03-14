@@ -9,6 +9,7 @@ pub struct FunctionInfo {
     pub is_async: bool,
 }
 
+
 #[pymethods]
 impl FunctionInfo {
     #[new]

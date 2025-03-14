@@ -2,13 +2,13 @@ use pyo3::prelude::*;
 use crate::types::function_info::FunctionInfo;
 
 #[pyclass]
-#[derive(Debug, Clone)]
+#[derive(Debug, FromPyObject)]
 pub struct Route {
     #[pyo3(get, set)]
     pub path: String,
 
     #[pyo3(get, set)]
-    pub function: FunctionInfo,
+    pub function: Py<FunctionInfo>,
 
     #[pyo3(get, set)]
     pub method: String,
@@ -21,7 +21,7 @@ pub struct Route {
 impl Route {
     #[new]
     #[pyo3(signature = (path, function, method, doc = None))]
-    pub fn new(path: &str, function: FunctionInfo, method: String, doc: Option<String>) -> Self {
+    pub fn new(path: &str, function: Py<FunctionInfo>, method: String, doc: Option<String>) -> Self {
         Self {
             path: path.to_string(),
             function,

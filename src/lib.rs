@@ -4,7 +4,7 @@ mod instants;
 // mod openapi;
 // mod background;
 // mod scheduler;
-mod server;
+// mod server;
 mod router;
 mod types;
 mod ws;
