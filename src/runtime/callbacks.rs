@@ -1,9 +1,9 @@
 
-use pyo3::{exceptions::PyStopIteration, prelude::*, types::PyDict, IntoPyObjectExt};
+use pyo3::{exceptions::PyStopIteration, prelude::*};
 use std::sync::{atomic, Arc, OnceLock, RwLock};
 use tokio::sync::Notify;
 
-use super::asyncio::copy_context;
+use super::conversion::FutureResultToPy;
 
 #[repr(u8)]
 enum PyFutureAwaitableState {
@@ -12,6 +12,7 @@ enum PyFutureAwaitableState {
     Cancelled = 2,
 }
 
+#[pyclass(frozen, module = "granian._granian")]
 pub(crate) struct PyFutureAwaitable {
     state: atomic::AtomicU8,
     result: OnceLock<PyResult<PyObject>>,
@@ -38,7 +39,7 @@ impl PyFutureAwaitable {
         Ok((Py::new(py, self)?, cancel_tx))
     }
 
-    pub fn set_result(pyself: Py<Self>, py: Python, result: PyAny) {
+    pub(crate) fn set_result(pyself: Py<Self>, py: Python, result: FutureResultToPy) {
         let rself = pyself.get();
 
         _ = rself.result.set(result.into_pyobject(py).map(Bound::unbind));
@@ -211,6 +212,7 @@ impl PyFutureAwaitable {
     }
 }
 
+
 #[pyclass(frozen)]
 pub(crate) struct PyFutureDoneCallback {
     pub cancel_tx: Arc<Notify>,
@@ -236,5 +238,66 @@ pub(crate) struct PyFutureResultSetter;
 impl PyFutureResultSetter {
     pub fn __call__(&self, target: Bound<PyAny>, value: Bound<PyAny>) {
         let _ = target.call1((value,));
+    }
+}
+
+
+#[pyclass(frozen, freelist = 128)]
+pub(crate) struct PyEmptyAwaitable;
+
+#[pymethods]
+impl PyEmptyAwaitable {
+    fn __await__(pyself: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        pyself
+    }
+
+    fn __iter__(pyself: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        pyself
+    }
+
+    fn __next__(&self) -> Option<()> {
+        None
+    }
+}
+
+
+#[pyclass(frozen)]
+pub(crate) struct PyIterAwaitable {
+    result: OnceLock<PyResult<PyObject>>,
+}
+
+impl PyIterAwaitable {
+    pub(crate) fn new() -> Self {
+        Self {
+            result: OnceLock::new(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn set_result(pyself: Py<Self>, py: Python, result: FutureResultToPy) {
+        _ = pyself.get().result.set(result.into_pyobject(py).map(Bound::unbind));
+        pyself.drop_ref(py);
+    }
+}
+
+#[pymethods]
+impl PyIterAwaitable {
+    fn __await__(pyself: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        pyself
+    }
+
+    fn __iter__(pyself: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        pyself
+    }
+
+    fn __next__(&self, py: Python) -> PyResult<Option<PyObject>> {
+        if let Some(res) = self.result.get() {
+            return res
+                .as_ref()
+                .map_err(|err| err.clone_ref(py))
+                .map(|v| Err(PyStopIteration::new_err(v.clone_ref(py))))?;
+        }
+
+        Ok(Some(py.None()))
     }
 }

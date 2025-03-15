@@ -197,8 +197,9 @@ async fn handle_socket(python_handler: PyObject, ws: WebSocketStream<TokioIo<Upg
                         let session = WebSocketSession::from_sender(tx_send.clone());
 
                         let inspect = py.import("inspect")?;
+                        let python_handler_clone = python_handler.clone_ref(py);
                         let is_coroutine = inspect
-                            .call_method1("iscoroutinefunction", (python_handler,))?
+                            .call_method1("iscoroutinefunction", (python_handler_clone,))?
                             .is_truthy()?;
 
                         let kwargs = PyDict::new(py);
@@ -208,13 +209,13 @@ async fn handle_socket(python_handler: PyObject, ws: WebSocketStream<TokioIo<Upg
 
                         if is_coroutine {
                             let asyncio = py.import("asyncio")?;
-                            let coro = python_handler.call(py, args.into(), Some(&kwargs.into()))?;
+                            let coro = python_handler.call(py, args.unwrap(), Some(&kwargs))?;
                             let loop_obj = asyncio.call_method0("new_event_loop")?;
                             let result = loop_obj.call_method1("run_until_complete", (coro,))?;
                             loop_obj.call_method0("close")?;
                             Ok(result.into())
                         } else {
-                            Ok(python_handler.call(py, args.into(), Some(&kwargs.into()))?)
+                            Ok(python_handler.call(py, args.unwrap(), Some(&kwargs.into()))?)
                         }
                     });
                 }

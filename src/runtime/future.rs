@@ -4,7 +4,7 @@ use pyo3::IntoPyObjectExt;
 use pyo3::prelude::*;
 use std::{
     future::Future,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, time::Duration,
 };
 use tokio::{
     runtime::Builder as RuntimeBuilder,
@@ -13,6 +13,7 @@ use tokio::{
 
 #[cfg(unix)]
 use super::callbacks::PyFutureAwaitable;
+
 #[cfg(windows)]
 use super::callbacks::{PyFutureDoneCallback, PyFutureResultSetter};
 
