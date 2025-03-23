@@ -42,7 +42,7 @@ impl PyFutureAwaitable {
     pub(crate) fn set_result(pyself: Py<Self>, py: Python, result: FutureResultToPy) {
         let rself = pyself.get();
 
-        _ = rself.result.set(result.into_pyobject(py).map(Bound::unbind));
+        _ = rself.result.set(Ok(result.to_object(py)));
         if rself
             .state
             .compare_exchange(
@@ -53,7 +53,7 @@ impl PyFutureAwaitable {
             )
             .is_err()
         {
-            pyself.drop_ref(py);
+            drop(pyself);
             return;
         }
 
@@ -64,11 +64,11 @@ impl PyFutureAwaitable {
                     py,
                     pyo3::intern!(py, "call_soon_threadsafe"),
                     (cb, pyself.clone_ref(py)),
-                    Some(ctx.bind(py)),
+                    Some(ctx.as_ref(py)),
                 );
             }
         }
-        pyself.drop_ref(py);
+        drop(pyself);
     }
 }
 
@@ -119,7 +119,7 @@ impl PyFutureAwaitable {
         let state = pyself.state.load(atomic::Ordering::Acquire);
         if state == PyFutureAwaitableState::Pending as u8 {
             let mut ack = pyself.ack.write().unwrap();
-            *ack = Some((cb, kwctx.unbind()));
+            *ack = Some((cb, kwctx.to_object(py).extract(py)?));
         } else {
             let event_loop = pyself.event_loop.clone_ref(py);
             event_loop.call_method(py, pyo3::intern!(py, "call_soon"), (cb, pyself), Some(&kwctx))?;
@@ -161,7 +161,7 @@ impl PyFutureAwaitable {
             let ctx = ctx.clone_ref(py);
             drop(ack);
 
-            let _ = event_loop.call_method(py, pyo3::intern!(py, "call_soon"), (cb, pyself), Some(ctx.bind(py)));
+            let _ = event_loop.call_method(py, pyo3::intern!(py, "call_soon"), (cb, pyself), Some(ctx.as_ref(py)));
         }
 
         true
@@ -220,10 +220,10 @@ pub(crate) struct PyFutureDoneCallback {
 
 #[pymethods]
 impl PyFutureDoneCallback {
-    pub fn __call__(&self, fut: Bound<PyAny>) -> PyResult<()> {
-        let py = fut.py();
+    pub fn __call__(&self, fut: Py<PyAny>) -> PyResult<()> {
+        let py = unsafe { Python::assume_gil_acquired() };
 
-        if { fut.getattr(pyo3::intern!(py, "cancelled"))?.call0()?.is_truthy() }.unwrap_or(false) {
+        if { fut.getattr(py, pyo3::intern!(py, "cancelled"))?.call0(py)?.is_true(py) }.unwrap_or(false) {
             self.cancel_tx.notify_one();
         }
 
@@ -236,8 +236,9 @@ pub(crate) struct PyFutureResultSetter;
 
 #[pymethods]
 impl PyFutureResultSetter {
-    pub fn __call__(&self, target: Bound<PyAny>, value: Bound<PyAny>) {
-        let _ = target.call1((value,));
+    pub fn __call__(&self, target: Py<PyAny>, value: Py<PyAny>) {
+        let py = unsafe { Python::assume_gil_acquired() };
+        let _ = target.call1(py, (value,));
     }
 }
 
@@ -275,8 +276,8 @@ impl PyIterAwaitable {
 
     #[inline]
     pub(crate) fn set_result(pyself: Py<Self>, py: Python, result: FutureResultToPy) {
-        _ = pyself.get().result.set(result.into_pyobject(py).map(Bound::unbind));
-        pyself.drop_ref(py);
+        _ = pyself.get().result.set(Ok(result.to_object(py)));
+        drop(pyself);
     }
 }
 

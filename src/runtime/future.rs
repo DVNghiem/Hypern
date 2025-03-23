@@ -185,7 +185,7 @@ pub(crate) fn init_runtime_st(
 //  It consumes more cpu-cycles than `future_into_py_futlike`,
 //  but for "quick" operations it's something like 12% faster.
 #[allow(unused_must_use)]
-pub(crate) fn future_into_py_iter<R, F>(rt: R, py: Python, fut: F) -> PyResult<Bound<PyAny>>
+pub(crate) fn future_into_py_iter<R, F>(rt: R, py: Python, fut: F) -> PyResult<PyObject>
 where
     R: Runtime + ContextExt + Clone,
     F: Future<Output = FutureResultToPy> + Send + 'static,
@@ -199,7 +199,7 @@ where
         rth.spawn_blocking(move |py| PyIterAwaitable::set_result(aw, py, result));
     });
 
-    Ok(py_fut.into_any().into_bound(py))
+    Ok(py_fut.into_py(py))
 }
 
 // NOTE:
@@ -209,7 +209,7 @@ where
 //  and for "long" operations it's something like 6% faster than `future_into_py_iter`.
 #[allow(unused_must_use)]
 #[cfg(unix)]
-pub(crate) fn future_into_py_futlike<R, F>(rt: R, py: Python, fut: F) -> PyResult<Bound<PyAny>>
+pub(crate) fn future_into_py_futlike<R, F>(rt: R, py: Python, fut: F) ->  PyResult<PyObject>
 where
     R: Runtime + ContextExt + Clone,
     F: Future<Output = FutureResultToPy> + Send + 'static,
@@ -222,16 +222,16 @@ where
     rt.spawn(async move {
         tokio::select! {
             result = fut => rth.spawn_blocking(move |py| PyFutureAwaitable::set_result(aw, py, result)),
-            () = cancel_tx.notified() => rth.spawn_blocking(move |py| aw.drop_ref(py)),
+            () = cancel_tx.notified() => rth.spawn_blocking(move |_py| drop(aw)),
         }
     });
 
-    Ok(py_fut.into_any().into_bound(py))
+    Ok(py_fut.into_py(py))
 }
 
 #[allow(unused_must_use)]
 #[cfg(windows)]
-pub(crate) fn future_into_py_futlike<R, F>(rt: R, py: Python, fut: F) -> PyResult<Bound<PyAny>>
+pub(crate) fn future_into_py_futlike<R, F>(rt: R, py: Python, fut: F) -> PyResult<PyAny>
 where
     R: Runtime + ContextExt + Clone,
     F: Future<Output = FutureResultToPy> + Send + 'static,
@@ -279,14 +279,14 @@ where
 
 #[allow(clippy::unnecessary_wraps)]
 #[inline(always)]
-pub(crate) fn empty_future_into_py(py: Python) -> PyResult<Bound<PyAny>> {
-    Ok(PyEmptyAwaitable.into_pyobject(py)?.into_any())
+pub(crate) fn empty_future_into_py(py: Python) -> PyResult<PyObject> {
+    Ok(PyEmptyAwaitable.into_py(py))
 }
 
 #[allow(unused_must_use)]
 pub(crate) fn run_until_complete<F>(
     rt: RuntimeWrapper,
-    event_loop: Bound<PyAny>,
+    event_loop: Py<PyAny>,
     fut: F,
 ) -> PyResult<()>
 where
@@ -295,9 +295,13 @@ where
     let result_tx = Arc::new(Mutex::new(None));
     let result_rx = Arc::clone(&result_tx);
 
-    let py_fut = event_loop.call_method0("create_future")?;
-    let loop_tx = event_loop.clone().unbind();
-    let future_tx = py_fut.clone().unbind();
+    let py = unsafe {
+        Python::assume_gil_acquired()
+    };
+
+    let py_fut = event_loop.call_method0(py, "create_future")?;
+    let loop_tx = event_loop.clone();
+    let future_tx = py_fut.clone();
 
     rt.inner.spawn(async move {
         let _ = fut.await;
@@ -310,12 +314,14 @@ where
         Python::with_gil(move |py| {
             let res_method = future_tx.getattr(py, "set_result").unwrap();
             let _ = loop_tx.call_method(py, "call_soon_threadsafe", (res_method, py.None()), None);
-            future_tx.drop_ref(py);
-            loop_tx.drop_ref(py);
+            drop(future_tx);
+            drop(loop_tx);
+            // future_tx.drop_ref(py);
+            // loop_tx.drop_ref(py);
         });
     });
 
-    event_loop.call_method1("run_until_complete", (py_fut,))?;
+    event_loop.call_method1(py, "run_until_complete", (py_fut,))?;
 
     result_rx.lock().unwrap().take().unwrap();
     Ok(())

@@ -1,25 +1,19 @@
-use pyo3::{prelude::*, IntoPyObjectExt};
+use pyo3::prelude::*;
 
 pub(crate) struct BytesToPy(pub hyper::body::Bytes);
 pub(crate) struct Utf8BytesToPy(pub tokio_tungstenite::tungstenite::Utf8Bytes);
 
-impl<'p> IntoPyObject<'p> for BytesToPy {
-    type Target = PyAny;
-    type Output = Bound<'p, Self::Target>;
-    type Error = PyErr;
+impl<'p> ToPyObject for BytesToPy {
 
-    fn into_pyobject(self, py: Python<'p>) -> Result<Self::Output, Self::Error> {
-        self.0.as_ref().into_bound_py_any(py)
+    fn to_object(&self, py: Python<'_>) -> PyObject {
+        self.0.as_ref().into_py(py)
     }
 }
 
-impl<'p> IntoPyObject<'p> for Utf8BytesToPy {
-    type Target = PyAny;
-    type Output = Bound<'p, Self::Target>;
-    type Error = PyErr;
+impl<'p> ToPyObject for Utf8BytesToPy {
 
-    fn into_pyobject(self, py: Python<'p>) -> Result<Self::Output, Self::Error> {
-        self.0.as_str().into_bound_py_any(py)
+    fn to_object(&self, py: Python<'_>) -> PyObject {
+        self.0.as_str().into_py(py)
     }
 }
 
@@ -29,16 +23,18 @@ pub(crate) enum FutureResultToPy {
     Bytes(hyper::body::Bytes),
 }
 
-impl<'p> IntoPyObject<'p> for FutureResultToPy {
-    type Target = PyAny;
-    type Output = Bound<'p, Self::Target>;
-    type Error = PyErr;
+impl<'p> ToPyObject for FutureResultToPy {
 
-    fn into_pyobject(self, py: Python<'p>) -> Result<Self::Output, Self::Error> {
+    fn to_object(&self, py: Python<'_>) -> PyObject {
         match self {
-            Self::None => Ok(py.None().into_bound(py)),
-            Self::Err(res) => Err(res.err().unwrap()),
-            Self::Bytes(inner) => inner.into_pyobject(py),
+            Self::None => py.None(),
+            Self::Err(res) => {
+                match res {
+                    Ok(_) => py.None(),
+                    Err(err) => err.to_object(py)
+                }
+            },
+            Self::Bytes(inner) => inner.into_py(py),
         }
     }
 }
