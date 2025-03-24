@@ -4,6 +4,23 @@ use std::convert::Into;
 
 static CONTEXTVARS: GILOnceCell<PyObject> = GILOnceCell::new();
 static CONTEXT: GILOnceCell<PyObject> = GILOnceCell::new();
+static ENSURE_FUTURE: GILOnceCell<PyObject> = GILOnceCell::new();
+static ASYNCIO: GILOnceCell<PyObject> = GILOnceCell::new();
+
+pub fn asyncio(py: Python) -> PyResult<Py<PyAny>> {
+    ASYNCIO
+        .get_or_try_init(py, || Ok(py.import("asyncio")?.into()))
+        .map(|asyncio| asyncio.into_py(py))
+}
+
+pub fn ensure_future<'p>(py: Python<'p>, awaitable: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    ENSURE_FUTURE
+        .get_or_try_init(py, || -> PyResult<PyObject> {
+            Ok(asyncio(py)?.getattr(py, "ensure_future")?.into())
+        })?
+        .into_py(py)
+        .call1(py, (awaitable,))
+}
 
 fn contextvars(py: Python) -> PyResult<&PyAny> {
     Ok(CONTEXTVARS

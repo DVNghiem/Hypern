@@ -5,32 +5,22 @@ use crate::{
             set_sql_connect,
         },
         sql::{config::DatabaseConfig, connection::DatabaseConnection},
-    },
-    di::DependencyInjection,
-    executor::{execute_http_function, execute_middleware_function, execute_startup_handler},
-    instants::TokioExecutor,
-    middlewares::base::{Middleware, MiddlewareConfig}, 
-    router::router::Router,
-    types::{
+    }, di::DependencyInjection, executor::{execute_http_function, execute_middleware_function, execute_startup_handler}, instants::TokioExecutor, middlewares::base::{Middleware, MiddlewareConfig}, router::router::Router, runtime::future::{future_into_py_iter, RuntimeRef}, types::{
         body::{full, BoxBody},
         function_info::FunctionInfo,
         middleware::MiddlewareReturn,
         request::Request,
-    },
-    ws::{router::WebsocketRouter, socket::SocketHeld, websocket::websocket_handler},
+    }, ws::{router::WebsocketRouter, socket::SocketHeld, websocket::websocket_handler}
 };
 use dashmap::DashMap;
 use futures::future::join_all;
 use hyper::{
-    body::Incoming,
-    server::conn::{http1, http2},
-    service::service_fn,
-    Request as HyperRequest, StatusCode,
+    body::Incoming, rt, server::conn::{http1, http2}, service::service_fn, Request as HyperRequest, StatusCode
 };
 use hyper::{header::HeaderValue, Response as HyperResponse};
 use hyper_util::rt::TokioIo;
 use pyo3::{prelude::*, types::PyDict};
-use pyo3_asyncio::TaskLocals;
+// use pyo3_asyncio::TaskLocals;
 use std::{
     collections::HashMap,
     sync::{
@@ -54,7 +44,7 @@ static NOTFOUND: &[u8] = b"Not Found";
 struct SharedContext {
     router: Arc<RwLock<Router>>,
     ws_router: Arc<WebsocketRouter>,
-    task_locals: Arc<TaskLocals>,
+    // task_locals: Arc<TaskLocals>,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
     dependencies: Arc<DependencyInjection>,
@@ -65,7 +55,7 @@ impl SharedContext {
     fn new(
         router: Arc<RwLock<Router>>,
         ws_router: Arc<WebsocketRouter>,
-        task_locals: Arc<TaskLocals>,
+        // task_locals: Arc<TaskLocals>,
         middlewares: Arc<Middleware>,
         extra_headers: Arc<DashMap<String, String>>,
         dependencies: Arc<DependencyInjection>,
@@ -74,7 +64,7 @@ impl SharedContext {
         Self {
             router,
             ws_router,
-            task_locals,
+            // task_locals,
             middlewares,
             extra_headers,
             dependencies,
@@ -86,7 +76,7 @@ impl SharedContext {
         Self {
             router: Arc::clone(&self.router),
             ws_router: Arc::clone(&self.ws_router),
-            task_locals: Arc::clone(&self.task_locals),
+            // task_locals: Arc::clone(&self.task_locals),
             middlewares: Arc::clone(&self.middlewares),
             extra_headers: Arc::clone(&self.extra_headers),
             dependencies: Arc::clone(&self.dependencies),
@@ -212,15 +202,15 @@ impl Server {
         let startup_handler = self.startup_handler.clone();
         let shutdown_handler = self.shutdown_handler.clone();
 
-        let task_locals = Arc::new(pyo3_asyncio::TaskLocals::new(event_loop).copy_context(py)?);
-        let task_local_copy = Arc::clone(&task_locals);
+        // let task_locals = Arc::new(pyo3_asyncio::TaskLocals::new(event_loop).copy_context(py)?);
+        // let task_local_copy = Arc::clone(&task_locals);
 
         let database_config: Option<DatabaseConfig> = self.database_config.clone();
 
         let shared_context = SharedContext::new(
             self.router.clone(),
             self.websocket_router.clone(),
-            task_locals.clone(),
+            // task_locals.clone(),
             self.middlewares.clone(),
             self.extra_headers.clone(),
             self.dependencies.clone(),
@@ -245,7 +235,7 @@ impl Server {
 
             rt.block_on(async move {
                 // excute startup handler
-                let _ = execute_startup_handler(startup_handler, &Arc::clone(&task_locals)).await;
+                // let _ = execute_startup_handler(startup_handler, &Arc::clone(&task_locals)).await;
 
                 let listener = tokio::net::TcpListener::from_std(raw_socket.into()).unwrap();
 
@@ -302,25 +292,25 @@ impl Server {
         });
 
         let event_loop = (*event_loop).call_method0("run_forever");
-        if event_loop.is_err() {
-            if let Some(function) = shutdown_handler {
-                if function.is_async {
-                    pyo3_asyncio::tokio::run_until_complete(
-                        task_local_copy.event_loop(py),
-                        pyo3_asyncio::into_future_with_locals(
-                            &task_local_copy.clone(),
-                            function.handler.as_ref(py).call0()?,
-                        )
-                        .unwrap(),
-                    )
-                    .unwrap();
-                } else {
-                    Python::with_gil(|py| function.handler.call0(py))?;
-                }
-            }
+        // if event_loop.is_err() {
+        //     if let Some(function) = shutdown_handler {
+        //         if function.is_async {
+        //             pyo3_asyncio::tokio::run_until_complete(
+        //                 task_local_copy.event_loop(py),
+        //                 pyo3_asyncio::into_future_with_locals(
+        //                     &task_local_copy.clone(),
+        //                     function.handler.as_ref(py).call0()?,
+        //                 )
+        //                 .unwrap(),
+        //             )
+        //             .unwrap();
+        //         } else {
+        //             Python::with_gil(|py| function.handler.call0(py))?;
+        //         }
+        //     }
 
-            exit(0);
-        }
+        //     exit(0);
+        // }
         Ok(())
     }
 }
@@ -353,7 +343,7 @@ async fn http_service(
             let response = mapping_method(
                 request,
                 function,
-                shared_context.task_locals,
+                // shared_context.task_locals,
                 shared_context.middlewares,
                 shared_context.extra_headers,
                 shared_context.dependencies,
@@ -427,6 +417,8 @@ async fn execute_request(
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
     dependencies: Arc<DependencyInjection>,
+    rt: RuntimeRef,
+    py: Python<'_>,
 ) -> HyperResponse<BoxBody> {
 
     let response_builder = HyperResponse::builder();
@@ -515,14 +507,18 @@ async fn execute_request(
 async fn mapping_method(
     req: Request,
     function: FunctionInfo,
-    task_locals: Arc<pyo3_asyncio::TaskLocals>,
+    // task_locals: Arc<pyo3_asyncio::TaskLocals>,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
     dependencies: Arc<DependencyInjection>,
+    rt: RuntimeRef,
+    py: Python<'_>,
 ) -> HyperResponse<BoxBody> {
-    pyo3_asyncio::tokio::scope(
-        task_locals.as_ref().to_owned(),
-        execute_request(req, function, middlewares, extra_headers, dependencies),
-    )
-    .await
+    // pyo3_asyncio::tokio::scope(
+    //     task_locals.as_ref().to_owned(),
+    //     execute_request(req, function, middlewares, extra_headers, dependencies),
+    // )
+    // .await
+    execute_request(req, function, middlewares, extra_headers, dependencies).await
+
 }

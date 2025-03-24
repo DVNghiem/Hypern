@@ -1,11 +1,13 @@
 #[cfg(windows)]
 use pyo3::IntoPyObjectExt;
 
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyDict};
 use std::{
     future::Future,
-    sync::{Arc, Mutex}, time::Duration,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
+use tokio::sync::oneshot;
 use tokio::{
     runtime::Builder as RuntimeBuilder,
     task::{JoinHandle, LocalSet},
@@ -17,10 +19,13 @@ use super::callbacks::PyFutureAwaitable;
 #[cfg(windows)]
 use super::callbacks::{PyFutureDoneCallback, PyFutureResultSetter};
 
-use super::blocking::BlockingRunner;
 use super::callbacks::PyEmptyAwaitable;
 use super::callbacks::PyIterAwaitable;
 use super::conversion::FutureResultToPy;
+use super::{
+    asyncio::{asyncio, copy_context, ensure_future},
+    blocking::BlockingRunner,
+};
 
 pub trait JoinError {
     #[allow(dead_code)]
@@ -209,7 +214,7 @@ where
 //  and for "long" operations it's something like 6% faster than `future_into_py_iter`.
 #[allow(unused_must_use)]
 #[cfg(unix)]
-pub(crate) fn future_into_py_futlike<R, F>(rt: R, py: Python, fut: F) ->  PyResult<PyObject>
+pub(crate) fn future_into_py_futlike<R, F>(rt: R, py: Python, fut: F) -> PyResult<PyObject>
 where
     R: Runtime + ContextExt + Clone,
     F: Future<Output = FutureResultToPy> + Send + 'static,
@@ -295,9 +300,7 @@ where
     let result_tx = Arc::new(Mutex::new(None));
     let result_rx = Arc::clone(&result_tx);
 
-    let py = unsafe {
-        Python::assume_gil_acquired()
-    };
+    let py = unsafe { Python::assume_gil_acquired() };
 
     let py_fut = event_loop.call_method0(py, "create_future")?;
     let loop_tx = event_loop.clone();
@@ -332,4 +335,98 @@ where
     F: Future + 'static,
 {
     local.block_on(&rt.inner, fut);
+}
+
+#[pyclass]
+struct PyTaskCompleter {
+    tx: Option<oneshot::Sender<PyResult<PyObject>>>,
+}
+
+#[pymethods]
+impl PyTaskCompleter {
+    #[pyo3(signature = (task))]
+    pub fn __call__(&mut self, py: Python, task: Py<PyAny>) -> PyResult<()> {
+        let result = match task.call_method0(py, "result") {
+            Ok(val) => Ok(val.into()),
+            Err(e) => Err(e),
+        };
+
+        // unclear to me whether or not this should be a panic or silent error.
+        //
+        // calling PyTaskCompleter twice should not be possible, but I don't think it really hurts
+        // anything if it happens.
+        if let Some(tx) = self.tx.take() {
+            if tx.send(result).is_err() {
+                // cancellation is not an error
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[pyclass]
+struct PyEnsureFuture {
+    awaitable: PyObject,
+    tx: Option<oneshot::Sender<PyResult<PyObject>>>,
+}
+
+#[pymethods]
+impl PyEnsureFuture {
+    pub fn __call__(&mut self) -> PyResult<()> {
+        Python::with_gil(|py| {
+            let task = ensure_future(py, self.awaitable.clone_ref(py))?;
+            let on_complete = PyTaskCompleter { tx: self.tx.take() };
+            task.call_method1(py, "add_done_callback", (on_complete,))?;
+            Ok(())
+        })
+    }
+}
+
+pub fn into_future<R>(
+    rt: R,
+    awaitable: PyAny,
+) -> PyResult<impl Future<Output = PyResult<PyObject>> + Send>
+where
+    R: Runtime + ContextExt + Clone,
+{
+    let py = awaitable.py();
+    // Convert Python objects to owned values that can be sent between threads
+    let awaitable_py = awaitable.into_py(py);
+    let event_loop = rt.py_event_loop(py);
+    let (tx, rx) = oneshot::channel();
+
+    // Clone these values to avoid capturing references to Python objects
+    let event_loop_py = event_loop.clone_ref(py);
+
+    // Prepare any context needed before spawning the async task
+    let ctx = copy_context(py).into_py(py);
+
+    let rt_clone = rt.clone();
+    rt_clone.spawn_blocking(move |py| {
+        let args = (PyEnsureFuture {
+            awaitable: awaitable_py.clone_ref(py),
+            tx: Some(tx),
+        },);
+        let kwargs = PyDict::new(py);
+        kwargs.set_item("context", ctx.as_ref(py)).unwrap();
+        event_loop_py
+            .call_method(py, "call_soon_threadsafe", args, Some(&kwargs))
+            .unwrap();
+    });
+
+    Ok(async move {
+        match rx.await {
+            Ok(item) => item,
+            Err(_) => Python::with_gil(|py| {
+                Err(PyErr::from_value(
+                    asyncio(py)
+                        .unwrap()
+                        .call_method0(py, "CancelledError")
+                        .unwrap()
+                        .into_ref(py),
+                ))
+            }),
+        }
+    })
 }

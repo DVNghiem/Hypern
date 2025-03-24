@@ -12,7 +12,7 @@ enum PyFutureAwaitableState {
     Cancelled = 2,
 }
 
-#[pyclass(frozen, module = "granian._granian")]
+#[pyclass(frozen)]
 pub(crate) struct PyFutureAwaitable {
     state: atomic::AtomicU8,
     result: OnceLock<PyResult<PyObject>>,

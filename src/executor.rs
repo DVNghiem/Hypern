@@ -3,7 +3,7 @@ use std::sync::Arc;
 use pyo3::{prelude::*, types::PyDict};
 
 use crate::{
-    di::DependencyInjection, types::{
+    di::DependencyInjection, runtime::future::{future_into_py_futlike, RuntimeRef}, types::{
         function_info::FunctionInfo, middleware::MiddlewareReturn, request::Request,
         response::Response,
     }
@@ -52,15 +52,17 @@ pub async fn execute_http_function(
     request: &Request,
     function: &FunctionInfo,
     deps: Option<Arc<DependencyInjection>>,
+    rt: RuntimeRef,
 ) -> PyResult<Response> {
     if function.is_async {
-        let output = Python::with_gil(|py| {
+        let output = Python::with_gil(|py| -> PyResult<_> {
             let function_output = get_function_output(function, py, request, deps)?;
-            pyo3_asyncio::tokio::into_future(function_output)
+            
         })?
         .await?;
+        
 
-        return Python::with_gil(|py| -> PyResult<Response> { output.extract(py) });
+        // return Python::with_gil(|py| -> PyResult<Response> { output.extract(py) });
     };
 
     Python::with_gil(|py| -> PyResult<Response> {
@@ -100,22 +102,22 @@ where
     }
 }
 
-pub async fn execute_startup_handler(
-    event_handler: Option<Arc<FunctionInfo>>,
-    task_locals: &TaskLocals,
-) -> PyResult<()> {
-    if let Some(function) = event_handler {
-        if function.is_async {
-            Python::with_gil(|py| {
-                pyo3_asyncio::into_future_with_locals(
-                    task_locals,
-                    function.handler.as_ref(py).call0()?,
-                )
-            })?
-            .await?;
-        } else {
-            Python::with_gil(|py| function.handler.call0(py))?;
-        }
-    }
-    Ok(())
-}
+// pub async fn execute_startup_handler(
+//     event_handler: Option<Arc<FunctionInfo>>,
+//     task_locals: &TaskLocals,
+// ) -> PyResult<()> {
+//     if let Some(function) = event_handler {
+//         if function.is_async {
+//             Python::with_gil(|py| {
+//                 pyo3_asyncio::into_future_with_locals(
+//                     task_locals,
+//                     function.handler.as_ref(py).call0()?,
+//                 )
+//             })?
+//             .await?;
+//         } else {
+//             Python::with_gil(|py| function.handler.call0(py))?;
+//         }
+//     }
+//     Ok(())
+// }

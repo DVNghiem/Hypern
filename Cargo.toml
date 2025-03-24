@@ -39,6 +39,9 @@ tungstenite = "0.26.1"
 hyper-tungstenite = "0.17.0"
 tokio-tungstenite = "0.26.1"
 crossbeam-channel = "0.5.14"
+tokio-util = "0.7.14"
+anyhow = "1.0.97"
+tokio-stream = "0.1.17"
 
 [profile.release]
 codegen-units = 1
