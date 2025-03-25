@@ -4,4 +4,3 @@ pub mod callbacks;
 pub mod asyncio;
 pub mod blocking;
 pub mod conversion;
-pub mod io;

@@ -3,13 +3,13 @@ use std::sync::Arc;
 use pyo3::{prelude::*, types::PyDict};
 
 use crate::{
-    di::DependencyInjection, runtime::future::{future_into_py_futlike, RuntimeRef}, types::{
+    di::DependencyInjection,
+    runtime::future::{into_future, RuntimeRef},
+    types::{
         function_info::FunctionInfo, middleware::MiddlewareReturn, request::Request,
         response::Response,
-    }
+    },
 };
-use pyo3_asyncio::TaskLocals;
-
 
 #[inline]
 fn get_function_output<'a, T>(
@@ -22,12 +22,10 @@ where
     T: ToPyObject,
 {
     let handler = function.handler.as_ref(py);
-
     let kwargs = PyDict::new(py);
 
     // Add dependencies to kwargs if provided
     if let Some(dependency_injection) = deps {
-
         kwargs.set_item(
             "inject",
             dependency_injection
@@ -37,14 +35,8 @@ where
                 .to_owned(),
         )?;
     }
-
-    let result = handler.call(
-        (function_args.to_object(py),),
-        Some(kwargs),
-    );
-
+    let result = handler.call((function_args.to_object(py),), Some(kwargs));
     result
-
 }
 
 #[inline]
@@ -57,12 +49,10 @@ pub async fn execute_http_function(
     if function.is_async {
         let output = Python::with_gil(|py| -> PyResult<_> {
             let function_output = get_function_output(function, py, request, deps)?;
-            
+            into_future(rt, function_output)
         })?
         .await?;
-        
-
-        // return Python::with_gil(|py| -> PyResult<Response> { output.extract(py) });
+        return Python::with_gil(|py| -> PyResult<Response> { output.extract(py) });
     };
 
     Python::with_gil(|py| -> PyResult<Response> {
@@ -74,13 +64,14 @@ pub async fn execute_http_function(
 pub async fn execute_middleware_function<T>(
     input: &T,
     function: &FunctionInfo,
+    rt: RuntimeRef,
 ) -> PyResult<MiddlewareReturn>
 where
     T: for<'a> FromPyObject<'a> + ToPyObject,
 {
     if function.is_async {
         let output: Py<PyAny> = Python::with_gil(|py| {
-            pyo3_asyncio::tokio::into_future(get_function_output(function, py, input, None)?)
+            into_future(rt, get_function_output(function, py, input, None)?)
         })?
         .await?;
 

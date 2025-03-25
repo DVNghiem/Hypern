@@ -15,7 +15,7 @@ use crate::{
 use dashmap::DashMap;
 use futures::future::join_all;
 use hyper::{
-    body::Incoming, rt, server::conn::{http1, http2}, service::service_fn, Request as HyperRequest, StatusCode
+    body::Incoming, server::conn::{http1, http2}, service::service_fn, Request as HyperRequest, StatusCode
 };
 use hyper::{header::HeaderValue, Response as HyperResponse};
 use hyper_util::rt::TokioIo;
@@ -44,7 +44,6 @@ static NOTFOUND: &[u8] = b"Not Found";
 struct SharedContext {
     router: Arc<RwLock<Router>>,
     ws_router: Arc<WebsocketRouter>,
-    // task_locals: Arc<TaskLocals>,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
     dependencies: Arc<DependencyInjection>,
@@ -55,7 +54,6 @@ impl SharedContext {
     fn new(
         router: Arc<RwLock<Router>>,
         ws_router: Arc<WebsocketRouter>,
-        // task_locals: Arc<TaskLocals>,
         middlewares: Arc<Middleware>,
         extra_headers: Arc<DashMap<String, String>>,
         dependencies: Arc<DependencyInjection>,
@@ -64,7 +62,6 @@ impl SharedContext {
         Self {
             router,
             ws_router,
-            // task_locals,
             middlewares,
             extra_headers,
             dependencies,
@@ -76,7 +73,6 @@ impl SharedContext {
         Self {
             router: Arc::clone(&self.router),
             ws_router: Arc::clone(&self.ws_router),
-            // task_locals: Arc::clone(&self.task_locals),
             middlewares: Arc::clone(&self.middlewares),
             extra_headers: Arc::clone(&self.extra_headers),
             dependencies: Arc::clone(&self.dependencies),
@@ -202,15 +198,11 @@ impl Server {
         let startup_handler = self.startup_handler.clone();
         let shutdown_handler = self.shutdown_handler.clone();
 
-        // let task_locals = Arc::new(pyo3_asyncio::TaskLocals::new(event_loop).copy_context(py)?);
-        // let task_local_copy = Arc::clone(&task_locals);
-
         let database_config: Option<DatabaseConfig> = self.database_config.clone();
 
         let shared_context = SharedContext::new(
             self.router.clone(),
             self.websocket_router.clone(),
-            // task_locals.clone(),
             self.middlewares.clone(),
             self.extra_headers.clone(),
             self.dependencies.clone(),

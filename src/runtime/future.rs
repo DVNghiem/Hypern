@@ -385,7 +385,7 @@ impl PyEnsureFuture {
 
 pub fn into_future<R>(
     rt: R,
-    awaitable: PyAny,
+    awaitable: &PyAny,
 ) -> PyResult<impl Future<Output = PyResult<PyObject>> + Send>
 where
     R: Runtime + ContextExt + Clone,
