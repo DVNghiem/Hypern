@@ -21,6 +21,7 @@ pub(crate) enum FutureResultToPy {
     None,
     Err(PyResult<()>),
     Bytes(hyper::body::Bytes),
+    PyAny(Py<PyAny>),
 }
 
 impl<'p> ToPyObject for FutureResultToPy {
@@ -35,6 +36,7 @@ impl<'p> ToPyObject for FutureResultToPy {
                 }
             },
             Self::Bytes(inner) => inner.into_py(py),
+            Self::PyAny(inner) => inner.to_object(py)
         }
     }
 }

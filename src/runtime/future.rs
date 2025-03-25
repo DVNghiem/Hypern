@@ -1,6 +1,3 @@
-#[cfg(windows)]
-use pyo3::IntoPyObjectExt;
-
 use pyo3::{prelude::*, types::PyDict};
 use std::{
     future::Future,
@@ -16,10 +13,6 @@ use tokio::{
 #[cfg(unix)]
 use super::callbacks::PyFutureAwaitable;
 
-#[cfg(windows)]
-use super::callbacks::{PyFutureDoneCallback, PyFutureResultSetter};
-
-use super::callbacks::PyEmptyAwaitable;
 use super::callbacks::PyIterAwaitable;
 use super::conversion::FutureResultToPy;
 use super::{
@@ -148,7 +141,7 @@ fn default_runtime(blocking_threads: usize) -> tokio::runtime::Runtime {
         .unwrap()
 }
 
-pub(crate) fn init_runtime_mt(
+pub(crate) fn init_runtime(
     threads: usize,
     blocking_threads: usize,
     py_threads: usize,
@@ -170,19 +163,6 @@ pub(crate) fn init_runtime_mt(
     )
 }
 
-pub(crate) fn init_runtime_st(
-    blocking_threads: usize,
-    py_threads: usize,
-    py_threads_idle_timeout: u64,
-    py_loop: Arc<PyObject>,
-) -> RuntimeWrapper {
-    RuntimeWrapper::new(
-        blocking_threads,
-        py_threads,
-        py_threads_idle_timeout,
-        py_loop,
-    )
-}
 
 // NOTE:
 //  `future_into_py_iter` relies on what CPython refers as "bare yield".
@@ -232,60 +212,6 @@ where
     });
 
     Ok(py_fut.into_py(py))
-}
-
-#[allow(unused_must_use)]
-#[cfg(windows)]
-pub(crate) fn future_into_py_futlike<R, F>(rt: R, py: Python, fut: F) -> PyResult<PyAny>
-where
-    R: Runtime + ContextExt + Clone,
-    F: Future<Output = FutureResultToPy> + Send + 'static,
-{
-    let event_loop = rt.py_event_loop(py);
-    let event_loop_ref = event_loop.clone_ref(py);
-    let cancel_tx = Arc::new(tokio::sync::Notify::new());
-    let rth = rt.clone();
-
-    let py_fut = event_loop.call_method0(py, pyo3::intern!(py, "create_future"))?;
-    py_fut.call_method1(
-        py,
-        pyo3::intern!(py, "add_done_callback"),
-        (PyFutureDoneCallback {
-            cancel_tx: cancel_tx.clone(),
-        },),
-    )?;
-    let fut_ref = py_fut.clone_ref(py);
-
-    rt.spawn(async move {
-        tokio::select! {
-            result = fut => {
-                rth.spawn_blocking(move |py| {
-                    let pyres = result.into_pyobject(py).map(Bound::unbind);
-                    let (cb, value) = match pyres {
-                        Ok(val) => (fut_ref.getattr(py, pyo3::intern!(py, "set_result")).unwrap(), val),
-                        Err(err) => (fut_ref.getattr(py, pyo3::intern!(py, "set_exception")).unwrap(), err.into_py_any(py).unwrap())
-                    };
-                    let _ = event_loop_ref.call_method1(py, pyo3::intern!(py, "call_soon_threadsafe"), (PyFutureResultSetter, cb, value));
-                    fut_ref.drop_ref(py);
-                    event_loop_ref.drop_ref(py);
-                });
-            },
-            () = cancel_tx.notified() => {
-                rth.spawn_blocking(move |py| {
-                    fut_ref.drop_ref(py);
-                    event_loop_ref.drop_ref(py);
-                });
-            }
-        }
-    });
-
-    Ok(py_fut.into_bound(py))
-}
-
-#[allow(clippy::unnecessary_wraps)]
-#[inline(always)]
-pub(crate) fn empty_future_into_py(py: Python) -> PyResult<PyObject> {
-    Ok(PyEmptyAwaitable.into_py(py))
 }
 
 #[allow(unused_must_use)]

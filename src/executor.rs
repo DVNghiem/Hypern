@@ -4,7 +4,7 @@ use pyo3::{prelude::*, types::PyDict};
 
 use crate::{
     di::DependencyInjection,
-    runtime::future::{into_future, RuntimeRef},
+    runtime::future::{into_future, ContextExt, Runtime},
     types::{
         function_info::FunctionInfo, middleware::MiddlewareReturn, request::Request,
         response::Response,
@@ -40,12 +40,12 @@ where
 }
 
 #[inline]
-pub async fn execute_http_function(
+pub async fn execute_http_function<R>(
     request: &Request,
     function: &FunctionInfo,
     deps: Option<Arc<DependencyInjection>>,
-    rt: RuntimeRef,
-) -> PyResult<Response> {
+    rt: R,
+) -> PyResult<Response> where R: Runtime + ContextExt + Clone, {
     if function.is_async {
         let output = Python::with_gil(|py| -> PyResult<_> {
             let function_output = get_function_output(function, py, request, deps)?;
@@ -61,13 +61,14 @@ pub async fn execute_http_function(
 }
 
 #[inline]
-pub async fn execute_middleware_function<T>(
+pub async fn execute_middleware_function<T, R>(
     input: &T,
     function: &FunctionInfo,
-    rt: RuntimeRef,
+    rt: R,
 ) -> PyResult<MiddlewareReturn>
 where
     T: for<'a> FromPyObject<'a> + ToPyObject,
+    R: Runtime + ContextExt + Clone,
 {
     if function.is_async {
         let output: Py<PyAny> = Python::with_gil(|py| {
@@ -93,22 +94,42 @@ where
     }
 }
 
-// pub async fn execute_startup_handler(
-//     event_handler: Option<Arc<FunctionInfo>>,
-//     task_locals: &TaskLocals,
-// ) -> PyResult<()> {
-//     if let Some(function) = event_handler {
-//         if function.is_async {
-//             Python::with_gil(|py| {
-//                 pyo3_asyncio::into_future_with_locals(
-//                     task_locals,
-//                     function.handler.as_ref(py).call0()?,
-//                 )
-//             })?
-//             .await?;
-//         } else {
-//             Python::with_gil(|py| function.handler.call0(py))?;
-//         }
-//     }
-//     Ok(())
-// }
+pub async fn execute_startup_handler<R>(
+    event_handler: Option<Arc<FunctionInfo>>,
+    rt: R,
+) -> PyResult<()> where R: Runtime + ContextExt + Clone,{
+    if let Some(function) = event_handler {
+        if function.is_async {
+            Python::with_gil(|py| {
+                into_future(
+                    rt,
+                    function.handler.as_ref(py).call0()?,
+                )
+            })?
+            .await?;
+        } else {
+            Python::with_gil(|py| function.handler.call0(py))?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn execute_shutdown_handler<R>(
+    event_handler: Option<Arc<FunctionInfo>>,
+    rt: R,
+) -> PyResult<()> where R: Runtime + ContextExt + Clone, {
+    if let Some(function) = event_handler {
+        if function.is_async {
+            Python::with_gil(|py| {
+                into_future(
+                    rt,
+                    function.handler.as_ref(py).call0()?,
+                )
+            })?
+            .await?;
+        } else {
+            Python::with_gil(|py| function.handler.call0(py))?;
+        }
+    }
+    Ok(())
+}

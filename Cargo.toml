@@ -10,7 +10,7 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 pyo3 = { version = "=0.20.3", features = ["anyhow", "extension-module", "generate-import-lib"] }
-# pyo3-asyncio = { version="0.20.0" , features = ["tokio-runtime"] }
+pyo3-asyncio = { version="0.20.0" , features = ["tokio-runtime"] }
 redis = "*"
 yaml-rust = "0.4"
 regex = "1.10.6"
@@ -39,7 +39,7 @@ tungstenite = "0.26.1"
 hyper-tungstenite = "0.17.0"
 tokio-tungstenite = "0.26.1"
 crossbeam-channel = "0.5.14"
-tokio-util = "0.7.14"
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
 anyhow = "1.0.97"
 tokio-stream = "0.1.17"
 
