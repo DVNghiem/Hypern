@@ -10,6 +10,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::types::PyTuple;
 
+use tokio::runtime::Runtime;
 use tokio::time::timeout;
 
 use uuid;
@@ -33,9 +34,7 @@ pub struct BackgroundTask {
     cancelled: Arc<Mutex<bool>>,
 }
 
-#[pymethods]
 impl BackgroundTask {
-    #[new]
     fn new(
         function: PyObject,
         args: Option<Vec<PyObject>>,
@@ -79,7 +78,7 @@ impl BackgroundTask {
         *cancelled
     }
 
-    pub fn execute(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn execute(&self, py: Python<'_>, rt: &Runtime) -> PyResult<PyObject> {
         // Clone necessary data outside of async block
         let function = self.function.clone();
         let cancelled = self.cancelled.clone();
@@ -134,7 +133,7 @@ impl BackgroundTask {
 
         // Convert the future to a Python awaitable and wrap it with a timeout
         let fut = pyo3_asyncio::tokio::future_into_py(py, async move {
-            match timeout(Duration::from_secs(timeout_secs.unwrap()), async {
+            match tokio::time::timeout(Duration::from_secs(timeout_secs.unwrap()), async {
                 Ok(execute_future)
             })
             .await

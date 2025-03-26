@@ -10,7 +10,7 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 pyo3 = { version = "=0.20.3", features = ["anyhow", "extension-module", "generate-import-lib"] }
-pyo3-asyncio = { version="0.20.0" , features = ["tokio-runtime"] }
+# pyo3-asyncio = { version="0.20.0" , features = ["tokio-runtime"] }
 redis = "*"
 yaml-rust = "0.4"
 regex = "1.10.6"

@@ -1,18 +1,11 @@
 use crate::{
-    database::{
-        context::{
-            get_session_database, get_sql_connect, insert_sql_session, remove_sql_session,
-            set_sql_connect,
-        },
-        sql::{config::DatabaseConfig, connection::DatabaseConnection},
-    },
     di::DependencyInjection,
     executor::{execute_http_function, execute_middleware_function, execute_shutdown_handler, execute_startup_handler},
     instants::TokioExecutor,
     middlewares::base::{Middleware, MiddlewareConfig},
     router::router::Router,
     runtime::{conversion, future::{
-        block_on_local, future_into_py_futlike, future_into_py_iter, init_runtime, run_until_complete, RuntimeRef, RuntimeWrapper
+        block_on_local, future_into_py, init_runtime, RuntimeRef
     }},
     types::{
         body::{full, BoxBody},
@@ -35,13 +28,10 @@ use hyper_util::rt::TokioIo;
 use pyo3::{prelude::*, types::PyDict};
 // use pyo3_asyncio::TaskLocals;
 use std::{
-    collections::HashMap,
-    sync::{
+    collections::HashMap, sync::{
         atomic::Ordering::{Relaxed, SeqCst},
         RwLock,
-    },
-    thread,
-    time::{Duration, Instant},
+    }, thread, time::{Duration, Instant}
 };
 use std::{
     process::exit,
@@ -102,7 +92,6 @@ pub struct Server {
     shutdown_handler: Option<Arc<FunctionInfo>>,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
-    database_config: Option<DatabaseConfig>,
     dependencies: Arc<DependencyInjection>,
     http2: bool,
 }
@@ -118,7 +107,6 @@ impl Server {
             shutdown_handler: None,
             middlewares: Arc::new(Middleware::new()),
             extra_headers: Arc::new(DashMap::new()),
-            database_config: None,
             dependencies: Arc::new(DependencyInjection::default()),
             http2: false,
         }
@@ -165,10 +153,6 @@ impl Server {
 
     pub fn set_shutdown_handler(&mut self, handler: FunctionInfo) {
         self.shutdown_handler = Some(Arc::new(handler));
-    }
-
-    pub fn set_database_config(&mut self, config: DatabaseConfig) {
-        self.database_config = Some(config);
     }
 
     pub fn enable_http2(&mut self) {
@@ -226,26 +210,26 @@ impl Server {
             workers,
             max_blocking_threads,
             workers,
-            1000,
+            100,
             Arc::new(event_loop_clone.clone()),
         );
         let rt_ref = rt.handler();
         let rt_ref_shutdown = rt.handler();
 
+        raw_socket.set_nonblocking(true).unwrap();
+        
         thread::spawn(move || {
             let local = tokio::task::LocalSet::new();
             debug!(
                 "Server start with {} workers and {} max blockingthreads",
                 workers, max_blocking_threads
             );
-            debug!("Waiting for process to start...");
-
+            
             block_on_local(&rt, local, async move {
+                let listener = tokio::net::TcpListener::from_std(raw_socket.into()).unwrap();
                 let rt_ref = rt_ref.clone();
                 // excute startup handler
                 let _ = execute_startup_handler(startup_handler, rt_ref.clone()).await;
-
-                let listener = tokio::net::TcpListener::from_std(raw_socket.into()).unwrap();
 
                 loop {
                     let (stream, _) = listener.accept().await.unwrap();
@@ -299,8 +283,8 @@ impl Server {
 
         let event_loop = (*event_loop).call_method0("run_forever");
         if event_loop.is_err() {
-            future_into_py_futlike(rt_ref_shutdown.clone(), py, async move {
-                execute_shutdown_handler(shutdown_handler, rt_ref_shutdown).await;
+            let _ = future_into_py(rt_ref_shutdown.clone(), py, async move {
+                let _ = execute_shutdown_handler(shutdown_handler, rt_ref_shutdown).await;
                 // Convert the Result to FutureResultToPy
                 conversion::FutureResultToPy::None
             });
@@ -384,29 +368,6 @@ async fn websocket_service(
     return response;
 }
 
-async fn inject_database(request_id: Arc<String>) {
-    let database = get_sql_connect();
-    match database {
-        Some(database) => {
-            insert_sql_session(&request_id, database.transaction().await);
-        }
-        None => {}
-    }
-}
-
-fn free_database(request_id: String) {
-    tokio::task::spawn(async move {
-        let tx = get_session_database(&request_id);
-        match tx {
-            None => return,
-            Some(mut tx) => {
-                tx.commit_internal().await;
-                remove_sql_session(&request_id);
-            }
-        }
-    });
-}
-
 async fn execute_request(
     mut request: Request,
     function: FunctionInfo,
@@ -416,9 +377,7 @@ async fn execute_request(
     rt: RuntimeRef,
 ) -> HyperResponse<BoxBody> {
     let response_builder = HyperResponse::builder();
-    let request_id = Arc::new(request.context_id.clone());
 
-    inject_database(Arc::clone(&request_id)).await;
     let rt_cloned = rt.clone();
 
     // Execute before middlewares in parallel where possible
@@ -503,8 +462,6 @@ async fn execute_request(
             }
         };
     }
-
-    free_database(request_id.to_string());
 
     response.to_response(&extra_headers)
 }

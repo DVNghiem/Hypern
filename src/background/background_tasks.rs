@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
 use crate::instants::get_runtime;
+use crate::runtime::asyncio::asyncio;
+use crate::runtime::future::RuntimeWrapper;
 
 #[pyclass]
 struct TaskResult {
@@ -58,6 +60,7 @@ impl BackgroundTasks {
     fn execute_all(&self) -> PyResult<()> {
         let tasks = Arc::clone(&self.tasks);
         let running_tasks = Arc::clone(&self.running_tasks);
+
         let runtime = get_runtime();
 
         // Move tasks to running_tasks and spawn them
@@ -66,7 +69,7 @@ impl BackgroundTasks {
 
         for (task_id, task) in tasks_lock.drain() {
             let handle = runtime.spawn(async move {
-                Python::with_gil(|py| match task.execute(py) {
+                Python::with_gil(|py| match task.execute(py, runtime) {
                     Ok(result) => TaskResult {
                         success: true,
                         result: Some(result),
@@ -92,7 +95,7 @@ impl BackgroundTasks {
             let running_tasks = Arc::clone(&self.running_tasks);
 
             let handle = runtime.spawn(async move {
-                Python::with_gil(|py| match task.execute(py) {
+                Python::with_gil(|py| match task.execute(py, runtime) {
                     Ok(result) => TaskResult {
                         success: true,
                         result: Some(result),

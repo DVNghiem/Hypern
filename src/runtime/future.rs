@@ -13,7 +13,6 @@ use tokio::{
 #[cfg(unix)]
 use super::callbacks::PyFutureAwaitable;
 
-use super::callbacks::PyIterAwaitable;
 use super::conversion::FutureResultToPy;
 use super::{
     asyncio::{asyncio, copy_context, ensure_future},
@@ -163,38 +162,9 @@ pub(crate) fn init_runtime(
     )
 }
 
-
-// NOTE:
-//  `future_into_py_iter` relies on what CPython refers as "bare yield".
-//  This is generally ~55% faster than `pyo3_asyncio.future_into_py` implementation.
-//  It consumes more cpu-cycles than `future_into_py_futlike`,
-//  but for "quick" operations it's something like 12% faster.
-#[allow(unused_must_use)]
-pub(crate) fn future_into_py_iter<R, F>(rt: R, py: Python, fut: F) -> PyResult<PyObject>
-where
-    R: Runtime + ContextExt + Clone,
-    F: Future<Output = FutureResultToPy> + Send + 'static,
-{
-    let aw = Py::new(py, PyIterAwaitable::new())?;
-    let py_fut = aw.clone_ref(py);
-    let rth = rt.clone();
-
-    rt.spawn(async move {
-        let result = fut.await;
-        rth.spawn_blocking(move |py| PyIterAwaitable::set_result(aw, py, result));
-    });
-
-    Ok(py_fut.into_py(py))
-}
-
-// NOTE:
-//  `future_into_py_futlike` relies on an `asyncio.Future` like implementation.
-//  This is generally ~38% faster than `pyo3_asyncio.future_into_py` implementation.
-//  It won't consume more cpu-cycles than standard asyncio implementation,
-//  and for "long" operations it's something like 6% faster than `future_into_py_iter`.
 #[allow(unused_must_use)]
 #[cfg(unix)]
-pub(crate) fn future_into_py_futlike<R, F>(rt: R, py: Python, fut: F) -> PyResult<PyObject>
+pub(crate) fn future_into_py<R, F>(rt: R, py: Python, fut: F) -> PyResult<PyObject>
 where
     R: Runtime + ContextExt + Clone,
     F: Future<Output = FutureResultToPy> + Send + 'static,
@@ -245,8 +215,6 @@ where
             let _ = loop_tx.call_method(py, "call_soon_threadsafe", (res_method, py.None()), None);
             drop(future_tx);
             drop(loop_tx);
-            // future_tx.drop_ref(py);
-            // loop_tx.drop_ref(py);
         });
     });
 
@@ -317,29 +285,22 @@ where
     R: Runtime + ContextExt + Clone,
 {
     let py = awaitable.py();
-    // Convert Python objects to owned values that can be sent between threads
-    let awaitable_py = awaitable.into_py(py);
     let event_loop = rt.py_event_loop(py);
     let (tx, rx) = oneshot::channel();
-
-    // Clone these values to avoid capturing references to Python objects
-    let event_loop_py = event_loop.clone_ref(py);
 
     // Prepare any context needed before spawning the async task
     let ctx = copy_context(py).into_py(py);
 
-    let rt_clone = rt.clone();
-    rt_clone.spawn_blocking(move |py| {
-        let args = (PyEnsureFuture {
-            awaitable: awaitable_py.clone_ref(py),
-            tx: Some(tx),
-        },);
-        let kwargs = PyDict::new(py);
-        kwargs.set_item("context", ctx.as_ref(py)).unwrap();
-        event_loop_py
-            .call_method(py, "call_soon_threadsafe", args, Some(&kwargs))
-            .unwrap();
-    });
+    let args = (PyEnsureFuture {
+        awaitable:  awaitable.into_py(py),
+        tx: Some(tx),
+    },);
+
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("context", ctx).unwrap();
+    event_loop
+        .call_method(py, "call_soon_threadsafe", args, Some(&kwargs))
+        .unwrap();
 
     Ok(async move {
         match rx.await {
