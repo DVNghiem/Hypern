@@ -1,15 +1,8 @@
 use crate::{
-    database::{
-        context::{
-            get_session_database, get_sql_connect, insert_sql_session, remove_sql_session,
-            set_sql_connect,
-        },
-        sql::{config::DatabaseConfig, connection::DatabaseConnection},
-    },
     di::DependencyInjection,
     executor::{execute_http_function, execute_middleware_function, execute_startup_handler},
     instants::TokioExecutor,
-    middlewares::base::{Middleware, MiddlewareConfig}, 
+    middlewares::base::{Middleware, MiddlewareConfig},
     router::router::Router,
     types::{
         body::{full, BoxBody},
@@ -103,7 +96,6 @@ pub struct Server {
     shutdown_handler: Option<Arc<FunctionInfo>>,
     middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
-    database_config: Option<DatabaseConfig>,
     dependencies: Arc<DependencyInjection>,
     http2: bool,
 }
@@ -119,7 +111,6 @@ impl Server {
             shutdown_handler: None,
             middlewares: Arc::new(Middleware::new()),
             extra_headers: Arc::new(DashMap::new()),
-            database_config: None,
             dependencies: Arc::new(DependencyInjection::default()),
             http2: false,
         }
@@ -168,10 +159,6 @@ impl Server {
         self.shutdown_handler = Some(Arc::new(handler));
     }
 
-    pub fn set_database_config(&mut self, config: DatabaseConfig) {
-        self.database_config = Some(config);
-    }
-
     pub fn enable_http2(&mut self) {
         self.http2 = true;
     }
@@ -215,8 +202,6 @@ impl Server {
         let task_locals = Arc::new(pyo3_asyncio::TaskLocals::new(event_loop).copy_context(py)?);
         let task_local_copy = Arc::clone(&task_locals);
 
-        let database_config: Option<DatabaseConfig> = self.database_config.clone();
-
         let shared_context = SharedContext::new(
             self.router.clone(),
             self.websocket_router.clone(),
@@ -248,14 +233,6 @@ impl Server {
                 let _ = execute_startup_handler(startup_handler, &Arc::clone(&task_locals)).await;
 
                 let listener = tokio::net::TcpListener::from_std(raw_socket.into()).unwrap();
-
-                match database_config {
-                    Some(config) => {
-                        let database = DatabaseConnection::new(config).await;
-                        set_sql_connect(database);
-                    }
-                    None => {}
-                };
 
                 loop {
                     let (stream, _) = listener.accept().await.unwrap();
@@ -398,29 +375,6 @@ async fn websocket_service(
     return response;
 }
 
-async fn inject_database(request_id: Arc<String>) {
-    let database = get_sql_connect();
-    match database {
-        Some(database) => {
-            insert_sql_session(&request_id, database.transaction().await);
-        }
-        None => {}
-    }
-}
-
-fn free_database(request_id: String) {
-    tokio::task::spawn(async move {
-        let tx = get_session_database(&request_id);
-        match tx {
-            None => return,
-            Some(mut tx) => {
-                tx.commit_internal().await;
-                remove_sql_session(&request_id);
-            }
-        }
-    });
-}
-
 async fn execute_request(
     mut request: Request,
     function: FunctionInfo,
@@ -431,8 +385,6 @@ async fn execute_request(
 
     let response_builder = HyperResponse::builder();
     let request_id = Arc::new(request.context_id.clone());
-
-    inject_database(Arc::clone(&request_id)).await;
 
     // Execute before middlewares in parallel where possible
     let before_results = join_all(
@@ -506,8 +458,6 @@ async fn execute_request(
             }
         };
     }
-
-    free_database(request_id.to_string());
 
     response.to_response(&extra_headers)
 }

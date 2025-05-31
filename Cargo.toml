@@ -27,7 +27,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3.31"
 dashmap = "6.1.0"
-sqlx = { version = "0.8", features = ["runtime-async-std", "postgres", "mysql", "sqlite", "chrono", "json"] }
 lazy_static = "1.5.0"
 parking_lot = "0.12.3"
 hyper = { version = "1.5.2", features = ["server", "http1", "http2"] }

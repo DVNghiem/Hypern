@@ -12,7 +12,7 @@ from typing_extensions import Annotated, Doc
 from hypern.args_parser import ArgsConfig
 from hypern.datastructures import SwaggerConfig
 from hypern.enum import HTTPMethod
-from hypern.hypern import DatabaseConfig, FunctionInfo, MiddlewareConfig, Router, Server, WebsocketRouter, Scheduler
+from hypern.hypern import FunctionInfo, MiddlewareConfig, Router, Server, WebsocketRouter, Scheduler
 from hypern.hypern import Route as InternalRoute
 from hypern.logging import logger
 from hypern.middleware import Middleware
@@ -107,14 +107,6 @@ class Hypern:
                 """
             ),
         ] = None,
-        database_config: Annotated[
-            DatabaseConfig | None,
-            Doc(
-                """
-                The database configuration for the application.
-                """
-            ),
-        ] = None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -129,7 +121,6 @@ class Hypern:
         self.args = ArgsConfig()
         self.start_up_handler = None
         self.shutdown_handler = None
-        self.database_config = database_config
         self.thread_config = ThreadConfigurator().get_config()
         self.swagger_config = swagger_config
 
@@ -269,15 +260,6 @@ class Hypern:
         after_request = FunctionInfo(handler=after_request, is_async=is_async)
         self.middleware_after_request.append((after_request, middleware.config))
 
-    def set_database_config(self, config: DatabaseConfig):
-        """
-        Sets the database configuration for the application.
-
-        Args:
-            config (DatabaseConfig): The database configuration to be set.
-        """
-        self.database_config = config
-
     def start(
         self,
     ):
@@ -298,8 +280,6 @@ class Hypern:
         server.set_after_hooks(hooks=self.middleware_after_request)
         server.set_response_headers(headers=self.response_headers)
 
-        if self.database_config:
-            server.set_database_config(config=self.database_config)
         if self.start_up_handler:
             server.set_startup_handler(self.start_up_handler)
         if self.shutdown_handler:
