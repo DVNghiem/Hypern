@@ -75,7 +75,7 @@ impl BackgroundTask {
         *cancelled
     }
 
-    pub fn execute(&self, py: Python<'_>) -> PyResult<PyObject> {
+    pub fn execute(&self, py: Python) -> PyResult<PyObject> {
         // Clone necessary data outside of async block
         let function = self.function.clone();
         let cancelled = self.cancelled.clone();
@@ -89,7 +89,7 @@ impl BackgroundTask {
         // Prepare arguments
         let args = match &self.args {
             Some(args) => PyTuple::new(py, args),
-            None => PyTuple::empty(py),
+            None => Ok(PyTuple::empty(py)),
         };
 
         // Prepare keyword arguments
@@ -129,7 +129,7 @@ impl BackgroundTask {
         })?;
 
         // Convert the future to a Python awaitable and wrap it with a timeout
-        let fut = pyo3_asyncio::tokio::future_into_py(py, async move {
+        let fut = pyo3_async_runtimes::tokio::future_into_py(py, async move {
             match timeout(Duration::from_secs(timeout_secs.unwrap()), async {
                 Ok(execute_future)
             })
@@ -147,15 +147,15 @@ impl BackgroundTask {
     }
 }
 
-impl FromPyObject<'_> for BackgroundTask {
-    fn extract(ob: &PyAny) -> PyResult<Self> {
-        let function = ob.getattr("function")?.extract::<PyObject>()?;
-        let args = ob.getattr("args")?.extract::<Option<Vec<PyObject>>>()?;
-        let kwargs = ob
-            .getattr("kwargs")?
-            .extract::<Option<HashMap<String, PyObject>>>()?;
-        let timeout_secs = ob.getattr("timeout_secs")?.extract::<Option<u64>>()?;
+// impl FromPyObject<'_> for BackgroundTask {
+//     fn extract(ob: &PyAny) -> PyResult<Self> {
+//         let function = ob.getattr("function")?.extract::<PyObject>()?;
+//         let args = ob.getattr("args")?.extract::<Option<Vec<PyObject>>>()?;
+//         let kwargs = ob
+//             .getattr("kwargs")?
+//             .extract::<Option<HashMap<String, PyObject>>>()?;
+//         let timeout_secs = ob.getattr("timeout_secs")?.extract::<Option<u64>>()?;
 
-        BackgroundTask::new(function, args, kwargs, timeout_secs)
-    }
-}
+//         BackgroundTask::new(function, args, kwargs, timeout_secs)
+//     }
+// }

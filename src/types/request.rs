@@ -23,26 +23,26 @@ pub struct UploadedFile {
     file_name: String,
 }
 
-impl ToPyObject for UploadedFile {
-    fn to_object(&self, py: Python) -> PyObject {
-        let name = self.name.clone();
-        let content_type = self.content_type.clone();
-        let path = self.path.clone();
-        let size = self.size;
-        let content = PyBytes::new(py, &self.content).into_py(py);
-        let file_name = self.file_name.clone();
+// impl ToPyObject for UploadedFile {
+//     fn to_object(&self, py: Python) -> PyObject {
+//         let name = self.name.clone();
+//         let content_type = self.content_type.clone();
+//         let path = self.path.clone();
+//         let size = self.size;
+//         let content = PyBytes::new(py, &self.content).into_py(py);
+//         let file_name = self.file_name.clone();
 
-        let uploaded_file = PyUploadedFile {
-            name,
-            content_type,
-            path,
-            size,
-            content,
-            file_name,
-        };
-        Py::new(py, uploaded_file).unwrap().as_ref(py).into()
-    }
-}
+//         let uploaded_file = PyUploadedFile {
+//             name,
+//             content_type,
+//             path,
+//             size,
+//             content,
+//             file_name,
+//         };
+//         Py::new(py, uploaded_file).unwrap().as_ref(py).into()
+//     }
+// }
 
 #[derive(Debug, Clone)]
 #[pyclass]
@@ -71,21 +71,21 @@ pub struct BodyData {
     files: Vec<UploadedFile>,
 }
 
-impl ToPyObject for BodyData {
-    fn to_object(&self, py: Python) -> PyObject {
-        let json = self.json.clone();
-        let files = self.files.clone();
+// impl ToPyObject for BodyData {
+//     fn to_object(&self, py: Python) -> PyObject {
+//         let json = self.json.clone();
+//         let files = self.files.clone();
 
-        let json = PyBytes::new(py, &json);
-        let files: Vec<Py<PyAny>> = files.into_iter().map(|file| file.to_object(py)).collect();
-        let files = PyList::new(py, files);
-        let body = PyBodyData {
-            json: json.into(),
-            files: files.into(),
-        };
-        Py::new(py, body).unwrap().as_ref(py).into()
-    }
-}
+//         let json = PyBytes::new(py, &json);
+//         let files: Vec<Py<PyAny>> = files.into_iter().map(|file| file.to_object(py)).collect();
+//         let files = PyList::new(py, files);
+//         let body = PyBodyData {
+//             json: json.into(),
+//             files: files.into(),
+//         };
+//         Py::new(py, body).unwrap().as_ref(py).into()
+//     }
+// }
 
 #[derive(Debug, Clone)]
 #[pyclass]
@@ -112,29 +112,29 @@ pub struct Request {
     pub auth: HashMap<String, String>,
 }
 
-impl ToPyObject for Request {
-    fn to_object(&self, py: Python) -> PyObject {
-        let query_params = self.query_params.clone();
-        let headers: Py<Header> = self.headers.clone().into_py(py).extract(py).unwrap();
-        let path_params = self.path_params.clone().into_py(py).extract(py).unwrap();
-        let body = self.body.clone().to_object(py).extract(py).unwrap();
-        let auth = self.auth.clone().into_py(py).extract(py).unwrap();
+// impl ToPyObject for Request {
+//     fn to_object(&self, py: Python) -> PyObject {
+//         let query_params = self.query_params.clone();
+//         let headers: Py<Header> = self.headers.clone().into_py(py).extract(py).unwrap();
+//         let path_params = self.path_params.clone().into_py(py).extract(py).unwrap();
+//         let body = self.body.clone().to_object(py).extract(py).unwrap();
+//         let auth = self.auth.clone().into_py(py).extract(py).unwrap();
 
-        let request = PyRequest {
-            path: self.path.clone(),
-            query_params,
-            path_params,
-            headers,
-            body,
-            auth,
-            method: self.method.clone(),
-            remote_addr: self.remote_addr.clone(),
-            timestamp: self.timestamp.clone(),
-            context_id: self.context_id.clone(),
-        };
-        Py::new(py, request).unwrap().as_ref(py).into()
-    }
-}
+//         let request = PyRequest {
+//             path: self.path.clone(),
+//             query_params,
+//             path_params,
+//             headers,
+//             body,
+//             auth,
+//             method: self.method.clone(),
+//             remote_addr: self.remote_addr.clone(),
+//             timestamp: self.timestamp.clone(),
+//             context_id: self.context_id.clone(),
+//         };
+//         Py::new(py, request).unwrap().as_ref(py).into()
+//     }
+// }
 
 impl Request {
     pub async fn from_request(request: HyperRequest<Incoming>) -> Self {

@@ -8,7 +8,7 @@ use crate::{
         response::Response,
     }
 };
-use pyo3_asyncio::TaskLocals;
+use pyo3_async_runtimes::TaskLocals;
 
 
 #[inline]
@@ -17,11 +17,11 @@ fn get_function_output<'a, T>(
     py: Python<'a>,
     function_args: &T,
     deps: Option<Arc<DependencyInjection>>,
-) -> Result<&'a PyAny, PyErr>
+) -> Result<Bound<'a, PyAny>, PyErr>
 where
-    T: ToPyObject,
+    T: IntoPyObject<'a>,
 {
-    let handler = function.handler.as_ref(py);
+    let handler = function.handler.as_ref();
 
     let kwargs = PyDict::new(py);
 
@@ -39,8 +39,9 @@ where
     }
 
     let result = handler.call(
+        py,
         (function_args.to_object(py),),
-        Some(kwargs),
+        kwargs,
     );
 
     result
@@ -56,7 +57,7 @@ pub async fn execute_http_function(
     if function.is_async {
         let output = Python::with_gil(|py| {
             let function_output = get_function_output(function, py, request, deps)?;
-            pyo3_asyncio::tokio::into_future(function_output)
+            pyo3_async_runtimes::tokio::into_future(function_output)
         })?
         .await?;
 
@@ -74,11 +75,11 @@ pub async fn execute_middleware_function<T>(
     function: &FunctionInfo,
 ) -> PyResult<MiddlewareReturn>
 where
-    T: for<'a> FromPyObject<'a> + ToPyObject,
+    T: for<'a> FromPyObject<'a> + IntoPyObject<'_>,
 {
     if function.is_async {
         let output: Py<PyAny> = Python::with_gil(|py| {
-            pyo3_asyncio::tokio::into_future(get_function_output(function, py, input, None)?)
+            pyo3_async_runtimes::tokio::into_future(get_function_output(function, py, input, None)?)
         })?
         .await?;
 
@@ -107,9 +108,9 @@ pub async fn execute_startup_handler(
     if let Some(function) = event_handler {
         if function.is_async {
             Python::with_gil(|py| {
-                pyo3_asyncio::into_future_with_locals(
+                pyo3_async_runtimes::into_future_with_locals(
                     task_locals,
-                    function.handler.as_ref(py).call0()?,
+                    function.handler.call0(py).unwrap().into_bound(py)
                 )
             })?
             .await?;

@@ -54,27 +54,27 @@ impl Response {
         builder.body(full(self.description.clone())).unwrap()
     }
 }
-impl ToPyObject for Response {
-    fn to_object(&self, py: Python) -> PyObject {
-        let headers = self.headers.clone().into_py(py).extract(py).unwrap();
-        // The description should only be either string or binary.
-        // it should raise an exception otherwise
-        let description = match String::from_utf8(self.description.to_vec()) {
-            Ok(description) => description.to_object(py),
-            Err(_) => PyBytes::new(py, &self.description.to_vec()).into(),
-        };
+// impl ToPyObject for Response {
+//     fn to_object(&self, py: Python) -> PyObject {
+//         let headers = self.headers.clone().into_py(py).extract(py).unwrap();
+//         // The description should only be either string or binary.
+//         // it should raise an exception otherwise
+//         let description = match String::from_utf8(self.description.to_vec()) {
+//             Ok(description) => description.to_object(py),
+//             Err(_) => PyBytes::new(py, &self.description.to_vec()).into(),
+//         };
 
-        let response = PyResponse {
-            status_code: self.status_code,
-            response_type: self.response_type.clone(),
-            headers,
-            description,
-            file_path: self.file_path.clone(),
-            context_id: self.context_id.clone(),
-        };
-        Py::new(py, response).unwrap().as_ref(py).into()
-    }
-}
+//         let response = PyResponse {
+//             status_code: self.status_code,
+//             response_type: self.response_type.clone(),
+//             headers,
+//             description,
+//             file_path: self.file_path.clone(),
+//             context_id: self.context_id.clone(),
+//         };
+//         Py::new(py, response).unwrap().as_ref(py).into()
+//     }
+// }
 
 #[pyclass(name = "Response")]
 #[derive(Debug, Clone)]
@@ -136,7 +136,7 @@ impl PyResponse {
     }
 
     pub fn set_cookie(&mut self, py: Python, key: &str, value: &str) -> PyResult<()> {
-        let headers = self.headers.as_ref(py).to_object(py);
+        let headers = self.headers.as_ref().to_object(py);
         let key = PyString::new(py, key);
         let value = PyString::new(py, value);
         let headers_dict: &PyDict = headers.downcast::<PyDict>(py)?;

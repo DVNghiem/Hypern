@@ -41,7 +41,7 @@ impl Scheduler {
         dependencies: Vec<String>,
         retry_policy: Option<(u32, u64, bool)>, // (max_retries, retry_delay_secs, exponential_backoff)
     ) -> PyResult<String> {
-        if !task.as_ref(py).is_callable() {
+        if !task.as_ref().is_callable() {
             return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>("Task must be callable"));
         }
 
