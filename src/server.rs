@@ -1,26 +1,15 @@
 use crate::{
-    database::{
-        context::{
-            get_session_database, get_sql_connect, insert_sql_session, remove_sql_session,
-            set_sql_connect,
-        },
-        sql::{config::DatabaseConfig, connection::DatabaseConnection},
-    },
-    di::DependencyInjection,
-    executor::{execute_http_function, execute_middleware_function, execute_startup_handler},
+    executor::{execute_http_function, execute_startup_handler},
     instants::TokioExecutor,
-    middlewares::base::{Middleware, MiddlewareConfig}, 
     router::router::Router,
+    socket::SocketHeld,
     types::{
         body::{full, BoxBody},
         function_info::FunctionInfo,
-        middleware::MiddlewareReturn,
         request::Request,
     },
-    ws::{router::WebsocketRouter, socket::SocketHeld, websocket::websocket_handler},
 };
 use dashmap::DashMap;
-use futures::future::join_all;
 use hyper::{
     body::Incoming,
     server::conn::{http1, http2},
@@ -29,7 +18,7 @@ use hyper::{
 };
 use hyper::{header::HeaderValue, Response as HyperResponse};
 use hyper_util::rt::TokioIo;
-use pyo3::{prelude::*, types::PyDict};
+use pyo3::prelude::*;
 use pyo3_asyncio::TaskLocals;
 use std::{
     collections::HashMap,
@@ -53,31 +42,22 @@ static NOTFOUND: &[u8] = b"Not Found";
 
 struct SharedContext {
     router: Arc<RwLock<Router>>,
-    ws_router: Arc<WebsocketRouter>,
     task_locals: Arc<TaskLocals>,
-    middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
-    dependencies: Arc<DependencyInjection>,
     http2: bool,
 }
 
 impl SharedContext {
     fn new(
         router: Arc<RwLock<Router>>,
-        ws_router: Arc<WebsocketRouter>,
         task_locals: Arc<TaskLocals>,
-        middlewares: Arc<Middleware>,
         extra_headers: Arc<DashMap<String, String>>,
-        dependencies: Arc<DependencyInjection>,
         http2: bool,
     ) -> Self {
         Self {
             router,
-            ws_router,
             task_locals,
-            middlewares,
             extra_headers,
-            dependencies,
             http2,
         }
     }
@@ -85,11 +65,8 @@ impl SharedContext {
     fn clone(&self) -> Self {
         Self {
             router: Arc::clone(&self.router),
-            ws_router: Arc::clone(&self.ws_router),
             task_locals: Arc::clone(&self.task_locals),
-            middlewares: Arc::clone(&self.middlewares),
             extra_headers: Arc::clone(&self.extra_headers),
-            dependencies: Arc::clone(&self.dependencies),
             http2: self.http2,
         }
     }
@@ -98,13 +75,9 @@ impl SharedContext {
 #[pyclass]
 pub struct Server {
     router: Arc<RwLock<Router>>,
-    websocket_router: Arc<WebsocketRouter>,
     startup_handler: Option<Arc<FunctionInfo>>,
     shutdown_handler: Option<Arc<FunctionInfo>>,
-    middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
-    database_config: Option<DatabaseConfig>,
-    dependencies: Arc<DependencyInjection>,
     http2: bool,
 }
 
@@ -114,44 +87,16 @@ impl Server {
     pub fn new() -> Self {
         Self {
             router: Arc::new(RwLock::new(Router::default())),
-            websocket_router: Arc::new(WebsocketRouter::default()),
             startup_handler: None,
             shutdown_handler: None,
-            middlewares: Arc::new(Middleware::new()),
             extra_headers: Arc::new(DashMap::new()),
-            database_config: None,
-            dependencies: Arc::new(DependencyInjection::default()),
             http2: false,
         }
-    }
-
-    pub fn inject(&mut self, key: &str, value: Py<PyAny>) {
-        let _ = self.dependencies.add_dependency(key, value);
-    }
-
-    pub fn set_dependencies(&mut self, dependencies: Py<PyDict>) {
-        self.dependencies = Arc::new(DependencyInjection::from_object(dependencies));
     }
 
     pub fn set_router(&mut self, router: Router) {
         // Update router
         self.router = Arc::new(RwLock::new(router));
-    }
-
-    pub fn set_websocket_router(&mut self, websocket_router: WebsocketRouter) {
-        self.websocket_router = Arc::new(websocket_router);
-    }
-
-    pub fn set_before_hooks(&mut self, hooks: Vec<(FunctionInfo, MiddlewareConfig)>) {
-        Arc::get_mut(&mut self.middlewares)
-            .unwrap()
-            .set_before_hooks(hooks);
-    }
-
-    pub fn set_after_hooks(&mut self, hooks: Vec<(FunctionInfo, MiddlewareConfig)>) {
-        Arc::get_mut(&mut self.middlewares)
-            .unwrap()
-            .set_after_hooks(hooks);
     }
 
     pub fn set_response_headers(&mut self, headers: HashMap<String, String>) {
@@ -166,10 +111,6 @@ impl Server {
 
     pub fn set_shutdown_handler(&mut self, handler: FunctionInfo) {
         self.shutdown_handler = Some(Arc::new(handler));
-    }
-
-    pub fn set_database_config(&mut self, config: DatabaseConfig) {
-        self.database_config = Some(config);
     }
 
     pub fn enable_http2(&mut self) {
@@ -207,23 +148,16 @@ impl Server {
         let asyncio = py.import("asyncio")?;
         let event_loop = asyncio.call_method0("get_event_loop")?;
 
-        let _websocket_router = Arc::clone(&self.websocket_router);
-
         let startup_handler = self.startup_handler.clone();
         let shutdown_handler = self.shutdown_handler.clone();
 
         let task_locals = Arc::new(pyo3_asyncio::TaskLocals::new(event_loop).copy_context(py)?);
         let task_local_copy = Arc::clone(&task_locals);
 
-        let database_config: Option<DatabaseConfig> = self.database_config.clone();
-
         let shared_context = SharedContext::new(
             self.router.clone(),
-            self.websocket_router.clone(),
             task_locals.clone(),
-            self.middlewares.clone(),
             self.extra_headers.clone(),
-            self.dependencies.clone(),
             self.http2,
         );
 
@@ -249,14 +183,6 @@ impl Server {
 
                 let listener = tokio::net::TcpListener::from_std(raw_socket.into()).unwrap();
 
-                match database_config {
-                    Some(config) => {
-                        let database = DatabaseConnection::new(config).await;
-                        set_sql_connect(database);
-                    }
-                    None => {}
-                };
-
                 loop {
                     let (stream, _) = listener.accept().await.unwrap();
                     let io = TokioIo::new(stream);
@@ -265,11 +191,6 @@ impl Server {
                         let svc = service_fn(|req: hyper::Request<hyper::body::Incoming>| {
                             let shared_context = shared_context.clone();
                             async move {
-                                if hyper_tungstenite::is_upgrade_request(&req) {
-                                    let response =
-                                        websocket_service(req, shared_context.ws_router).await;
-                                    return Ok::<_, hyper::Error>(response);
-                                }
                                 let response = http_service(req, shared_context).await;
                                 Ok::<_, hyper::Error>(response)
                             }
@@ -354,9 +275,7 @@ async fn http_service(
                 request,
                 function,
                 shared_context.task_locals,
-                shared_context.middlewares,
                 shared_context.extra_headers,
-                shared_context.dependencies,
             )
             .await;
             response
@@ -380,135 +299,15 @@ async fn http_service(
     return response;
 }
 
-async fn websocket_service(
-    req: HyperRequest<Incoming>,
-    websocket_router: Arc<WebsocketRouter>,
-) -> HyperResponse<BoxBody> {
-    let path = req.uri().path().to_string();
-    let route = websocket_router.find_route(&path);
-
-    let response = match route {
-        Some(route) => {
-            let handler = route.handler.clone();
-            let response = websocket_handler(handler, req).await;
-            response.unwrap()
-        }
-        None => HyperResponse::new(full("Not a websocket request")),
-    };
-    return response;
-}
-
-async fn inject_database(request_id: Arc<String>) {
-    let database = get_sql_connect();
-    match database {
-        Some(database) => {
-            insert_sql_session(&request_id, database.transaction().await);
-        }
-        None => {}
-    }
-}
-
-fn free_database(request_id: String) {
-    tokio::task::spawn(async move {
-        let tx = get_session_database(&request_id);
-        match tx {
-            None => return,
-            Some(mut tx) => {
-                tx.commit_internal().await;
-                remove_sql_session(&request_id);
-            }
-        }
-    });
-}
-
 async fn execute_request(
-    mut request: Request,
+    request: Request,
     function: FunctionInfo,
-    middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
-    dependencies: Arc<DependencyInjection>,
 ) -> HyperResponse<BoxBody> {
-
-    let response_builder = HyperResponse::builder();
-    let request_id = Arc::new(request.context_id.clone());
-
-    inject_database(Arc::clone(&request_id)).await;
-
-    // Execute before middlewares in parallel where possible
-    let before_results = join_all(
-        middlewares
-            .get_before_hooks()
-            .into_iter()
-            .filter(|(_, config)| !config.is_conditional)
-            .map(|(middleware, _)| {
-                let request = request.clone();
-                let middleware = middleware.clone();
-                async move { execute_middleware_function(&request, &middleware).await }
-            }),
-    )
-    .await;
-
-    // Process results and handle any errors
-    for result in before_results {
-        match result {
-            Ok(MiddlewareReturn::Request(r)) => request = r,
-            Ok(MiddlewareReturn::Response(r)) => return r.to_response(&extra_headers),
-            Err(e) => {
-                return response_builder
-                    .body(full(format!("Error: {}", e)))
-                    .unwrap();
-            }
-        }
-    }
-
-    // Execute conditional middlewares sequentially
-    for (middleware, config) in middlewares.get_before_hooks() {
-        if config.is_conditional {
-            match execute_middleware_function(&request, &middleware).await {
-                Ok(MiddlewareReturn::Request(r)) => request = r,
-                Ok(MiddlewareReturn::Response(r)) => return r.to_response(&extra_headers),
-                Err(e) => {
-                    return HyperResponse::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(full(format!("Error: {}", e)))
-                        .unwrap();
-                }
-            }
-        }
-    }
-
     // Execute the main handler
-    let mut response = execute_http_function(&request, &function, Some(dependencies))
-        .await
-        .unwrap();
+    let response = execute_http_function(&request, &function).await.unwrap();
 
     // mapping context id
-    response.context_id = request.context_id;
-
-    // Execute after middlewares with similar optimization
-    for (after_middleware, _) in middlewares.get_after_hooks() {
-        response = match execute_middleware_function(&response, &after_middleware).await {
-            Ok(MiddlewareReturn::Request(_)) => {
-                return response_builder
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(full("Middleware returned a response"))
-                    .unwrap();
-            }
-            Ok(MiddlewareReturn::Response(r)) => {
-                let response = r;
-                response
-            }
-            Err(e) => {
-                return response_builder
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(full(e.to_string()))
-                    .unwrap();
-            }
-        };
-    }
-
-    free_database(request_id.to_string());
-
     response.to_response(&extra_headers)
 }
 
@@ -516,13 +315,11 @@ async fn mapping_method(
     req: Request,
     function: FunctionInfo,
     task_locals: Arc<pyo3_asyncio::TaskLocals>,
-    middlewares: Arc<Middleware>,
     extra_headers: Arc<DashMap<String, String>>,
-    dependencies: Arc<DependencyInjection>,
 ) -> HyperResponse<BoxBody> {
     pyo3_asyncio::tokio::scope(
         task_locals.as_ref().to_owned(),
-        execute_request(req, function, middlewares, extra_headers, dependencies),
+        execute_request(req, function, extra_headers),
     )
     .await
 }

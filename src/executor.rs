@@ -3,8 +3,8 @@ use std::sync::Arc;
 use pyo3::{prelude::*, types::PyDict};
 
 use crate::{
-    di::DependencyInjection, types::{
-        function_info::FunctionInfo, middleware::MiddlewareReturn, request::Request,
+    types::{
+        function_info::FunctionInfo, request::Request,
         response::Response,
     }
 };
@@ -16,7 +16,6 @@ fn get_function_output<'a, T>(
     function: &'a FunctionInfo,
     py: Python<'a>,
     function_args: &T,
-    deps: Option<Arc<DependencyInjection>>,
 ) -> Result<&'a PyAny, PyErr>
 where
     T: ToPyObject,
@@ -24,19 +23,6 @@ where
     let handler = function.handler.as_ref(py);
 
     let kwargs = PyDict::new(py);
-
-    // Add dependencies to kwargs if provided
-    if let Some(dependency_injection) = deps {
-
-        kwargs.set_item(
-            "inject",
-            dependency_injection
-                .to_object(py)
-                .into_ref(py)
-                .downcast::<PyDict>()?
-                .to_owned(),
-        )?;
-    }
 
     let result = handler.call(
         (function_args.to_object(py),),
@@ -51,11 +37,10 @@ where
 pub async fn execute_http_function(
     request: &Request,
     function: &FunctionInfo,
-    deps: Option<Arc<DependencyInjection>>,
 ) -> PyResult<Response> {
     if function.is_async {
         let output = Python::with_gil(|py| {
-            let function_output = get_function_output(function, py, request, deps)?;
+            let function_output = get_function_output(function, py, request)?;
             pyo3_asyncio::tokio::into_future(function_output)
         })?
         .await?;
@@ -64,40 +49,8 @@ pub async fn execute_http_function(
     };
 
     Python::with_gil(|py| -> PyResult<Response> {
-        get_function_output(function, py, request, deps)?.extract()
+        get_function_output(function, py, request)?.extract()
     })
-}
-
-#[inline]
-pub async fn execute_middleware_function<T>(
-    input: &T,
-    function: &FunctionInfo,
-) -> PyResult<MiddlewareReturn>
-where
-    T: for<'a> FromPyObject<'a> + ToPyObject,
-{
-    if function.is_async {
-        let output: Py<PyAny> = Python::with_gil(|py| {
-            pyo3_asyncio::tokio::into_future(get_function_output(function, py, input, None)?)
-        })?
-        .await?;
-
-        Python::with_gil(|py| -> PyResult<MiddlewareReturn> {
-            let output_response = output.extract::<Response>(py);
-            match output_response {
-                Ok(o) => Ok(MiddlewareReturn::Response(o)),
-                Err(_) => Ok(MiddlewareReturn::Request(output.extract::<Request>(py)?)),
-            }
-        })
-    } else {
-        Python::with_gil(|py| -> PyResult<MiddlewareReturn> {
-            let output = get_function_output(function, py, input, None)?;
-            match output.extract::<Response>() {
-                Ok(o) => Ok(MiddlewareReturn::Response(o)),
-                Err(_) => Ok(MiddlewareReturn::Request(output.extract::<Request>()?)),
-            }
-        })
-    }
 }
 
 pub async fn execute_startup_handler(
