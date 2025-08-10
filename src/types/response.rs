@@ -1,12 +1,82 @@
+use bytes::Bytes;
 use dashmap::DashMap;
 use pyo3::{
-    prelude::*,
-    types::{PyBytes, PyDict, PyString},
+    prelude::*, pybacked::PyBackedStr, types::{PyBytes, PyDict, PyString}
 };
 
-use hyper::{header::HeaderName, Response as HyperResponse, StatusCode};
+use hyper::{header::{HeaderName, HeaderValue, SERVER as HK_SERVER, HeaderMap}, Response as HyperResponse, StatusCode};
 
-use super::{body::{full, BoxBody}, header::Header};
+use super::{body::{full, BoxBody}, header::HypernHeaders};
+
+pub(crate) type HTTPResponseBody = http_body_util::combinators::BoxBody<Bytes, anyhow::Error>;
+
+pub(crate) struct PyResponseBody {
+    status: hyper::StatusCode,
+    headers: HeaderMap,
+    body: HTTPResponseBody,
+}
+
+macro_rules! headers_from_py {
+    ($headers:expr) => {{
+        let mut headers = HeaderMap::with_capacity($headers.len() + 3);
+        for (key, value) in $headers {
+            headers.append(
+                HeaderName::from_bytes(key.as_bytes()).unwrap(),
+                HeaderValue::from_str(&value).unwrap(),
+            );
+        }
+        headers.entry(HK_SERVER).or_insert(HeaderValue::from_static("hypern"));
+        headers
+    }};
+}
+
+
+impl PyResponseBody {
+    pub fn new(status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>, body: HTTPResponseBody) -> Self {
+        Self {
+            status: status.try_into().unwrap(),
+            headers: headers_from_py!(headers),
+            body,
+        }
+    }
+
+    pub fn empty(status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>) -> Self {
+        Self {
+            status: status.try_into().unwrap(),
+            headers: headers_from_py!(headers),
+            body: empty_body(),
+        }
+    }
+
+    pub fn from_bytes(status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>, body: Box<[u8]>) -> Self {
+        Self {
+            status: status.try_into().unwrap(),
+            headers: headers_from_py!(headers),
+            body: http_body_util::Full::new(Bytes::from(body))
+                .map_err(std::convert::Into::into)
+                .boxed(),
+        }
+    }
+
+    pub fn from_string(status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>, body: String) -> Self {
+        Self {
+            status: status.try_into().unwrap(),
+            headers: headers_from_py!(headers),
+            body: http_body_util::Full::new(Bytes::from(body))
+                .map_err(std::convert::Into::into)
+                .boxed(),
+        }
+    }
+
+    #[inline]
+    pub fn to_response(self) -> hyper::Response<HTTPResponseBody> {
+        let mut res = hyper::Response::new(self.body);
+        *res.status_mut() = self.status;
+        *res.headers_mut() = self.headers;
+        res
+    }
+}
+
 
 fn get_description_from_pyobject(description: &PyAny) -> PyResult<Vec<u8>> {
     if let Ok(s) = description.downcast::<PyString>() {
