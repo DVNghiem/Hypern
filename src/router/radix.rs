@@ -2,9 +2,7 @@ use crate::router::route::Route;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
-#[derive(Debug)]
 #[pyclass]
-#[derive(Clone)]
 pub struct RadixNode {
     pub path: String,
     pub children: HashMap<char, RadixNode>,
@@ -16,6 +14,18 @@ pub struct RadixNode {
 impl Default for RadixNode {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Clone for RadixNode {
+    fn clone(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            children: self.children.clone(),
+            is_endpoint: self.is_endpoint,
+            routes: self.routes.clone(),
+            param_name: self.param_name.clone(),
+        }
     }
 }
 
@@ -51,10 +61,11 @@ impl RadixNode {
             return;
         }
 
-        let segments: Vec<&str> = normalized_path.split('/')
+        let segments: Vec<&str> = normalized_path
+            .split('/')
             .filter(|s| !s.is_empty())
             .collect();
-        
+
         self._insert_segments(&segments, 0, route);
     }
 
@@ -66,16 +77,14 @@ impl RadixNode {
         }
 
         let segment = segments[index];
-        
+
         if segment.starts_with(':') {
             let param_name = segment[1..].to_string();
-            let param_node = self.children
-                .entry(':')
-                .or_insert_with(|| {
-                    let mut node = RadixNode::new();
-                    node.param_name = Some(param_name.clone());
-                    node
-                });
+            let param_node = self.children.entry(':').or_insert_with(|| {
+                let mut node = RadixNode::new();
+                node.param_name = Some(param_name.clone());
+                node
+            });
             param_node._insert_segments(segments, index + 1, route);
             return;
         }
@@ -87,7 +96,7 @@ impl RadixNode {
 
         if let Some(existing_node) = self.children.get_mut(&first_char) {
             let common_prefix = Self::find_common_prefix(&existing_node.path, segment);
-            
+
             if common_prefix == existing_node.path {
                 // Full match of existing node's path, check remaining segment
                 let remaining = &segment[common_prefix.len()..];
@@ -99,7 +108,8 @@ impl RadixNode {
                     let mut new_node = RadixNode::new();
                     new_node.path = remaining.to_string();
                     new_node._insert_segments(segments, index + 1, route);
-                    existing_node.children
+                    existing_node
+                        .children
                         .entry(remaining.chars().next().unwrap())
                         .or_insert(new_node);
                 }
@@ -167,7 +177,8 @@ impl RadixNode {
             };
         }
 
-        let segments: Vec<&str> = normalized_path.split('/')
+        let segments: Vec<&str> = normalized_path
+            .split('/')
             .filter(|s| !s.is_empty())
             .collect();
 
@@ -183,7 +194,9 @@ impl RadixNode {
     ) -> Option<(&'a Route, HashMap<String, String>)> {
         if index >= segments.len() {
             return if self.is_endpoint {
-                self.routes.get(&method.to_uppercase()).map(|r| (r, params.clone()))
+                self.routes
+                    .get(&method.to_uppercase())
+                    .map(|r| (r, params.clone()))
             } else {
                 None
             };
@@ -197,12 +210,15 @@ impl RadixNode {
                 if let Some(remaining) = segment.strip_prefix(&child.path) {
                     if remaining.is_empty() {
                         // Full match, proceed to next segment
-                        if let Some(result) = child._find_segments(segments, index + 1, method, params) {
+                        if let Some(result) =
+                            child._find_segments(segments, index + 1, method, params)
+                        {
                             return Some(result);
                         }
                     } else {
                         // Check if remaining part matches any child
-                        if let Some(result) = child._find_segments(&[remaining], 0, method, params) {
+                        if let Some(result) = child._find_segments(&[remaining], 0, method, params)
+                        {
                             return Some(result);
                         }
                     }
@@ -214,7 +230,8 @@ impl RadixNode {
         if let Some(param_node) = self.children.get(&':') {
             if let Some(param_name) = &param_node.param_name {
                 params.insert(param_name.clone(), segment.to_string());
-                if let Some(result) = param_node._find_segments(segments, index + 1, method, params) {
+                if let Some(result) = param_node._find_segments(segments, index + 1, method, params)
+                {
                     return Some(result);
                 }
                 params.remove(param_name);

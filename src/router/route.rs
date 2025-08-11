@@ -1,14 +1,12 @@
 use pyo3::prelude::*;
-use crate::types::function_info::FunctionInfo;
 
 #[pyclass]
-#[derive(Debug, Clone)]
 pub struct Route {
     #[pyo3(get, set)]
     pub path: String,
 
     #[pyo3(get, set)]
-    pub function: FunctionInfo,
+    pub function: PyObject,
 
     #[pyo3(get, set)]
     pub method: String,
@@ -17,11 +15,24 @@ pub struct Route {
     pub doc: Option<String>,
 }
 
+impl Clone for Route {
+    fn clone(&self) -> Self {
+        Python::with_gil(|py| {
+            Self {
+                path: self.path.clone(),
+                function: self.function.clone_ref(py),
+                method: self.method.clone(),
+                doc: self.doc.clone(),
+            }
+        })
+    }
+}
+
 #[pymethods]
 impl Route {
     #[new]
     #[pyo3(signature = (path, function, method, doc = None))]
-    pub fn new(path: &str, function: FunctionInfo, method: String, doc: Option<String>) -> Self {
+    pub fn new(path: &str, function: PyObject, method: String, doc: Option<String>) -> Self {
         Self {
             path: path.to_string(),
             function,

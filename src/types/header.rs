@@ -1,6 +1,3 @@
-use anyhow::Result;
-use futures::TryStreamExt;
-use http_body_util::BodyExt;
 use hyper::header::HeaderMap;
 use pyo3::prelude::*;
 use pyo3::types::{PyIterator, PyList, PyString};
@@ -51,7 +48,7 @@ impl HypernHeaders {
         self.inner.contains_key(key)
     }
 
-    fn __getitem__(&self, key: &str) -> Result<&str> {
+    fn __getitem__(&self, key: &str) -> PyResult<&str> {
         if let Some(value) = self.inner.get(key) {
             return Ok(value.to_str().unwrap_or(""));
         }

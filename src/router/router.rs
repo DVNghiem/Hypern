@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 
 /// Contains the thread safe hashmaps of different routes
 #[pyclass]
-#[derive(Debug, Default, FromPyObject)]
+#[derive(Default, FromPyObject)]
 pub struct Router {
     #[pyo3(get, set)]
     path: String,

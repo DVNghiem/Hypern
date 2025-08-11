@@ -1,16 +1,16 @@
-use futures::StreamExt;
 use http_body_util::BodyExt;
+use hyper::Request as HyperRequest;
 use percent_encoding::percent_decode_str;
 use pyo3::prelude::*;
-use pyo3_async_runtimes::generic::future_into_py;
+use pyo3_async_runtimes::tokio::future_into_py;
 use std::{collections::HashMap, sync::Mutex};
-use hyper::Request as HyperRequest;
+
+use crate::errors::{error_request, error_stream};
 
 use super::header::HypernHeaders;
 use hyper::body;
 
-#[derive(Default, Debug, Clone)]
-#[pyclass]
+#[pyclass(frozen)]
 pub struct Request {
     path: String,
     query_string: String,
@@ -22,7 +22,6 @@ pub struct Request {
 
 impl Request {
     pub async fn new(req: HyperRequest<body::Incoming>) -> Self {
-
         let (req_part, body_part) = req.into_parts();
         let (path, query_string) = req_part.uri.path_and_query().map_or_else(
             || (vec![], ""),
@@ -52,13 +51,20 @@ impl Request {
 #[pymethods]
 impl Request {
     fn __call__<'p>(&self, py: Python<'p>) -> PyResult<Bound<'p, PyAny>> {
-        if let Some(body) = self.body.lock().unwrap().take() {
-            return future_into_py(py, async move {
-                match body.collect().await {
-                    Ok(data) => data.to_bytes(),
-                    _ => (),
-                }
-            });
-        }
+        let body = self.body.lock().unwrap().take();
+
+        future_into_py(py, async move {
+            if let Some(body) = body {
+                return match body.collect().await {
+                    Ok(data) => {
+                        let bytes = data.to_bytes();
+                        let bytes_vec = bytes.to_vec();
+                        Ok(bytes_vec)
+                    }
+                    Err(_) => error_request!(),
+                };
+            }
+            error_stream!()
+        })
     }
 }

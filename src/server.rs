@@ -1,11 +1,9 @@
 use crate::{
-    executor::{execute_http_function, execute_startup_handler},
     instants::TokioExecutor,
     router::router::Router,
     socket::SocketHeld,
     types::{
         body::{full, BoxBody},
-        function_info::FunctionInfo,
         request::Request,
     },
 };
@@ -19,7 +17,8 @@ use hyper::{
 use hyper::{header::HeaderValue, Response as HyperResponse};
 use hyper_util::rt::TokioIo;
 use pyo3::prelude::*;
-use pyo3_asyncio::TaskLocals;
+use pyo3::pycell::PyRef;
+use pyo3_async_runtimes::TaskLocals;
 use std::{
     collections::HashMap,
     sync::{
@@ -75,8 +74,6 @@ impl SharedContext {
 #[pyclass]
 pub struct Server {
     router: Arc<RwLock<Router>>,
-    startup_handler: Option<Arc<FunctionInfo>>,
-    shutdown_handler: Option<Arc<FunctionInfo>>,
     extra_headers: Arc<DashMap<String, String>>,
     http2: bool,
 }
@@ -87,8 +84,6 @@ impl Server {
     pub fn new() -> Self {
         Self {
             router: Arc::new(RwLock::new(Router::default())),
-            startup_handler: None,
-            shutdown_handler: None,
             extra_headers: Arc::new(DashMap::new()),
             http2: false,
         }
@@ -105,14 +100,6 @@ impl Server {
         }
     }
 
-    pub fn set_startup_handler(&mut self, handler: FunctionInfo) {
-        self.startup_handler = Some(Arc::new(handler));
-    }
-
-    pub fn set_shutdown_handler(&mut self, handler: FunctionInfo) {
-        self.shutdown_handler = Some(Arc::new(handler));
-    }
-
     pub fn enable_http2(&mut self) {
         self.http2 = true;
     }
@@ -120,7 +107,7 @@ impl Server {
     pub fn start(
         &mut self,
         py: Python,
-        socket: &PyCell<SocketHeld>,
+        socket: PyRef<SocketHeld>,
         workers: usize,
         max_blocking_threads: usize,
     ) -> PyResult<()> {
@@ -144,15 +131,12 @@ impl Server {
             return Ok(());
         }
 
-        let raw_socket = socket.try_borrow_mut()?.get_socket();
+        let raw_socket = socket.get_socket();
         let asyncio = py.import("asyncio")?;
         let event_loop = asyncio.call_method0("get_event_loop")?;
 
-        let startup_handler = self.startup_handler.clone();
-        let shutdown_handler = self.shutdown_handler.clone();
 
-        let task_locals = Arc::new(pyo3_asyncio::TaskLocals::new(event_loop).copy_context(py)?);
-        let task_local_copy = Arc::clone(&task_locals);
+        let task_locals = Arc::new(TaskLocals::new(event_loop.clone()).copy_context(py)?);
 
         let shared_context = SharedContext::new(
             self.router.clone(),
@@ -178,8 +162,6 @@ impl Server {
             debug!("Waiting for process to start...");
 
             rt.block_on(async move {
-                // excute startup handler
-                let _ = execute_startup_handler(startup_handler, &Arc::clone(&task_locals)).await;
 
                 let listener = tokio::net::TcpListener::from_std(raw_socket.into()).unwrap();
 
@@ -222,24 +204,8 @@ impl Server {
             });
         });
 
-        let event_loop = (*event_loop).call_method0("run_forever");
+        let event_loop = event_loop.call_method0("run_forever");
         if event_loop.is_err() {
-            if let Some(function) = shutdown_handler {
-                if function.is_async {
-                    pyo3_asyncio::tokio::run_until_complete(
-                        task_local_copy.event_loop(py),
-                        pyo3_asyncio::into_future_with_locals(
-                            &task_local_copy.clone(),
-                            function.handler.as_ref(py).call0()?,
-                        )
-                        .unwrap(),
-                    )
-                    .unwrap();
-                } else {
-                    Python::with_gil(|py| function.handler.call0(py))?;
-                }
-            }
-
             exit(0);
         }
         Ok(())
@@ -269,8 +235,8 @@ async fn http_service(
     let response = match route {
         Some((route, path_params)) => {
             let function = route.function;
-            let mut request = Request::from_request(req).await;
-            request.path_params = path_params;
+            let mut request = Request::new(req).await;
+            // request.path_params = path_params;
             let response = mapping_method(
                 request,
                 function,
@@ -301,7 +267,7 @@ async fn http_service(
 
 async fn execute_request(
     request: Request,
-    function: FunctionInfo,
+    function: PyObject,
     extra_headers: Arc<DashMap<String, String>>,
 ) -> HyperResponse<BoxBody> {
     // Execute the main handler
@@ -313,12 +279,12 @@ async fn execute_request(
 
 async fn mapping_method(
     req: Request,
-    function: FunctionInfo,
-    task_locals: Arc<pyo3_asyncio::TaskLocals>,
+    function: PyObject,
+    task_locals: Arc<TaskLocals>,
     extra_headers: Arc<DashMap<String, String>>,
 ) -> HyperResponse<BoxBody> {
-    pyo3_asyncio::tokio::scope(
-        task_locals.as_ref().to_owned(),
+    pyo3_async_runtimes::tokio::scope(
+        (*task_locals).clone_ref(function.py()),
         execute_request(req, function, extra_headers),
     )
     .await

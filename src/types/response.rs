@@ -1,14 +1,24 @@
-use bytes::Bytes;
-use dashmap::DashMap;
-use pyo3::{
-    prelude::*, pybacked::PyBackedStr, types::{PyBytes, PyDict, PyString}
+use std::{
+    borrow::Cow,
+    sync::{atomic, Arc, Mutex},
 };
 
-use hyper::{header::{HeaderName, HeaderValue, SERVER as HK_SERVER, HeaderMap}, Response as HyperResponse, StatusCode};
+use bytes::Bytes;
+use http_body_util::BodyExt;
+use pyo3::{prelude::*, pybacked::PyBackedStr, IntoPyObjectExt};
 
-use super::{body::{full, BoxBody}, header::HypernHeaders};
+use hyper::{
+    body,
+    header::{HeaderMap, HeaderName, HeaderValue, SERVER},
+};
+use pyo3_async_runtimes::tokio::future_into_py;
+use tokio::sync::{oneshot, Notify};
 
 pub(crate) type HTTPResponseBody = http_body_util::combinators::BoxBody<Bytes, anyhow::Error>;
+
+pub(crate) enum PyResponse {
+    Body(PyResponseBody),
+}
 
 pub(crate) struct PyResponseBody {
     status: hyper::StatusCode,
@@ -25,14 +35,19 @@ macro_rules! headers_from_py {
                 HeaderValue::from_str(&value).unwrap(),
             );
         }
-        headers.entry(HK_SERVER).or_insert(HeaderValue::from_static("hypern"));
+        headers
+            .entry(SERVER)
+            .or_insert(HeaderValue::from_static("hypern"));
         headers
     }};
 }
 
-
 impl PyResponseBody {
-    pub fn new(status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>, body: HTTPResponseBody) -> Self {
+    pub fn new(
+        status: u16,
+        headers: Vec<(PyBackedStr, PyBackedStr)>,
+        body: HTTPResponseBody,
+    ) -> Self {
         Self {
             status: status.try_into().unwrap(),
             headers: headers_from_py!(headers),
@@ -44,11 +59,17 @@ impl PyResponseBody {
         Self {
             status: status.try_into().unwrap(),
             headers: headers_from_py!(headers),
-            body: empty_body(),
+            body: http_body_util::Empty::<Bytes>::new()
+                .map_err(|e| match e {})
+                .boxed(),
         }
     }
 
-    pub fn from_bytes(status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>, body: Box<[u8]>) -> Self {
+    pub fn from_bytes(
+        status: u16,
+        headers: Vec<(PyBackedStr, PyBackedStr)>,
+        body: Box<[u8]>,
+    ) -> Self {
         Self {
             status: status.try_into().unwrap(),
             headers: headers_from_py!(headers),
@@ -58,7 +79,11 @@ impl PyResponseBody {
         }
     }
 
-    pub fn from_string(status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>, body: String) -> Self {
+    pub fn from_string(
+        status: u16,
+        headers: Vec<(PyBackedStr, PyBackedStr)>,
+        body: String,
+    ) -> Self {
         Self {
             status: status.try_into().unwrap(),
             headers: headers_from_py!(headers),
@@ -77,141 +102,76 @@ impl PyResponseBody {
     }
 }
 
+#[pyclass(frozen, freelist = 128)]
+pub(crate) struct PyEmptyAwaitable;
 
-fn get_description_from_pyobject(description: &PyAny) -> PyResult<Vec<u8>> {
-    if let Ok(s) = description.downcast::<PyString>() {
-        Ok(s.to_string().into_bytes())
-    } else if let Ok(b) = description.downcast::<PyBytes>() {
-        Ok(b.as_bytes().to_vec())
-    } else {
-        Ok(vec![])
+#[pymethods]
+impl PyEmptyAwaitable {
+    fn __await__(pyself: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        pyself
+    }
+
+    fn __iter__(pyself: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        pyself
+    }
+
+    fn __next__(&self) -> Option<()> {
+        None
     }
 }
-
-#[derive(Debug, Clone, FromPyObject)]
-pub struct Response {
-    pub status_code: u16,
-    pub response_type: String,
-    pub headers: Header,
-
-    #[pyo3(from_py_with = "get_description_from_pyobject")]
-    pub description: Vec<u8>,
-    pub file_path: Option<String>,
-
-    pub context_id: String,
-}
-
-impl Response {
-    pub fn to_response(
-        &self,
-        extra_headers: &DashMap<String, String>,
-    ) -> HyperResponse<BoxBody> {
-        let mut builder =
-        HyperResponse::builder().status(StatusCode::from_u16(self.status_code).unwrap());
-
-        for (key, value) in self.headers.headers.iter() {
-            if let Ok(name) = HeaderName::from_bytes(key.as_bytes()) {
-                builder = builder.header(name, value);
-            }
-        }
-
-        for ref_multi in extra_headers.iter() {
-            if let Ok(name) = HeaderName::from_bytes(ref_multi.key().as_bytes()) {
-                builder = builder.header(name, ref_multi.value());
-            }
-        }
-
-        builder.body(full(self.description.clone())).unwrap()
-    }
-}
-impl ToPyObject for Response {
-    fn to_object(&self, py: Python) -> PyObject {
-        let headers = self.headers.clone().into_py(py).extract(py).unwrap();
-        // The description should only be either string or binary.
-        // it should raise an exception otherwise
-        let description = match String::from_utf8(self.description.to_vec()) {
-            Ok(description) => description.to_object(py),
-            Err(_) => PyBytes::new(py, &self.description.to_vec()).into(),
-        };
-
-        let response = PyResponse {
-            status_code: self.status_code,
-            response_type: self.response_type.clone(),
-            headers,
-            description,
-            file_path: self.file_path.clone(),
-            context_id: self.context_id.clone(),
-        };
-        Py::new(py, response).unwrap().as_ref(py).into()
-    }
-}
-
-#[pyclass(name = "Response")]
-#[derive(Debug, Clone)]
-pub struct PyResponse {
-    #[pyo3(get)]
-    pub status_code: u16,
-    #[pyo3(get)]
-    pub response_type: String,
-    #[pyo3(get, set)]
-    pub headers: Py<Header>,
-    #[pyo3(get)]
-    pub description: Py<PyAny>,
-    #[pyo3(get)]
-    pub file_path: Option<String>,
-
-    #[pyo3(get)]
-    pub context_id: String,
+#[pyclass(frozen)]
+pub(crate) struct Response {
+    tx: Mutex<Option<oneshot::Sender<PyResponse>>>,
+    disconnect_guard: Arc<Notify>,
+    body: Mutex<Option<body::Incoming>>,
+    disconnected: Arc<atomic::AtomicBool>,
 }
 
 #[pymethods]
-impl PyResponse {
-    // To do: Add check for content-type in header and change response_type accordingly
-    #[new]
-    pub fn new(
-        py: Python,
-        status_code: u16,
-        headers: &PyAny,
-        description: Py<PyAny>,
-    ) -> PyResult<Self> {
-        let headers_output: Py<Header> = if let Ok(headers_dict) = headers.downcast::<PyDict>() {
-            // Here you'd have logic to create a Headers instance from a PyDict
-            // For simplicity, let's assume you have a method `from_dict` on Headers for this
-            let headers = Header::new(Some(headers_dict)); // Hypothetical method
-            Py::new(py, headers)?
-        } else if let Ok(headers) = headers.extract::<Py<Header>>() {
-            // If it's already a Py<Headers>, use it directly
-            headers
-        } else {
-            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "headers must be a Headers instance or a dict",
-            ));
-        };
+impl Response {
+    fn client_disconnect<'p>(&self, py: Python<'p>) -> PyResult<Bound<'p, PyAny>> {
+        if self.disconnected.load(atomic::Ordering::Acquire) {
+            return PyEmptyAwaitable.into_bound_py_any(py);
+        }
 
-        Ok(Self {
-            status_code,
-            // we should be handling based on headers but works for now
-            response_type: "text".to_string(),
-            headers: headers_output,
-            description,
-            file_path: None,
-            context_id: "".to_string(),
+        let guard = self.disconnect_guard.clone();
+        let state = self.disconnected.clone();
+        future_into_py(py, async move {
+            guard.notified().await;
+            state.store(true, atomic::Ordering::Release);
+            Ok(())
         })
     }
 
-    #[setter]
-    pub fn set_description(&mut self, description: Py<PyAny>) -> PyResult<()> {
-        self.description = description;
-        Ok(())
+    #[pyo3(signature = (status=200, headers=vec![]))]
+    fn response_empty(&self, status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>) {
+        if let Some(tx) = self.tx.lock().unwrap().take() {
+            _ = tx.send(PyResponse::Body(PyResponseBody::empty(status, headers)));
+        }
     }
 
-    pub fn set_cookie(&mut self, py: Python, key: &str, value: &str) -> PyResult<()> {
-        let headers = self.headers.as_ref(py).to_object(py);
-        let key = PyString::new(py, key);
-        let value = PyString::new(py, value);
-        let headers_dict: &PyDict = headers.downcast::<PyDict>(py)?;
-        headers_dict.set_item(key, value)?;
-        self.headers = headers.extract(py)?;
-        Ok(())
+    #[pyo3(signature = (status=200, headers=vec![], body=vec![].into()))]
+    fn response_bytes(
+        &self,
+        status: u16,
+        headers: Vec<(PyBackedStr, PyBackedStr)>,
+        body: Cow<[u8]>,
+    ) {
+        if let Some(tx) = self.tx.lock().unwrap().take() {
+            _ = tx.send(PyResponse::Body(PyResponseBody::from_bytes(
+                status,
+                headers,
+                body.into(),
+            )));
+        }
+    }
+
+    #[pyo3(signature = (status=200, headers=vec![], body=String::new()))]
+    fn response_str(&self, status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>, body: String) {
+        if let Some(tx) = self.tx.lock().unwrap().take() {
+            _ = tx.send(PyResponse::Body(PyResponseBody::from_string(
+                status, headers, body,
+            )));
+        }
     }
 }

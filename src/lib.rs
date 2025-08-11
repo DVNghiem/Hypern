@@ -4,20 +4,19 @@ mod instants;
 mod server;
 mod router;
 mod types;
-mod executor;
 mod socket;
+mod errors;
 
-#[pymodule]
-fn hypern(_py: Python<'_>, m: &PyModule) -> PyResult<()>  {
+#[pymodule(gil_used = false)]
+fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()>  {
 
-    m.add_class::<server::Server>()?;
-    m.add_class::<router::route::Route>()?;
-    m.add_class::<router::router::Router>()?;
-    m.add_class::<types::function_info::FunctionInfo>()?;
-    m.add_class::<types::response::Response>()?;
-    m.add_class::<types::header::HypernHeaders>()?;
-    m.add_class::<types::request::Request>()?;
-    m.add_class::<socket::SocketHeld>()?;
+    module.add_class::<server::Server>()?;
+    module.add_class::<router::route::Route>()?;
+    module.add_class::<router::router::Router>()?;
+    module.add_class::<types::response::Response>()?;
+    module.add_class::<types::header::HypernHeaders>()?;
+    module.add_class::<types::request::Request>()?;
+    module.add_class::<socket::SocketHeld>()?;
 
     pyo3::prepare_freethreaded_python();
     Ok(())
