@@ -28,7 +28,7 @@ use std::{
         RwLock,
     },
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use std::{
     process::exit,
@@ -36,7 +36,6 @@ use std::{
 };
 use tokio::sync::oneshot;
 
-use tracing::{debug, info};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -157,11 +156,6 @@ impl Server {
                 .enable_all()
                 .build()
                 .unwrap();
-            debug!(
-                "Server start with {} workers and {} max blockingthreads",
-                workers, max_blocking_threads
-            );
-            debug!("Waiting for process to start...");
 
             rt.block_on(async move {
                 let listener = tokio::net::TcpListener::from_std(raw_socket.into()).unwrap();
@@ -181,23 +175,17 @@ impl Server {
 
                         match shared_context.http2 {
                             true => {
-                                if let Err(err) = http2::Builder::new(TokioExecutor)
+                                http2::Builder::new(TokioExecutor)
                                     .keep_alive_timeout(Duration::from_secs(60))
                                     .serve_connection(io, svc)
                                     .await
-                                {
-                                    debug!("Failed to serve connection: {:?}", err);
-                                }
                             }
                             false => {
-                                if let Err(err) = http1::Builder::new()
+                                http1::Builder::new()
                                     .keep_alive(true)
                                     .serve_connection(io, svc)
                                     .with_upgrades()
                                     .await
-                                {
-                                    debug!("Failed to serve connection: {:?}", err);
-                                }
                             }
                         }
                     });
@@ -219,13 +207,6 @@ async fn http_service(
 ) -> HyperResponse<HTTPResponseBody> {
     let path = req.uri().path().to_string();
     let method = req.method().to_string();
-    let version = req.version();
-    let user_agent = req
-        .headers()
-        .get("user-agent")
-        .cloned()
-        .unwrap_or(HeaderValue::from_str("unknown").unwrap());
-    let start_time = Instant::now();
 
     // matching mapping router
     let route = {
