@@ -242,7 +242,6 @@ async fn http_service(
                 request,
                 function,
                 shared_context.extra_headers,
-                shared_context.task_locals,
             )
             .await;
             response
@@ -252,17 +251,6 @@ async fn http_service(
             .body(full_http(NOTFOUND))
             .unwrap(),
     };
-    // logging
-    info!(
-        "{:?} {:?} {:?} {:?} {:?} {:?}",
-        version,
-        method,
-        path,
-        user_agent,
-        start_time.elapsed(),
-        response.status(),
-    );
-
     return response;
 }
 
@@ -270,7 +258,6 @@ async fn execute_request(
     request: Request,
     function: PyObject,
     extra_headers: Arc<DashMap<String, String>>,
-    task_locals: Arc<TaskLocals>,
 ) -> HyperResponse<HTTPResponseBody> {
     // Create a channel for communication between Python and Rust
     let (tx, rx) = oneshot::channel();
@@ -360,7 +347,7 @@ async fn execute_request(
             // Convert PyResponse to HyperResponse
             match py_response {
                 crate::types::response::PyResponse::Body(body_response) => {
-                    let (mut parts, _body) = body_response.to_response().into_parts();
+                    let (mut parts, body) = body_response.to_response().into_parts();
 
                     // Add extra headers from the server configuration
                     for header in extra_headers.iter() {
@@ -373,7 +360,7 @@ async fn execute_request(
                     }
 
                     // Create the response with the proper body type
-                    HyperResponse::from_parts(parts, full_http(""))
+                    HyperResponse::from_parts(parts, body)
                 }
             }
         }
