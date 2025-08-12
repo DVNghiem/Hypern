@@ -1,9 +1,9 @@
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 
-pub type BoxBody = http_body_util::combinators::BoxBody<Bytes, hyper::Error>;
+pub type HTTPResponseBody = http_body_util::combinators::BoxBody<Bytes, anyhow::Error>;
 
-pub fn full<T: Into<Bytes>>(chunk: T) -> BoxBody {
+pub fn full_http<T: Into<Bytes>>(chunk: T) -> HTTPResponseBody {
     Full::new(chunk.into())
         .map_err(|never| match never {})
         .boxed()

@@ -67,4 +67,29 @@ impl Request {
             error_stream!()
         })
     }
+
+    #[getter(path)]
+    fn path(&self) -> &str {
+        &self.path
+    }
+
+    #[getter(query_string)]
+    fn query_string(&self) -> &str {
+        &self.query_string
+    }
+
+    #[getter(headers)]
+    fn headers(&self) -> HypernHeaders {
+        self.headers.clone()
+    }
+
+    #[getter(method)]
+    fn method(&self) -> &str {
+        &self.method
+    }
+
+    #[getter(path_params)]
+    fn path_params(&self) -> &HashMap<String, String> {
+        &self.path_params
+    }
 }

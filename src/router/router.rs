@@ -7,15 +7,14 @@ use pyo3::prelude::*;
 
 /// Contains the thread safe hashmaps of different routes
 #[pyclass]
-#[derive(Default, FromPyObject)]
+#[derive(Default, Clone)]
 pub struct Router {
     #[pyo3(get, set)]
     path: String,
 
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     routes: Vec<Route>,
 
-    #[pyo3(get, set)]
     radix_tree: RadixNode,
 }
 
@@ -77,7 +76,7 @@ impl Router {
             .routes
             .iter()
             .find(|r| r.matches(path, method))
-            .cloned())
+            .map(|r| r.clone()))
     }
 
     /// Get all routes for a specific path
@@ -86,7 +85,7 @@ impl Router {
         self.routes
             .iter()
             .filter(|r| r.path == path)
-            .cloned()
+            .map(|r| r.clone())
             .collect()
     }
 

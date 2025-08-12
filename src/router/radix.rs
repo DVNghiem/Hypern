@@ -3,6 +3,7 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 
 #[pyclass]
+#[derive(Clone)]
 pub struct RadixNode {
     pub path: String,
     pub children: HashMap<char, RadixNode>,
@@ -14,18 +15,6 @@ pub struct RadixNode {
 impl Default for RadixNode {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl Clone for RadixNode {
-    fn clone(&self) -> Self {
-        Self {
-            path: self.path.clone(),
-            children: self.children.clone(),
-            is_endpoint: self.is_endpoint,
-            routes: self.routes.clone(),
-            param_name: self.param_name.clone(),
-        }
     }
 }
 

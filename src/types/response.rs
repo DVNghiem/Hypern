@@ -8,7 +8,6 @@ use http_body_util::BodyExt;
 use pyo3::{prelude::*, pybacked::PyBackedStr, IntoPyObjectExt};
 
 use hyper::{
-    body,
     header::{HeaderMap, HeaderName, HeaderValue, SERVER},
 };
 use pyo3_async_runtimes::tokio::future_into_py;
@@ -43,18 +42,6 @@ macro_rules! headers_from_py {
 }
 
 impl PyResponseBody {
-    pub fn new(
-        status: u16,
-        headers: Vec<(PyBackedStr, PyBackedStr)>,
-        body: HTTPResponseBody,
-    ) -> Self {
-        Self {
-            status: status.try_into().unwrap(),
-            headers: headers_from_py!(headers),
-            body,
-        }
-    }
-
     pub fn empty(status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>) -> Self {
         Self {
             status: status.try_into().unwrap(),
@@ -123,8 +110,17 @@ impl PyEmptyAwaitable {
 pub(crate) struct Response {
     tx: Mutex<Option<oneshot::Sender<PyResponse>>>,
     disconnect_guard: Arc<Notify>,
-    body: Mutex<Option<body::Incoming>>,
     disconnected: Arc<atomic::AtomicBool>,
+}
+
+impl Response {
+    pub fn new(tx: oneshot::Sender<PyResponse>) -> Self {
+        Self {
+            tx: Mutex::new(Some(tx)),
+            disconnect_guard: Arc::new(Notify::new()),
+            disconnected: Arc::new(atomic::AtomicBool::new(false)),
+        }
+    }
 }
 
 #[pymethods]

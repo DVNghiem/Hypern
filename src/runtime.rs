@@ -1,12 +1,3 @@
-use once_cell::sync::OnceCell;
-use tokio::runtime::Runtime;
-
-static RUNTIME: OnceCell<Runtime> = OnceCell::new();
-
-pub fn get_runtime() -> &'static Runtime {
-    RUNTIME.get_or_init(|| Runtime::new().unwrap())
-}
-
 #[derive(Clone)]
 // An Executor that uses the tokio runtime.
 pub struct TokioExecutor;
