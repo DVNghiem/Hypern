@@ -6,6 +6,7 @@ mod types;
 mod socket;
 mod errors;
 mod runtime;
+mod execute;
 
 #[pymodule(gil_used = false)]
 fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()>  {

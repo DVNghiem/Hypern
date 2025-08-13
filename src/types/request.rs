@@ -9,7 +9,6 @@ use crate::errors::{error_request, error_stream};
 
 use super::header::HypernHeaders;
 use hyper::body;
-
 #[pyclass(frozen)]
 pub struct Request {
     path: String,

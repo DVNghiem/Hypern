@@ -1,11 +1,12 @@
 use crate::{
-    runtime::TokioExecutor,
+    execute::execute_http_function,
     router::router::Router,
+    runtime::TokioExecutor,
     socket::SocketHeld,
     types::{
         body::full_http,
-        request::Request, 
-        response::{Response, HTTPResponseBody},
+        request::Request,
+        response::{HTTPResponseBody, Response},
     },
 };
 use dashmap::DashMap;
@@ -20,7 +21,6 @@ use hyper::{
 use hyper_util::rt::TokioIo;
 use pyo3::prelude::*;
 use pyo3::pycell::PyRef;
-use pyo3_async_runtimes::TaskLocals;
 use std::{
     collections::HashMap,
     sync::{
@@ -43,7 +43,6 @@ static NOTFOUND: &[u8] = b"Not Found";
 
 struct SharedContext {
     router: Arc<RwLock<Router>>,
-    task_locals: Arc<TaskLocals>,
     extra_headers: Arc<DashMap<String, String>>,
     http2: bool,
 }
@@ -51,13 +50,11 @@ struct SharedContext {
 impl SharedContext {
     fn new(
         router: Arc<RwLock<Router>>,
-        task_locals: Arc<TaskLocals>,
         extra_headers: Arc<DashMap<String, String>>,
         http2: bool,
     ) -> Self {
         Self {
             router,
-            task_locals,
             extra_headers,
             http2,
         }
@@ -66,7 +63,6 @@ impl SharedContext {
     fn clone(&self) -> Self {
         Self {
             router: Arc::clone(&self.router),
-            task_locals: Arc::clone(&self.task_locals),
             extra_headers: Arc::clone(&self.extra_headers),
             http2: self.http2,
         }
@@ -137,14 +133,8 @@ impl Server {
         let asyncio = py.import("asyncio")?;
         let event_loop = asyncio.call_method0("get_event_loop")?;
 
-        let task_locals = Arc::new(TaskLocals::new(event_loop.clone()).copy_context(py)?);
-
-        let shared_context = SharedContext::new(
-            self.router.clone(),
-            task_locals.clone(),
-            self.extra_headers.clone(),
-            self.http2,
-        );
+        let shared_context =
+            SharedContext::new(self.router.clone(), self.extra_headers.clone(), self.http2);
 
         thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
@@ -219,12 +209,7 @@ async fn http_service(
             let function = route.function;
             let request = Request::new(req).await;
             // request.path_params = path_params;
-            let response = execute_request(
-                request,
-                function,
-                shared_context.extra_headers,
-            )
-            .await;
+            let response = execute_request(request, function, shared_context.extra_headers).await;
             response
         }
         None => HyperResponse::builder()
@@ -243,81 +228,15 @@ async fn execute_request(
     // Create a channel for communication between Python and Rust
     let (tx, rx) = oneshot::channel();
     let response = Response::new(tx);
-
-    // Clone necessary data for the async task
-    let function_clone = function;
     
     // Create an async task that will handle the Python function call
-    let python_task = async move {
-        // Use spawn_blocking but with proper async handling
-        let result = tokio::task::spawn_blocking(move || {
-            Python::with_gil(|py| {
-                // Call the Python function
-                let args = (request, response);
-                let result = function_clone.call1(py, args);
-                
-                // Handle the result - whether it's a coroutine or not
-                match result {
-                    Ok(maybe_coro) => {
-                        // Check if it's a coroutine by trying to access __await__
-                        if let Ok(true) = maybe_coro.bind(py).hasattr("__await__") {
-                            // This is a coroutine, we need to await it properly
-                            let asyncio = py.import("asyncio")?;
-                            
-                            // Use asyncio.run() to create a new event loop and run the coroutine
-                            let _result = asyncio.call_method1("run", (maybe_coro,))?;
-                            Ok(())
-                        } else {
-                            // Synchronous function, already executed
-                            Ok(())
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Python function call error: {:?}", e);
-                        Err(e)
-                    }
-                }
-            })
-        })
-        .await;
-
-        match result {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(py_err)) => {
-                eprintln!("Python function error: {:?}", py_err);
-                Err(())
-            }
-            Err(join_err) => {
-                eprintln!("Task join error: {:?}", join_err);
-                Err(())
-            }
-        }
-    };
+    tokio::spawn(async move { execute_http_function(function, request, response).await });
 
     // Wait for the response from the Python side with a timeout
-    let response_result = tokio::select! {
-        // Execute the Python function
-        python_result = python_task => {
-            match python_result {
-                Ok(()) => {
-                    // Python function executed successfully, now wait for response
-                    match rx.await {
-                        Ok(py_response) => Some(py_response),
-                        Err(_) => {
-                            eprintln!("Channel closed without response");
-                            None
-                        }
-                    }
-                }
-                Err(()) => {
-                    eprintln!("Python function execution failed");
-                    None
-                }
-            }
-        }
-        // Add a timeout to prevent hanging
-        _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
-            eprintln!("Request timeout after 30 seconds");
+    let response_result = match rx.await {
+        Ok(py_response) => Some(py_response),
+        Err(_) => {
+            eprintln!("Channel closed without response");
             None
         }
     };
@@ -339,7 +258,6 @@ async fn execute_request(
                             parts.headers.insert(name, value);
                         }
                     }
-
                     // Create the response with the proper body type
                     HyperResponse::from_parts(parts, body)
                 }

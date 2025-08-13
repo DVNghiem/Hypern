@@ -23,6 +23,7 @@ impl SocketHeld {
         // reuse port is not available on windows
         #[cfg(not(target_os = "windows"))]
         socket.set_reuse_port(true)?;
+        socket.set_nonblocking(true)?;
 
         socket.set_reuse_address(true)?;
         socket.bind(&address.into())?;
