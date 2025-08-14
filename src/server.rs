@@ -3,17 +3,11 @@ use crate::{
     router::router::Router,
     runtime::TokioExecutor,
     socket::SocketHeld,
-    types::{
-        body::full_http,
-        request::Request,
-        response::{HTTPResponseBody, Response},
-    },
+    types::{body::{full_http, HTTPResponseBody}, request::Request, response::Response},
 };
-use dashmap::DashMap;
 use hyper::Response as HyperResponse;
 use hyper::{
     body::Incoming,
-    header::{HeaderName, HeaderValue},
     server::conn::{http1, http2},
     service::service_fn,
     Request as HyperRequest, StatusCode,
@@ -21,41 +15,25 @@ use hyper::{
 use hyper_util::rt::TokioIo;
 use pyo3::prelude::*;
 use pyo3::pycell::PyRef;
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::Ordering::{Relaxed, SeqCst},
-        RwLock,
-    },
-    thread,
-    time::Duration,
-};
-use std::{
-    process::exit,
-    sync::{atomic::AtomicBool, Arc},
-};
+use std::{process::exit, sync::Arc};
+use std::{sync::RwLock, thread, time::Duration};
 use tokio::sync::oneshot;
-
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
-
-static STARTED: AtomicBool = AtomicBool::new(false);
-static NOTFOUND: &[u8] = b"Not Found";
 
 struct SharedContext {
     router: Arc<RwLock<Router>>,
-    extra_headers: Arc<DashMap<String, String>>,
+    task_locals: Arc<pyo3_async_runtimes::TaskLocals>,
     http2: bool,
 }
 
 impl SharedContext {
     fn new(
         router: Arc<RwLock<Router>>,
-        extra_headers: Arc<DashMap<String, String>>,
+        task_locals: Arc<pyo3_async_runtimes::TaskLocals>,
         http2: bool,
     ) -> Self {
         Self {
             router,
-            extra_headers,
+            task_locals,
             http2,
         }
     }
@@ -63,7 +41,7 @@ impl SharedContext {
     fn clone(&self) -> Self {
         Self {
             router: Arc::clone(&self.router),
-            extra_headers: Arc::clone(&self.extra_headers),
+            task_locals: Arc::clone(&self.task_locals),
             http2: self.http2,
         }
     }
@@ -72,7 +50,6 @@ impl SharedContext {
 #[pyclass]
 pub struct Server {
     router: Arc<RwLock<Router>>,
-    extra_headers: Arc<DashMap<String, String>>,
     http2: bool,
 }
 
@@ -82,7 +59,6 @@ impl Server {
     pub fn new() -> Self {
         Self {
             router: Arc::new(RwLock::new(Router::default())),
-            extra_headers: Arc::new(DashMap::new()),
             http2: false,
         }
     }
@@ -90,12 +66,6 @@ impl Server {
     pub fn set_router(&mut self, router: Router) {
         // Update router
         self.router = Arc::new(RwLock::new(router));
-    }
-
-    pub fn set_response_headers(&mut self, headers: HashMap<String, String>) {
-        for (key, value) in headers {
-            self.extra_headers.insert(key, value);
-        }
     }
 
     pub fn enable_http2(&mut self) {
@@ -109,32 +79,13 @@ impl Server {
         workers: usize,
         max_blocking_threads: usize,
     ) -> PyResult<()> {
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "debug".into()),
-            )
-            .with(
-                fmt::layer()
-                    .with_target(false)
-                    .with_level(true)
-                    .with_file(true),
-            )
-            .init();
-
-        if STARTED
-            .compare_exchange(false, true, SeqCst, Relaxed)
-            .is_err()
-        {
-            return Ok(());
-        }
-
         let raw_socket = socket.get_socket();
         let asyncio = py.import("asyncio")?;
         let event_loop = asyncio.call_method0("get_event_loop")?;
+        let task_locals =
+            Arc::new(pyo3_async_runtimes::TaskLocals::new(event_loop.clone()).copy_context(py)?);
 
-        let shared_context =
-            SharedContext::new(self.router.clone(), self.extra_headers.clone(), self.http2);
+        let shared_context = SharedContext::new(self.router.clone(), task_locals, self.http2);
 
         thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
@@ -209,12 +160,11 @@ async fn http_service(
             let function = route.function;
             let request = Request::new(req).await;
             // request.path_params = path_params;
-            let response = execute_request(request, function, shared_context.extra_headers).await;
-            response
+            execute_request(request, function, shared_context.task_locals).await
         }
         None => HyperResponse::builder()
             .status(StatusCode::NOT_FOUND)
-            .body(full_http(NOTFOUND))
+            .body(full_http(b"Not Found".to_vec()))
             .unwrap(),
     };
     return response;
@@ -223,14 +173,14 @@ async fn http_service(
 async fn execute_request(
     request: Request,
     function: PyObject,
-    extra_headers: Arc<DashMap<String, String>>,
+    task_locals: Arc<pyo3_async_runtimes::TaskLocals>,
 ) -> HyperResponse<HTTPResponseBody> {
     // Create a channel for communication between Python and Rust
     let (tx, rx) = oneshot::channel();
     let response = Response::new(tx);
-    
+    let _ = execute_http_function(function, request, response, task_locals).await;
     // Create an async task that will handle the Python function call
-    tokio::spawn(async move { execute_http_function(function, request, response).await });
+    // tokio::spawn(async move { execute_http_function(function, request, response).await });
 
     // Wait for the response from the Python side with a timeout
     let response_result = match rx.await {
@@ -247,19 +197,8 @@ async fn execute_request(
             // Convert PyResponse to HyperResponse
             match py_response {
                 crate::types::response::PyResponse::Body(body_response) => {
-                    let (mut parts, body) = body_response.to_response().into_parts();
-
-                    // Add extra headers from the server configuration
-                    for header in extra_headers.iter() {
-                        if let (Ok(name), Ok(value)) = (
-                            HeaderName::from_bytes(header.key().as_bytes()),
-                            HeaderValue::from_str(header.value()),
-                        ) {
-                            parts.headers.insert(name, value);
-                        }
-                    }
                     // Create the response with the proper body type
-                    HyperResponse::from_parts(parts, body)
+                    body_response.to_response()
                 }
             }
         }
