@@ -3,7 +3,11 @@ use crate::{
     router::router::Router,
     runtime::TokioExecutor,
     socket::SocketHeld,
-    types::{body::{full_http, HTTPResponseBody}, request::Request, response::Response},
+    types::{
+        body::{full_http, HTTPResponseBody},
+        request::Request,
+        response::Response,
+    },
 };
 use hyper::Response as HyperResponse;
 use hyper::{
@@ -35,14 +39,6 @@ impl SharedContext {
             router,
             task_locals,
             http2,
-        }
-    }
-
-    fn clone(&self) -> Self {
-        Self {
-            router: Arc::clone(&self.router),
-            task_locals: Arc::clone(&self.task_locals),
-            http2: self.http2,
         }
     }
 }
@@ -85,7 +81,11 @@ impl Server {
         let task_locals =
             Arc::new(pyo3_async_runtimes::TaskLocals::new(event_loop.clone()).copy_context(py)?);
 
-        let shared_context = SharedContext::new(self.router.clone(), task_locals, self.http2);
+        let shared_context = Arc::new(SharedContext::new(
+            self.router.clone(),
+            task_locals,
+            self.http2,
+        ));
 
         thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
@@ -104,11 +104,12 @@ impl Server {
                 loop {
                     let (stream, _) = listener.accept().await.unwrap();
                     let io = TokioIo::new(stream);
-                    let shared_context = shared_context.clone();
+                    let shared_context = Arc::clone(&shared_context);
                     tokio::task::spawn(async move {
                         let svc = service_fn(|req: hyper::Request<hyper::body::Incoming>| {
-                            let shared_context = shared_context.clone();
+                            let value = Arc::clone(&shared_context);
                             async move {
+                                let shared_context = Arc::clone(&value);
                                 let response = http_service(req, shared_context).await;
                                 Ok::<_, hyper::Error>(response)
                             }
@@ -144,7 +145,7 @@ impl Server {
 
 async fn http_service(
     req: HyperRequest<Incoming>,
-    shared_context: SharedContext,
+    shared_context: Arc<SharedContext>,
 ) -> HyperResponse<HTTPResponseBody> {
     let path = req.uri().path().to_string();
     let method = req.method().to_string();
@@ -160,7 +161,7 @@ async fn http_service(
             let function = route.function;
             let request = Request::new(req).await;
             // request.path_params = path_params;
-            execute_request(request, function, shared_context.task_locals).await
+            execute_request(request, function, shared_context.task_locals.clone()).await
         }
         None => HyperResponse::builder()
             .status(StatusCode::NOT_FOUND)
@@ -179,7 +180,9 @@ async fn execute_request(
     let (tx, rx) = oneshot::channel();
     let response = Response::new(tx);
     // Create an async task that will handle the Python function call
-    tokio::spawn(async move { execute_http_function(function, request, response, task_locals).await });
+    tokio::spawn(
+        async move { execute_http_function(function, request, response, task_locals).await },
+    );
 
     // Wait for the response from the Python side with a timeout
     let response_result = match rx.await {
