@@ -178,9 +178,8 @@ async fn execute_request(
     // Create a channel for communication between Python and Rust
     let (tx, rx) = oneshot::channel();
     let response = Response::new(tx);
-    let _ = execute_http_function(function, request, response, task_locals).await;
     // Create an async task that will handle the Python function call
-    // tokio::spawn(async move { execute_http_function(function, request, response).await });
+    tokio::spawn(async move { execute_http_function(function, request, response, task_locals).await });
 
     // Wait for the response from the Python side with a timeout
     let response_result = match rx.await {
