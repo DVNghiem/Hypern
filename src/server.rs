@@ -20,18 +20,18 @@ use hyper_util::rt::TokioIo;
 use pyo3::prelude::*;
 use pyo3::pycell::PyRef;
 use std::{process::exit, sync::Arc};
-use std::{sync::RwLock, thread, time::Duration};
+use std::{thread, time::Duration};
 use tokio::sync::oneshot;
 
 struct SharedContext {
-    router: Arc<RwLock<Router>>,
+    router: Arc<Router>,
     task_locals: Arc<pyo3_async_runtimes::TaskLocals>,
     http2: bool,
 }
 
 impl SharedContext {
     fn new(
-        router: Arc<RwLock<Router>>,
+        router: Arc<Router>,
         task_locals: Arc<pyo3_async_runtimes::TaskLocals>,
         http2: bool,
     ) -> Self {
@@ -45,7 +45,7 @@ impl SharedContext {
 
 #[pyclass]
 pub struct Server {
-    router: Arc<RwLock<Router>>,
+    router: Arc<Router>,
     http2: bool,
 }
 
@@ -54,14 +54,14 @@ impl Server {
     #[new]
     pub fn new() -> Self {
         Self {
-            router: Arc::new(RwLock::new(Router::default())),
+            router: Arc::new(Router::default()),
             http2: false,
         }
     }
 
     pub fn set_router(&mut self, router: Router) {
-        // Update router
-        self.router = Arc::new(RwLock::new(router));
+        // Update router - convert to Arc for shared immutable access
+        self.router = Arc::new(router);
     }
 
     pub fn enable_http2(&mut self) {
@@ -91,10 +91,11 @@ impl Server {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(workers)
                 .max_blocking_threads(max_blocking_threads)
-                .thread_keep_alive(Duration::from_secs(60))
+                .thread_keep_alive(Duration::from_secs(5))
                 .thread_name("hypern-worker")
-                .thread_stack_size(3 * 1024 * 1024) // 3MB stack
-                .enable_all()
+                .thread_stack_size(1024 * 1024) // 1MB stack (minimal)
+                .enable_io()
+                .enable_time()
                 .build()
                 .unwrap();
 
@@ -103,32 +104,47 @@ impl Server {
 
                 loop {
                     let (stream, _) = listener.accept().await.unwrap();
+                    
+                    // Configure stream for maximum performance
+                    let _ = stream.set_nodelay(true);
+                    let _ = stream.set_linger(None);
+                    
                     let io = TokioIo::new(stream);
-                    let shared_context = Arc::clone(&shared_context);
+                    let shared_context = shared_context.clone();
+                    
+                    // Use a lighter-weight spawn for connection handling
                     tokio::task::spawn(async move {
                         let svc = service_fn(|req: hyper::Request<hyper::body::Incoming>| {
-                            let value = Arc::clone(&shared_context);
+                            let ctx = shared_context.clone();
                             async move {
-                                let shared_context = Arc::clone(&value);
-                                let response = http_service(req, shared_context).await;
+                                let response = http_service(req, ctx).await;
                                 Ok::<_, hyper::Error>(response)
                             }
                         });
 
-                        match shared_context.http2 {
+                        let result = match shared_context.http2 {
                             true => {
                                 http2::Builder::new(TokioExecutor)
-                                    .keep_alive_timeout(Duration::from_secs(60))
+                                    .keep_alive_timeout(Duration::from_secs(10))
+                                    .keep_alive_interval(Duration::from_secs(2))
+                                    .max_concurrent_streams(Some(4000))
+                                    .max_frame_size(Some(8192))
                                     .serve_connection(io, svc)
                                     .await
                             }
                             false => {
                                 http1::Builder::new()
                                     .keep_alive(true)
+                                    .half_close(true)
+                                    .max_buf_size(8192)
                                     .serve_connection(io, svc)
                                     .with_upgrades()
                                     .await
                             }
+                        };
+                        
+                        if let Err(e) = result {
+                            eprintln!("Connection error: {}", e);
                         }
                     });
                 }
@@ -147,16 +163,13 @@ async fn http_service(
     req: HyperRequest<Incoming>,
     shared_context: Arc<SharedContext>,
 ) -> HyperResponse<HTTPResponseBody> {
-    let path = req.uri().path().to_string();
-    let method = req.method().to_string();
+    let path = req.uri().path();
+    let method = req.method().as_str();
 
-    // matching mapping router
-    let route = {
-        let router = shared_context.router.read().unwrap();
-        router.find_matching_route(&path, &method)
-    };
+    // Fast path: direct router lookup without cloning
+    let route = shared_context.router.find_matching_route(path, method);
 
-    let response = match route {
+    match route {
         Some((route, _path_params)) => {
             let function = route.function;
             let request = Request::new(req).await;
@@ -167,8 +180,7 @@ async fn http_service(
             .status(StatusCode::NOT_FOUND)
             .body(full_http(b"Not Found".to_vec()))
             .unwrap(),
-    };
-    return response;
+    }
 }
 
 async fn execute_request(
@@ -179,36 +191,30 @@ async fn execute_request(
     // Create a channel for communication between Python and Rust
     let (tx, rx) = oneshot::channel();
     let response = Response::new(tx);
-    // Create an async task that will handle the Python function call
-    tokio::spawn(
-        async move { execute_http_function(function, request, response, task_locals).await },
-    );
+    
+    // Execute Python function on a blocking thread pool for better isolation
+    tokio::task::spawn(execute_http_function(function, request, response, task_locals));
 
-    // Wait for the response from the Python side with a timeout
-    let response_result = match rx.await {
-        Ok(py_response) => Some(py_response),
-        Err(_) => {
-            eprintln!("Channel closed without response");
-            None
-        }
+    // Wait for the response from the Python side with a shorter timeout
+    let response_result = match tokio::time::timeout(Duration::from_secs(10), rx).await {
+        Ok(Ok(py_response)) => Some(py_response),
+        Ok(Err(_)) => None,
+        Err(_) => None,
     };
 
     // Convert the response or return an error
     match response_result {
         Some(py_response) => {
-            // Convert PyResponse to HyperResponse
             match py_response {
                 crate::types::response::PyResponse::Body(body_response) => {
-                    // Create the response with the proper body type
                     body_response.to_response()
                 }
             }
         }
         None => {
-            // If no response was received, return 500
             HyperResponse::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(full_http("No response from handler"))
+                .body(full_http("Handler error"))
                 .unwrap()
         }
     }

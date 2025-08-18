@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 
 use crate::types::{request::Request, response::Response};
 
-#[inline]
+#[inline(always)]
 pub async fn execute_http_function(
     function: Py<PyAny>,
     request: Request,
