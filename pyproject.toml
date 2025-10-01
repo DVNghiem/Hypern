@@ -33,7 +33,7 @@ dependencies=[
 ]
 [tool.maturin]
 features = ["pyo3/extension-module"]
-module-name = "hypern"
+module-name = "hypern.hypern"
 
 [tool.poetry]
 name = "hypern"

@@ -12,6 +12,20 @@ impl HypernHeaders {
     pub fn new(map: HeaderMap) -> Self {
         Self { inner: map }
     }
+    
+    /// Public method to get header value
+    pub fn get_header(&self, key: &str) -> Option<String> {
+        if let Some(value) = self.inner.get(key) {
+            value.to_str().ok().map(|s| s.to_string())
+        } else {
+            None
+        }
+    }
+    
+    /// Public method to check if header exists
+    pub fn has_header(&self, key: &str) -> bool {
+        self.inner.contains_key(key)
+    }
 }
 
 #[pymethods]

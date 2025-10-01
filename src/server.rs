@@ -1,4 +1,5 @@
 use crate::{
+    application::Application,
     execute::execute_http_function,
     router::router::Router,
     runtime::TokioExecutor,
@@ -62,6 +63,11 @@ impl Server {
     pub fn set_router(&mut self, router: Router) {
         // Update router - convert to Arc for shared immutable access
         self.router = Arc::new(router);
+    }
+
+    pub fn set_application(&mut self, app: &Application) {
+        // Update router from application
+        self.router = Arc::new(app.get_router());
     }
 
     pub fn enable_http2(&mut self) {

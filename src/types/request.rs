@@ -16,7 +16,9 @@ pub struct Request {
     headers: HypernHeaders,
     method: String,
     path_params: HashMap<String, String>,
+    query_params: HashMap<String, String>,
     body: Mutex<Option<body::Incoming>>,
+    cached_body: Mutex<Option<Vec<u8>>>,
 }
 
 impl Request {
@@ -33,8 +35,16 @@ impl Request {
         );
 
         let headers = HypernHeaders::new(req_part.headers);
-
         let method = req_part.method.to_string();
+
+        // Parse query parameters
+        let query_params = if query_string.is_empty() {
+            HashMap::new()
+        } else {
+            form_urlencoded::parse(query_string.as_bytes())
+                .into_owned()
+                .collect()
+        };
 
         Self {
             path: String::from_utf8_lossy(&path).to_string(),
@@ -42,10 +52,50 @@ impl Request {
             headers,
             method,
             path_params: HashMap::new(),
+            query_params,
             body: Mutex::new(Some(body_part)),
+            cached_body: Mutex::new(None),
         }
     }
 }
+
+impl Request {
+    /// Helper method to get body bytes, caching the result
+    async fn get_body_bytes(&self) -> PyResult<Vec<u8>> {
+        // Check if body is already cached
+        {
+            let cached = self.cached_body.lock().unwrap();
+            if let Some(bytes) = cached.as_ref() {
+                return Ok(bytes.clone());
+            }
+        }
+
+        // Get body from the mutex
+        let body = {
+            let mut body_guard = self.body.lock().unwrap();
+            body_guard.take()
+        };
+
+        if let Some(body) = body {
+            match body.collect().await {
+                Ok(data) => {
+                    let bytes = data.to_bytes().to_vec();
+                    // Cache the result
+                    {
+                        let mut cached = self.cached_body.lock().unwrap();
+                        *cached = Some(bytes.clone());
+                    }
+                    Ok(bytes)
+                }
+                Err(_) => Err(PyErr::new::<pyo3::exceptions::PyIOError, _>("Failed to read body"))
+            }
+        } else {
+            Err(PyErr::new::<pyo3::exceptions::PyIOError, _>("Body already consumed"))
+        }
+    }
+}
+
+// JSON conversion will be implemented later with proper PyO3 API
 
 #[pymethods]
 impl Request {
@@ -90,5 +140,49 @@ impl Request {
     #[getter(path_params)]
     fn path_params(&self) -> &HashMap<String, String> {
         &self.path_params
+    }
+
+    #[getter(query_params)]
+    fn query_params(&self) -> &HashMap<String, String> {
+        &self.query_params
+    }
+
+    /// Get a query parameter by name
+    pub fn query(&self, name: &str) -> Option<&String> {
+        self.query_params.get(name)
+    }
+
+    /// Get a path parameter by name  
+    pub fn param(&self, name: &str) -> Option<&String> {
+        self.path_params.get(name)
+    }
+
+    /// Get content type from headers
+    pub fn content_type(&self) -> Option<String> {
+        self.headers.get_header("content-type")
+    }
+
+    /// Check if request has a specific content type
+    pub fn is_content_type(&self, content_type: &str) -> bool {
+        if let Some(ct) = self.content_type() {
+            ct.to_lowercase().contains(&content_type.to_lowercase())
+        } else {
+            false
+        }
+    }
+
+    /// Check if request accepts JSON
+    pub fn is_json(&self) -> bool {
+        self.is_content_type("application/json")
+    }
+
+    /// Check if request is form data
+    pub fn is_form(&self) -> bool {
+        self.is_content_type("application/x-www-form-urlencoded")
+    }
+
+    /// Check if request is multipart
+    pub fn is_multipart(&self) -> bool {
+        self.is_content_type("multipart/")
     }
 }

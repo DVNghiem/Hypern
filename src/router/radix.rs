@@ -67,6 +67,7 @@ impl RadixNode {
 
         let segment = segments[index];
 
+        // Handle parameter routes (:param)
         if segment.starts_with(':') {
             let param_name = segment[1..].to_string();
             let param_node = self.children.entry(':').or_insert_with(|| {
@@ -75,6 +76,20 @@ impl RadixNode {
                 node
             });
             param_node._insert_segments(segments, index + 1, route);
+            return;
+        }
+
+        // Handle wildcard routes (*path)
+        if segment.starts_with('*') {
+            let param_name = segment[1..].to_string();
+            let wildcard_node = self.children.entry('*').or_insert_with(|| {
+                let mut node = RadixNode::new();
+                node.param_name = Some(param_name.clone());
+                node
+            });
+            // Wildcard captures everything, so mark as endpoint immediately
+            wildcard_node.is_endpoint = true;
+            wildcard_node.routes.insert(route.method.to_uppercase(), route);
             return;
         }
 
@@ -222,6 +237,21 @@ impl RadixNode {
                 if let Some(result) = param_node._find_segments(segments, index + 1, method, params)
                 {
                     return Some(result);
+                }
+                params.remove(param_name);
+            }
+        }
+
+        // Check wildcard node (matches everything remaining)
+        if let Some(wildcard_node) = self.children.get(&'*') {
+            if let Some(param_name) = &wildcard_node.param_name {
+                // Collect all remaining segments as the wildcard parameter
+                let remaining_path = segments[index..].join("/");
+                params.insert(param_name.clone(), remaining_path);
+                if wildcard_node.is_endpoint {
+                    if let Some(route) = wildcard_node.routes.get(&method.to_uppercase()) {
+                        return Some((route, params.clone()));
+                    }
                 }
                 params.remove(param_name);
             }

@@ -140,14 +140,14 @@ impl Response {
     }
 
     #[pyo3(signature = (status=200, headers=vec![]))]
-    fn send_empty(&self, status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>) {
+    pub fn send_empty(&self, status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>) {
         if let Some(tx) = self.tx.lock().unwrap().take() {
             _ = tx.send(PyResponse::Body(PyResponseBody::empty(status, headers)));
         }
     }
 
     #[pyo3(signature = (status=200, headers=vec![], body=vec![].into()))]
-    fn send_bytes(
+    pub fn send_bytes(
         &self,
         status: u16,
         headers: Vec<(PyBackedStr, PyBackedStr)>,
@@ -163,7 +163,7 @@ impl Response {
     }
 
     #[pyo3(signature = (status=200, headers=vec![], body=String::new()))]
-    fn send_str(&self, status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>, body: String) {
+    pub fn send_str(&self, status: u16, headers: Vec<(PyBackedStr, PyBackedStr)>, body: String) {
         if let Some(tx) = self.tx.lock().unwrap().take() {
             _ = tx.send(PyResponse::Body(PyResponseBody::from_string(
                 status, headers, body,
