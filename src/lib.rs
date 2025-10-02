@@ -22,7 +22,6 @@ mod errors;
 mod runtime;
 mod execute;
 mod application;
-mod error_handling;
 mod lifecycle;
 
 #[pymodule(gil_used = false)]
@@ -38,9 +37,9 @@ fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()>  {
     module.add_class::<types::request::Request>()?;
     module.add_class::<types::header::HypernHeaders>()?;
     module.add_class::<socket::SocketHeld>()?;
-    module.add_class::<error_handling::HypernError>()?;
-    module.add_class::<error_handling::DefaultErrorHandler>()?;
-    module.add_class::<error_handling::ErrorContext>()?;
+    module.add_class::<errors::HypernError>()?;
+    module.add_class::<errors::DefaultErrorHandler>()?;
+    module.add_class::<errors::ErrorContext>()?;
     module.add_class::<lifecycle::LifecycleManager>()?;
 
     pyo3::prepare_freethreaded_python();

@@ -21,11 +21,6 @@ impl HypernHeaders {
             None
         }
     }
-    
-    /// Public method to check if header exists
-    pub fn has_header(&self, key: &str) -> bool {
-        self.inner.contains_key(key)
-    }
 }
 
 #[pymethods]

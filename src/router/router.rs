@@ -167,7 +167,7 @@ impl Router {
 }
 
 impl Router {
-    pub fn iter(&self) -> std::slice::Iter<Route> {
+    pub fn iter(&'_ self) -> std::slice::Iter<'_, Route> {
         self.routes.iter()
     }
     

@@ -18,7 +18,6 @@ pub struct Request {
     path_params: HashMap<String, String>,
     query_params: HashMap<String, String>,
     body: Mutex<Option<body::Incoming>>,
-    cached_body: Mutex<Option<Vec<u8>>>,
 }
 
 impl Request {
@@ -54,48 +53,9 @@ impl Request {
             path_params: HashMap::new(),
             query_params,
             body: Mutex::new(Some(body_part)),
-            cached_body: Mutex::new(None),
         }
     }
 }
-
-impl Request {
-    /// Helper method to get body bytes, caching the result
-    async fn get_body_bytes(&self) -> PyResult<Vec<u8>> {
-        // Check if body is already cached
-        {
-            let cached = self.cached_body.lock().unwrap();
-            if let Some(bytes) = cached.as_ref() {
-                return Ok(bytes.clone());
-            }
-        }
-
-        // Get body from the mutex
-        let body = {
-            let mut body_guard = self.body.lock().unwrap();
-            body_guard.take()
-        };
-
-        if let Some(body) = body {
-            match body.collect().await {
-                Ok(data) => {
-                    let bytes = data.to_bytes().to_vec();
-                    // Cache the result
-                    {
-                        let mut cached = self.cached_body.lock().unwrap();
-                        *cached = Some(bytes.clone());
-                    }
-                    Ok(bytes)
-                }
-                Err(_) => Err(PyErr::new::<pyo3::exceptions::PyIOError, _>("Failed to read body"))
-            }
-        } else {
-            Err(PyErr::new::<pyo3::exceptions::PyIOError, _>("Body already consumed"))
-        }
-    }
-}
-
-// JSON conversion will be implemented later with proper PyO3 API
 
 #[pymethods]
 impl Request {
