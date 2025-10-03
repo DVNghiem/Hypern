@@ -20,7 +20,6 @@ mod body;
 mod header;
 mod request;
 mod response;
-mod response_builder;
 mod socket;
 mod errors;
 mod runtime;
@@ -40,7 +39,6 @@ fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()>  {
     module.add_class::<middleware::Middleware>()?;
     module.add_class::<application::Application>()?;
     module.add_class::<response::Response>()?;
-    module.add_class::<response_builder::ResponseBuilder>()?;
     module.add_class::<request::Request>()?;
     module.add_class::<header::HypernHeaders>()?;
     module.add_class::<socket::SocketHeld>()?;
