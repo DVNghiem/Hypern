@@ -1,5 +1,4 @@
 use pyo3::prelude::*;
-use std::collections::HashMap;
 
 /// Middleware function type - takes request/response and can modify them
 #[pyclass]
@@ -88,35 +87,5 @@ impl MiddlewareChain {
     
     pub fn get_applicable_error(&self, path: &str) -> Vec<&Middleware> {
         self.error.iter().filter(|m| m.applies_to(path)).collect()
-    }
-}
-
-/// Context passed through middleware chain
-#[derive(Default)]
-pub struct MiddlewareContext {
-    pub data: HashMap<String, PyObject>,
-    pub skip_remaining: bool,
-    pub error: Option<PyObject>,
-}
-
-impl MiddlewareContext {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    
-    pub fn set_data(&mut self, key: String, value: PyObject) {
-        self.data.insert(key, value);
-    }
-    
-    pub fn get_data(&self, key: &str) -> Option<&PyObject> {
-        self.data.get(key)
-    }
-    
-    pub fn skip_remaining(&mut self) {
-        self.skip_remaining = true;
-    }
-    
-    pub fn set_error(&mut self, error: PyObject) {
-        self.error = Some(error);
     }
 }
