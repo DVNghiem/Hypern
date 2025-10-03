@@ -13,7 +13,7 @@ use hyper::{
 use pyo3_async_runtimes::tokio::future_into_py;
 use tokio::sync::{oneshot, Notify};
 
-use crate::types::body::HTTPResponseBody;
+use crate::body::HTTPResponseBody;
 
 pub(crate) enum PyResponse {
     Body(PyResponseBody),

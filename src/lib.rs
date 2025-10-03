@@ -16,7 +16,11 @@ use pyo3::prelude::*;
 
 mod server;
 mod router;
-mod types;
+mod body;
+mod header;
+mod request;
+mod response;
+mod response_builder;
 mod socket;
 mod errors;
 mod runtime;
@@ -24,19 +28,22 @@ mod execute;
 mod application;
 mod error_handling;
 mod lifecycle;
+pub mod radix;
+pub mod route;
+pub mod middleware;
 
 #[pymodule(gil_used = false)]
 fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()>  {
 
     module.add_class::<server::Server>()?;
-    module.add_class::<router::route::Route>()?;
-    module.add_class::<router::router::Router>()?;
-    module.add_class::<router::middleware::Middleware>()?;
+    module.add_class::<route::Route>()?;
+    module.add_class::<router::Router>()?;
+    module.add_class::<middleware::Middleware>()?;
     module.add_class::<application::Application>()?;
-    module.add_class::<types::response::Response>()?;
-    module.add_class::<types::response_builder::ResponseBuilder>()?;
-    module.add_class::<types::request::Request>()?;
-    module.add_class::<types::header::HypernHeaders>()?;
+    module.add_class::<response::Response>()?;
+    module.add_class::<response_builder::ResponseBuilder>()?;
+    module.add_class::<request::Request>()?;
+    module.add_class::<header::HypernHeaders>()?;
     module.add_class::<socket::SocketHeld>()?;
     module.add_class::<error_handling::HypernError>()?;
     module.add_class::<error_handling::DefaultErrorHandler>()?;

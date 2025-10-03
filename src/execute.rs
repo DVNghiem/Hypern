@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use pyo3::prelude::*;
 
-use crate::types::{request::Request, response::Response};
+use crate::{request::Request, response::Response};
 
 #[inline(always)]
 pub async fn execute_http_function(

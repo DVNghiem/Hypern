@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use super::radix::RadixNode;
-use super::route::Route;
-use super::middleware::{Middleware, MiddlewareChain};
+use crate::radix::RadixNode;
+use crate::route::Route;
+use crate::middleware::{Middleware, MiddlewareChain};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 

@@ -1,4 +1,4 @@
-use crate::router::{route::Route, router::Router, middleware::Middleware};
+use crate::{route::Route, router::Router, middleware::Middleware};
 use pyo3::prelude::*;
 
 /// ExpressJS-inspired application structure

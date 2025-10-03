@@ -1,10 +1,10 @@
 use crate::{
     application::Application,
     execute::execute_http_function,
-    router::router::Router,
+    router::Router,
     runtime::TokioExecutor,
     socket::SocketHeld,
-    types::{
+    {
         body::{full_http, HTTPResponseBody},
         request::Request,
         response::Response,
@@ -212,7 +212,7 @@ async fn execute_request(
     match response_result {
         Some(py_response) => {
             match py_response {
-                crate::types::response::PyResponse::Body(body_response) => {
+                crate::response::PyResponse::Body(body_response) => {
                     body_response.to_response()
                 }
             }
