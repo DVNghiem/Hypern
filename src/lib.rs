@@ -26,9 +26,9 @@ mod runtime;
 mod execute;
 mod application;
 mod lifecycle;
-pub mod radix;
-pub mod route;
-pub mod middleware;
+mod radix;
+mod route;
+mod middleware;
 
 #[pymodule(gil_used = false)]
 fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()>  {

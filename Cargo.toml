@@ -9,8 +9,8 @@ name = "hypern"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-pyo3 = { version = "0.25.1", features = ["extension-module", "generate-import-lib", "experimental-async"] }
-pyo3-async-runtimes = { version = "0.25", features = ["tokio-runtime"] }
+pyo3 = { version = "0.26.0", features = ["anyhow", "bytes", "extension-module", "generate-import-lib"] }
+pyo3-async-runtimes = { version = "0.26.0", features = ["tokio-runtime"] }
 
 tokio = { version = "1.47.1", features = ["full"] }
 socket2 = { version = "0.6.0", features = ["all"] }
