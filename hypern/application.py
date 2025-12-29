@@ -7,9 +7,8 @@ from typing import Any, Callable, List, TypeVar
 import psutil
 from typing_extensions import Annotated, Doc
 
-from hypern.hypern import Router, Server
+from hypern.hypern import Router, Server, SocketHeld
 from hypern.hypern import Route
-from hypern.processpool import run_processes
 
 AppType = TypeVar("AppType", bound="Hypern")
 
@@ -79,9 +78,7 @@ class Hypern:
         host='0.0.0.0',
         port=5000,
         workers=1,
-        processes=1,
         max_blocking_threads=1,
-        reload=False,
     ):
         """
         Starts the server with the specified configuration.
@@ -91,17 +88,8 @@ class Hypern:
         """
         server = Server()
         server.set_router(router=self.router)
-
-
-        run_processes(
-            server=server,
-            host=host,
-            port=port,
-            workers=workers,
-            processes=processes,
-            max_blocking_threads=max_blocking_threads,
-            reload=reload,
-        )
+        socket = SocketHeld(host, port)
+        server.start(socket=socket, workers=workers, max_blocking_threads=max_blocking_threads)
 
     def add_route(self, method: str, endpoint: str, handler: Callable[..., Any]):
         """
