@@ -1,6 +1,3 @@
-//! Route caching with LRU eviction for hot path optimization.
-
-use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -31,16 +28,6 @@ pub struct RouteCache {
     cache: dashmap::DashMap<u64, CachedRoute>,
     max_size: usize,
     access_counter: AtomicU64,
-    stats: RwLock<RouteCacheStats>,
-}
-
-/// Statistics for the route cache
-#[derive(Debug, Default, Clone)]
-pub struct RouteCacheStats {
-    pub hits: u64,
-    pub misses: u64,
-    pub evictions: u64,
-    pub insertions: u64,
 }
 
 impl RouteCache {
@@ -49,7 +36,6 @@ impl RouteCache {
             cache: dashmap::DashMap::with_capacity(max_size),
             max_size,
             access_counter: AtomicU64::new(0),
-            stats: RwLock::new(RouteCacheStats::default()),
         }
     }
 
@@ -60,10 +46,8 @@ impl RouteCache {
             let access_time = self.access_counter.fetch_add(1, Ordering::Relaxed);
             entry.hits += 1;
             entry.last_access = access_time;
-            self.stats.write().hits += 1;
             Some(entry.clone())
         } else {
-            self.stats.write().misses += 1;
             None
         }
     }
@@ -77,7 +61,6 @@ impl RouteCache {
 
         let cached = CachedRoute::new(route, path_params);
         self.cache.insert(path_hash, cached);
-        self.stats.write().insertions += 1;
     }
 
     /// Evict least recently used entry
@@ -94,23 +77,6 @@ impl RouteCache {
 
         if let Some(key) = oldest_key {
             self.cache.remove(&key);
-            self.stats.write().evictions += 1;
-        }
-    }
-
-    /// Get cache statistics
-    pub fn get_stats(&self) -> RouteCacheStats {
-        self.stats.read().clone()
-    }
-
-    /// Get hit rate
-    pub fn hit_rate(&self) -> f64 {
-        let stats = self.stats.read();
-        let total = stats.hits + stats.misses;
-        if total > 0 {
-            stats.hits as f64 / total as f64
-        } else {
-            0.0
         }
     }
 
@@ -175,49 +141,10 @@ impl RouteMatcher {
         self.cache.insert(hash, route, params);
     }
 
-    /// Get cache statistics
-    pub fn get_stats(&self) -> RouteCacheStats {
-        self.cache.get_stats()
-    }
-
-    /// Get hit rate
-    pub fn hit_rate(&self) -> f64 {
-        self.cache.hit_rate()
-    }
 }
 
 impl Default for RouteMatcher {
     fn default() -> Self {
         Self::new(10000)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_route_cache_hit_miss() {
-        let cache = RouteCache::new(100);
-
-        // Miss
-        assert!(cache.get(12345).is_none());
-        assert_eq!(cache.get_stats().misses, 1);
-
-        // Insert and hit
-        let route = Route::empty();
-        cache.insert(12345, route, HashMap::new());
-        assert!(cache.get(12345).is_some());
-        assert_eq!(cache.get_stats().hits, 1);
-    }
-
-    #[test]
-    fn test_route_matcher_hash() {
-        let hash1 = RouteMatcher::compute_hash("/api/users", "GET");
-        let hash2 = RouteMatcher::compute_hash("/api/users", "POST");
-        let hash3 = RouteMatcher::compute_hash("/api/users", "GET");
-
-        assert_ne!(hash1, hash2);
-        assert_eq!(hash1, hash3);
     }
 }

@@ -25,7 +25,6 @@ pub mod core;
 pub mod fast_path;
 pub mod http;
 pub mod memory;
-pub mod metrics;
 pub mod middleware;
 pub mod python;
 pub mod routing;
@@ -36,7 +35,7 @@ pub mod utils;
 pub use crate::core::server::Server;
 pub use crate::http::headers::{FastHeaders, HypernHeaders};
 pub use crate::http::request::{FastRequest, Request};
-pub use crate::http::response::{Response, ResponseSlot, ResponseWriter};
+pub use crate::http::response::{ResponseSlot, ResponseWriter};
 pub use crate::middleware::Middleware;
 pub use crate::routing::cache::RouteCache;
 pub use crate::routing::route::Route;
@@ -46,7 +45,6 @@ pub use crate::routing::router::Router;
 pub use fast_path::json_cache::JsonResponseCache;
 pub use fast_path::static_files::StaticFileHandler;
 pub use memory::pool::{RequestPool, ResponsePool};
-pub use metrics::collector::ServerMetrics;
 
 #[pymodule(gil_used = false)]
 fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
@@ -56,7 +54,6 @@ fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<Router>()?;
     module.add_class::<Middleware>()?;
 
-    module.add_class::<Response>()?;
     module.add_class::<ResponseWriter>()?;
     module.add_class::<Request>()?;
     module.add_class::<HypernHeaders>()?;

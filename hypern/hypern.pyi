@@ -11,9 +11,13 @@ class Request:
 
     async def __call__(self, *args, **kwds): ...
 
-class Response:
-    def send_bytes(self, status: int, headers: list[tuple[str, str]], body: bytes) -> None: ...
-
+class ResponseWriter:
+    def status(self, status: int) -> ResponseWriter: ...
+    def header(self, key: str, value: str) -> ResponseWriter: ...
+    def body(self, body: bytes) -> ResponseWriter: ...
+    def body_str(self, body: str) -> ResponseWriter: ...
+    def finish(self) -> None: ...
+    
 @dataclass
 class Server:
     router: Router
@@ -28,7 +32,7 @@ class Server:
 
 class Route:
     path: str
-    function: Callable[[Request, Response], Any]
+    function: Callable[[Request, ResponseWriter], Any]
     method: str
     doc: str | None = None
 

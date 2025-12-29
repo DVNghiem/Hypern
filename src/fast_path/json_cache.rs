@@ -122,20 +122,6 @@ impl JsonResponseCache {
         self.cache.write().clear();
     }
 
-    /// Get cache statistics
-    pub fn stats(&self) -> JsonCacheStats {
-        let cache = self.cache.read();
-        let entries = cache.len();
-        let total_size: usize = cache.values().map(|v| v.data.len()).sum();
-        let total_hits: u64 = cache.values().map(|v| v.hits).sum();
-
-        JsonCacheStats {
-            entries,
-            total_size,
-            total_hits,
-        }
-    }
-
     /// Compute hash for a cache key
     pub fn compute_key_hash(route: &str, params: &str) -> u64 {
         use xxhash_rust::xxh3::xxh3_64;
@@ -148,12 +134,4 @@ impl Default for JsonResponseCache {
     fn default() -> Self {
         Self::new(10000, Duration::from_secs(60))
     }
-}
-
-/// Cache statistics
-#[derive(Debug, Clone, Default)]
-pub struct JsonCacheStats {
-    pub entries: usize,
-    pub total_size: usize,
-    pub total_hits: u64,
 }

@@ -5,11 +5,13 @@ use pyo3::prelude::*;
 use pyo3::pycell::PyRef;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tracing::error;
 
 use crate::core::interpreter_pool::InterpreterPool;
 use crate::http::request::FastRequest;
 use crate::routing::router::Router;
-use crate::socket::SocketHeld; // Kept for API compatibility
+use crate::socket::SocketHeld;
+use crate::utils::cpu::num_cpus; // Kept for API compatibility
 
 #[pyclass]
 pub struct Server {
@@ -22,14 +24,10 @@ pub struct Server {
 impl Server {
     #[new]
     pub fn new() -> Self {
-        let num_workers = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4);
-
         Self {
             router: Arc::new(Router::default()),
             http2: false,
-            interpreter_pool: Arc::new(InterpreterPool::new(num_workers)),
+            interpreter_pool: Arc::new(InterpreterPool::new(num_cpus(4))),
         }
     }
 
@@ -45,18 +43,10 @@ impl Server {
         &mut self,
         py: Python,
         socket: PyRef<SocketHeld>,
-        _workers: usize,
-        _max_blocking_threads: usize,
+        workers: usize,
+        max_blocking_threads: usize,
     ) -> PyResult<()> {
         let raw_socket = socket.get_socket();
-
-        let _addr = raw_socket
-            .local_addr()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyOSError, _>(e.to_string()))?
-            .as_socket()
-            .ok_or_else(|| {
-                PyErr::new::<pyo3::exceptions::PyValueError, _>("Invalid socket address")
-            })?;
 
         // Register all routes in the interpreter pool
         for route in self.router.iter() {
@@ -65,10 +55,6 @@ impl Server {
                 route.function.clone_ref(py),
             );
         }
-
-        // We need to clone the listener or create a new one from the FD
-        // Since we are inside Python start, we likely need to spawn a runtime or block.
-        // Usually `server.start` wraps the main future.
 
         // Convert std TcpListener to Tokio TcpListener
         raw_socket
@@ -79,18 +65,13 @@ impl Server {
             .try_clone()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyOSError, _>(e.to_string()))?;
 
-        // Move execution to asyncio loop or run a new runtime?
-        // Typically Pyo3 async methods return a Coroutine.
-        // But this `start` is synchronous in signature.
-        // If it returns `PyResult<()>`, it might be expected to spawn a background thread
-        // OR run the loop blocking.
-        // Given previous code spawned a thread, let's do that with a Tokio runtime.
-
         let pool = self.interpreter_pool.clone();
         let router = self.router.clone();
 
         py.detach(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(workers)
+                .max_blocking_threads(max_blocking_threads)
                 .enable_all()
                 .build()
                 .expect("Failed to build Tokio runtime");
@@ -114,21 +95,13 @@ impl Server {
                                     async move {
                                         // Parse request to FastRequest
                                         let fast_req = FastRequest::from_hyper(req).await;
-                                        eprintln!(
-                                            "Received request: {} {}",
-                                            fast_req.method().as_str(),
-                                            fast_req.path()
-                                        );
-
                                         // Match route to get pattern-based hash and params
                                         if let Some((route, params)) = router.find_matching_route(
                                             fast_req.path(),
                                             fast_req.method().as_str(),
                                         ) {
-                                            eprintln!("Matched route: {}", route.path);
                                             fast_req.set_path_params(params);
                                             let route_hash = route.handler_hash();
-                                            eprintln!("Route hash: {}", route_hash);
 
                                             Ok::<_, hyper::Error>(
                                                 pool.execute(route_hash, fast_req).await,
@@ -146,7 +119,7 @@ impl Server {
                             )
                             .await
                         {
-                            eprintln!("Error serving connection from {:?}: {:?}", addr, err);
+                            error!("Error serving connection from {:?}: {:?}", addr, err);
                         }
                     });
                 }

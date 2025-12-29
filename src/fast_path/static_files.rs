@@ -160,13 +160,6 @@ impl StaticFileHandler {
         self.cache.write().clear();
     }
 
-    /// Get cache statistics
-    pub fn cache_stats(&self) -> (usize, usize) {
-        let cache = self.cache.read();
-        let count = cache.len();
-        let bytes: usize = cache.values().map(|f| f.size).sum();
-        (count, bytes)
-    }
 }
 
 /// Static file errors

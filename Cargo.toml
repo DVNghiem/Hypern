@@ -54,8 +54,8 @@ parking_lot = "0.12.5"
 core_affinity = "0.8"
 
 # Tracing (optional)
-tracing = { version = "0.1.44", optional = true }
-tracing-subscriber = { version = "0.3.22", optional = true }
+tracing = { version = "0.1.44"}
+tracing-subscriber = { version = "0.3.22"}
 
 # Error handling
 thiserror = "2.0.17"
@@ -74,7 +74,7 @@ pyo3-build-config = "=0.27.2"
 default = ["io_uring"]
 mimalloc = ["dep:mimalloc"]
 io_uring = ["io-uring"]
-metrics = ["tracing", "tracing-subscriber"]
+metrics = []
 
 [profile.release]
 codegen-units = 1

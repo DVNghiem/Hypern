@@ -5,11 +5,11 @@ use dashmap::DashMap;
 use pyo3::prelude::*;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use tracing::{error, warn};
 
 static HANDLER_REGISTRY: OnceLock<DashMap<u64, Py<PyAny>>> = OnceLock::new();
 
 pub fn register_handler(hash: u64, handler: Py<PyAny>) {
-    eprintln!("Registering handler for hash: {}", hash);
     HANDLER_REGISTRY
         .get_or_init(DashMap::new)
         .insert(hash, handler);
@@ -46,7 +46,6 @@ impl InterpreterPool {
                         let registry = HANDLER_REGISTRY.get_or_init(DashMap::new);
 
                         if let Some(handler) = registry.get(&work.route_hash) {
-                            eprintln!("Executing handler for hash: {}", work.route_hash);
                             let writer = ResponseWriter::new(work.response_slot.clone());
                             let py_writer =
                                 Bound::new(py, writer).expect("Failed to wrap ResponseWriter");
@@ -62,7 +61,7 @@ impl InterpreterPool {
                                     }
                                 }
                                 Err(e) => {
-                                    eprintln!("Python handler error: {:?}", e);
+                                    error!("Python handler error: {:?}", e);
                                     work.response_slot.set_status(500);
                                     work.response_slot.set_body(
                                         format!("Internal Server Error: {:?}", e).into_bytes(),
@@ -71,7 +70,7 @@ impl InterpreterPool {
                                 }
                             }
                         } else {
-                            eprintln!("No handler found for hash: {}", work.route_hash);
+                            warn!("No handler found for hash: {}", work.route_hash);
                             work.response_slot.set_status(404);
                             work.response_slot.set_body(b"Not Found".to_vec());
                             work.response_slot.mark_ready();
@@ -105,7 +104,7 @@ impl InterpreterPool {
         let mut iterations = 0;
         loop {
             if response_slot.is_ready() {
-                eprintln!("Response ready after {} iterations", iterations);
+                error!("Response ready after {} iterations", iterations);
                 break;
             }
             iterations += 1;
@@ -114,9 +113,7 @@ impl InterpreterPool {
             }
         }
 
-        eprintln!("Converting to hyper response");
         let res = response_slot.into_hyper_response();
-        eprintln!("Yielding response");
         res
     }
 }

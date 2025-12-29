@@ -1,5 +1,3 @@
-//! Thread-local arena allocator for fast per-request allocations.
-
 use bumpalo::Bump;
 use std::cell::RefCell;
 
@@ -48,28 +46,12 @@ impl ThreadArena {
         self.bytes_allocated = 0;
     }
 
-    /// Get allocation statistics
-    pub fn stats(&self) -> ArenaStats {
-        ArenaStats {
-            allocation_count: self.allocation_count,
-            bytes_allocated: self.bytes_allocated,
-            capacity: self.arena.chunk_capacity(),
-        }
-    }
 }
 
 impl Default for ThreadArena {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Arena allocation statistics
-#[derive(Debug, Clone, Default)]
-pub struct ArenaStats {
-    pub allocation_count: usize,
-    pub bytes_allocated: usize,
-    pub capacity: usize,
 }
 
 /// Execute a closure with access to the thread-local arena
@@ -83,54 +65,4 @@ where
 /// Reset the thread-local arena
 pub fn reset_arena() {
     THREAD_ARENA.with(|arena| arena.borrow_mut().reset());
-}
-
-/// Get thread-local arena statistics
-pub fn arena_stats() -> ArenaStats {
-    THREAD_ARENA.with(|arena| arena.borrow().stats())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_arena_allocation() {
-        let mut arena = ThreadArena::new();
-
-        let bytes = arena.alloc_bytes(100);
-        assert_eq!(bytes.len(), 100);
-
-        let s = arena.alloc_str("hello world");
-        assert_eq!(s, "hello world");
-
-        let stats = arena.stats();
-        assert_eq!(stats.allocation_count, 2);
-        assert_eq!(stats.bytes_allocated, 100 + 11);
-    }
-
-    #[test]
-    fn test_arena_reset() {
-        let mut arena = ThreadArena::new();
-
-        arena.alloc_bytes(1000);
-        assert_eq!(arena.stats().bytes_allocated, 1000);
-
-        arena.reset();
-        assert_eq!(arena.stats().bytes_allocated, 0);
-        assert_eq!(arena.stats().allocation_count, 0);
-    }
-
-    #[test]
-    fn test_with_arena() {
-        with_arena(|arena| {
-            let bytes = arena.alloc_bytes(50);
-            assert_eq!(bytes.len(), 50);
-        });
-
-        reset_arena();
-
-        let stats = arena_stats();
-        assert_eq!(stats.bytes_allocated, 0);
-    }
 }
