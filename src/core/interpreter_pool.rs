@@ -42,7 +42,7 @@ impl InterpreterPool {
                 let pool = WorkerPool::new(config, |item: WorkItem<RequestWork>| {
                     let work = item.data;
 
-                    Python::with_gil(|py| {
+                    Python::attach(|py| {
                         let registry = HANDLER_REGISTRY.get_or_init(DashMap::new);
 
                         if let Some(handler) = registry.get(&work.route_hash) {

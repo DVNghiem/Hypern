@@ -89,7 +89,7 @@ impl Server {
         let pool = self.interpreter_pool.clone();
         let router = self.router.clone();
 
-        py.allow_threads(move || {
+        py.detach(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()

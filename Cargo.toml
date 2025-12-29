@@ -9,66 +9,66 @@ name = "hypern"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-pyo3 = { version = "0.26.0", features = ["anyhow", "bytes", "extension-module", "generate-import-lib"] }
-pyo3-async-runtimes = { version = "0.26.0", features = ["tokio-runtime"] }
+pyo3 = { version = "0.27.2", features = ["anyhow", "bytes", "extension-module", "generate-import-lib"] }
+pyo3-async-runtimes = { version = "0.27.0", features = ["tokio-runtime"] }
 
-tokio = { version = "1.47.1", features = ["full"] }
-socket2 = { version = "0.6.0", features = ["all"] }
-hyper = { version = "1.6.0", features = ["server", "http1", "http2"] }
+tokio = { version = "1.48.0", features = ["full"] }
+socket2 = { version = "0.6.1", features = ["all"] }
+hyper = { version = "1.8.1", features = ["server", "http1", "http2"] }
 http-body-util = "0.1.3"
-hyper-util = { version = "0.1.16", features = ["tokio"]}
-bytes = "1.10.1"
-tungstenite = "0.27.0"
-hyper-tungstenite = "0.18.0"
-tokio-tungstenite = "0.27.0"
-anyhow = "1.0.99"
+hyper-util = { version = "0.1.19", features = ["tokio"]}
+bytes = "1.11.0"
+tungstenite = "0.28.0"
+hyper-tungstenite = "0.19.0"
+tokio-tungstenite = "0.28.0"
+anyhow = "1.0.100"
 percent-encoding = "2.3.1"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-url = "2.5.4"
+serde_json = "1.0.148"
+url = "2.5.7"
 form_urlencoded = "1.2.1"
 mime = "0.3.17"
-mimalloc = { version = "0.1.47", optional = true }
+mimalloc = { version = "0.1.48", optional = true }
 
 # Performance: SIMD JSON parsing
-simd-json = "0.13"
+simd-json = "0.17.0"
 
 # Performance: Fast hashing
 ahash = "0.8"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 # Performance: Memory optimization
-smallvec = "1.13"
+smallvec = "1.15.1"
 memmap2 = "0.9"
 bumpalo = "3.14"
 
 # Performance: Routing optimization
-phf = { version = "0.11", features = ["macros"] }
+phf = { version = "0.13.1", features = ["macros"] }
 
 # Performance: Concurrency
 crossbeam = "0.8"
-dashmap = "5.5"
-parking_lot = "0.12"
+dashmap = "6.1.0"
+parking_lot = "0.12.5"
 
 # Performance: Core affinity (optional)
 core_affinity = "0.8"
 
 # Tracing (optional)
-tracing = { version = "0.1", optional = true }
-tracing-subscriber = { version = "0.3", optional = true }
+tracing = { version = "0.1.44", optional = true }
+tracing-subscriber = { version = "0.3.22", optional = true }
 
 # Error handling
-thiserror = "1.0"
+thiserror = "2.0.17"
 
 [target.'cfg(not(any(target_env = "musl", target_os = "freebsd", target_os = "openbsd", target_os = "windows")))'.dependencies]
-tikv-jemallocator = { version = "0.6.0", default-features = false, features = ["disable_initial_exec_tls"] }
+tikv-jemallocator = { version = "0.6.1", default-features = false, features = ["disable_initial_exec_tls"] }
 
 # Linux-specific io_uring support
 [target.'cfg(target_os = "linux")'.dependencies]
-io-uring = { version = "0.6", optional = true }
+io-uring = { version = "0.7.11", optional = true }
 
 [build-dependencies]
-pyo3-build-config = "=0.25"
+pyo3-build-config = "=0.27.2"
 
 [features]
 default = ["io_uring"]
