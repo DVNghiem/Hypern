@@ -34,6 +34,7 @@ struct RequestWork {
     route_hash: u64,
     request: FastRequest,
     response_slot: Arc<ResponseSlot>,
+    completion_tx: tokio::sync::oneshot::Sender<()>,
 }
 
 impl InterpreterPool {
@@ -54,7 +55,11 @@ impl InterpreterPool {
 
                     enum ExecutionResult {
                         SyncSuccess,
-                        AsyncFuture(std::pin::Pin<Box<dyn std::future::Future<Output = PyResult<Py<PyAny>>> + Send>>),
+                        AsyncFuture(
+                            std::pin::Pin<
+                                Box<dyn std::future::Future<Output = PyResult<Py<PyAny>>> + Send>,
+                            >,
+                        ),
                         NotFound,
                         Error(PyErr),
                     }
@@ -65,7 +70,7 @@ impl InterpreterPool {
 
                         if let Some(entry) = registry.get(&work.route_hash) {
                             let (handler, is_async) = entry.value();
-                            
+
                             let writer = ResponseWriter::new(work.response_slot.clone());
                             // Handle errors during wrapping
                             let py_writer = match Bound::new(py, writer) {
@@ -83,18 +88,34 @@ impl InterpreterPool {
                             if *is_async {
                                 match call_result {
                                     Ok(coro) => {
-                                        // Convert to Rust Future
-                                        match pyo3_async_runtimes::tokio::into_future(coro) {
-                                            Ok(fut) => ExecutionResult::AsyncFuture(Box::pin(fut)),
-                                            Err(e) => ExecutionResult::Error(e)
+                                        if let Some(locals) =
+                                            crate::core::runtime_state::get_task_locals()
+                                        {
+                                            // High-performance path: use pre-captured TaskLocals
+                                            match pyo3_async_runtimes::into_future_with_locals(
+                                                locals, coro,
+                                            ) {
+                                                Ok(fut) => {
+                                                    ExecutionResult::AsyncFuture(Box::pin(fut))
+                                                }
+                                                Err(e) => ExecutionResult::Error(e),
+                                            }
+                                        } else {
+                                            // Fallback logic if TaskLocals are not initialized
+                                            match pyo3_async_runtimes::tokio::into_future(coro) {
+                                                Ok(fut) => {
+                                                    ExecutionResult::AsyncFuture(Box::pin(fut))
+                                                }
+                                                Err(e) => ExecutionResult::Error(e),
+                                            }
                                         }
-                                    },
-                                    Err(e) => ExecutionResult::Error(e)
+                                    }
+                                    Err(e) => ExecutionResult::Error(e),
                                 }
                             } else {
                                 match call_result {
                                     Ok(_) => ExecutionResult::SyncSuccess,
-                                    Err(e) => ExecutionResult::Error(e)
+                                    Err(e) => ExecutionResult::Error(e),
                                 }
                             }
                         } else {
@@ -105,40 +126,37 @@ impl InterpreterPool {
                     // Handle the result (outside GIL where possible for awaiting)
                     match exec_result {
                         ExecutionResult::SyncSuccess => {
-                            if !work.response_slot.is_ready() {
-                                work.response_slot.mark_ready();
-                            }
+                            let _ = work.completion_tx.send(());
                         }
-                        ExecutionResult::AsyncFuture(fut) => {
-                            match fut.await {
-                                Ok(_) => {
-                                    if !work.response_slot.is_ready() {
-                                        work.response_slot.mark_ready();
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Python async handler error: {:?}", e);
-                                    work.response_slot.set_status(500);
-                                    work.response_slot.set_body(
-                                        format!("Internal Server Error: {:?}", e).into_bytes(),
-                                    );
-                                    work.response_slot.mark_ready();
-                                }
+                        ExecutionResult::AsyncFuture(fut) => match fut.await {
+                            Ok(_) => {
+                                println!("Async future finished for hash: {}", work.route_hash);
+                                let _ = work.completion_tx.send(());
                             }
-                        }
+                            Err(e) => {
+                                error!(
+                                    "Python async handler error for hash {}: {:?}",
+                                    work.route_hash, e
+                                );
+                                work.response_slot.set_status(500);
+                                work.response_slot.set_body(
+                                    format!("Internal Server Error: {:?}", e).into_bytes(),
+                                );
+                                let _ = work.completion_tx.send(());
+                            }
+                        },
                         ExecutionResult::NotFound => {
                             warn!("No handler found for hash: {}", work.route_hash);
                             work.response_slot.set_status(404);
                             work.response_slot.set_body(b"Not Found".to_vec());
-                            work.response_slot.mark_ready();
+                            let _ = work.completion_tx.send(());
                         }
                         ExecutionResult::Error(e) => {
-                            error!("Python handler error: {:?}", e);
+                            error!("Python handler error for hash {}: {:?}", work.route_hash, e);
                             work.response_slot.set_status(500);
-                            work.response_slot.set_body(
-                                format!("Internal Server Error: {:?}", e).into_bytes(),
-                            );
-                            work.response_slot.mark_ready();
+                            work.response_slot
+                                .set_body(format!("Internal Server Error: {:?}", e).into_bytes());
+                            let _ = work.completion_tx.send(());
                         }
                     }
                 });
@@ -153,32 +171,26 @@ impl InterpreterPool {
         request: FastRequest,
     ) -> hyper::Response<crate::body::HTTPResponseBody> {
         let response_slot = ResponseSlot::new();
+        let (tx, rx) = tokio::sync::oneshot::channel();
 
-        let work = RequestWork {
+        let pool = self.get_pool();
+        pool.submit_affinity(
+            WorkItem {
+                id: 0,
+                data: RequestWork {
+                    route_hash,
+                    request,
+                    response_slot: response_slot.clone(),
+                    completion_tx: tx,
+                },
+            },
             route_hash,
-            request,
-            response_slot: response_slot.clone(),
-        };
+        )
+        .expect("Worker pool closed");
 
-        // Submit to pool based on hash
-        self.get_pool()
-            .submit_affinity(WorkItem { id: 0, data: work }, route_hash)
-            .expect("Worker pool closed");
+        // Wait for completion via oneshot
+        let _ = rx.await;
 
-        // Wait for completion (non-blocking yield)
-        let mut iterations = 0;
-        loop {
-            if response_slot.is_ready() {
-                error!("Response ready after {} iterations", iterations);
-                break;
-            }
-            iterations += 1;
-            if iterations % 1000 == 0 {
-                tokio::task::yield_now().await;
-            }
-        }
-
-        let res = response_slot.into_hyper_response();
-        res
+        response_slot.into_hyper_response()
     }
 }

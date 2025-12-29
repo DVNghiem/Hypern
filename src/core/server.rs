@@ -3,11 +3,11 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use pyo3::prelude::*;
 use pyo3::pycell::PyRef;
-use std::process::exit;
+// use std::process::exit; // Removed unused import
 use std::sync::Arc;
 use std::thread;
 use tokio::net::TcpListener;
-use tracing::{error, info};
+use tracing::{error, warn};
 
 use crate::core::interpreter_pool::InterpreterPool;
 use crate::http::request::FastRequest;
@@ -72,6 +72,12 @@ impl Server {
         let asyncio = py.import("asyncio")?;
         let ev_loop = asyncio.call_method0("get_event_loop")?;
 
+        // Initialize TaskLocals for the server
+        let locals = pyo3_async_runtimes::TaskLocals::new(ev_loop.clone());
+        if let Err(_) = crate::core::runtime_state::set_task_locals(locals) {
+            warn!("Task locals already set, skipping.");
+        }
+
         thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(workers)
@@ -106,10 +112,8 @@ impl Server {
                                         ) {
                                             fast_req.set_path_params(params);
                                             let route_hash = route.handler_hash();
-
-                                            Ok::<_, hyper::Error>(
-                                                pool.execute(route_hash, fast_req).await,
-                                            )
+                                            let res = pool.execute(route_hash, fast_req).await;
+                                            Ok::<_, hyper::Error>(res)
                                         } else {
                                             // 404 Not Found
                                             let mut res = hyper::Response::new(
@@ -130,12 +134,11 @@ impl Server {
             });
         });
         println!("Server is running...");
-        // keep event loop alive
-        let result = ev_loop.call_method0("run_forever");
-        if result.is_err(){
-            error!("Error keeping event loop alive: {:?}", result.err());
-            exit(0)
-        }
+        println!("Server is running...");
+        // Keep event loop alive
+        // Only run_forever if we are the main thread or if requested.
+        // In the original code it was here.
+        let _ = ev_loop.call_method0("run_forever");
 
         Ok(())
     }

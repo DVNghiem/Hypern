@@ -1,6 +1,4 @@
-
 use bytes::Bytes;
-use http_body_util::BodyExt;
 use hyper::header::{HeaderMap, HeaderName, HeaderValue, SERVER};
 use pyo3::prelude::*;
 use smallvec::SmallVec;
@@ -61,6 +59,10 @@ impl ResponseSlot {
         *self.body.write() = body.into_bytes();
     }
 
+    pub fn get_body_len(&self) -> usize {
+        self.body.read().len()
+    }
+
     #[inline]
     pub fn mark_ready(&self) {
         self.ready.store(true, Ordering::Release);
@@ -77,7 +79,7 @@ impl ResponseSlot {
         let headers = self.headers.read();
         let body = self.body.read();
 
-        let mut header_map = HeaderMap::with_capacity(headers.len() + 1);
+        let mut header_map = HeaderMap::with_capacity(headers.len() + 2);
         for (key, value) in headers.iter() {
             if let (Ok(name), Ok(val)) = (
                 HeaderName::from_bytes(key.as_bytes()),
@@ -90,10 +92,11 @@ impl ResponseSlot {
             .entry(SERVER)
             .or_insert(HeaderValue::from_static("hypern"));
 
-        let body_bytes = Bytes::from(body.clone());
-        let http_body = http_body_util::Full::new(body_bytes)
-            .map_err(std::convert::Into::into)
-            .boxed();
+        // Set Content-Length explicitly for better client compatibility
+        header_map.insert(hyper::header::CONTENT_LENGTH, HeaderValue::from(body.len()));
+
+        // Use standard helper for consistency
+        let http_body = crate::body::full_http(body.clone());
 
         let mut res = hyper::Response::new(http_body);
         *res.status_mut() = hyper::StatusCode::from_u16(status).unwrap_or(hyper::StatusCode::OK);
@@ -139,6 +142,11 @@ impl ResponseWriter {
 
     pub fn body_str<'py>(pyself: PyRef<'py, Self>, body: &str) -> PyRef<'py, Self> {
         pyself.slot.set_body_str(body.to_string());
+        pyself
+    }
+
+    pub fn write<'py>(pyself: PyRef<'py, Self>, body: Vec<u8>) -> PyRef<'py, Self> {
+        pyself.slot.set_body(body);
         pyself
     }
 
