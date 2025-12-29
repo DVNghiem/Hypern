@@ -26,7 +26,6 @@ pub mod fast_path;
 pub mod http;
 pub mod memory;
 pub mod middleware;
-pub mod python;
 pub mod routing;
 pub mod utils;
 

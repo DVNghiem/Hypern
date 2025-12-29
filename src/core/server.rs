@@ -74,7 +74,7 @@ impl Server {
 
         // Initialize TaskLocals for the server
         let locals = pyo3_async_runtimes::TaskLocals::new(ev_loop.clone());
-        if let Err(_) = crate::core::runtime_state::set_task_locals(locals) {
+        if let Err(_) = crate::core::runtime::set_task_locals(locals) {
             warn!("Task locals already set, skipping.");
         }
 

@@ -319,7 +319,7 @@ impl FastRequest {
         match body.as_ref() {
             Some(bytes) => {
                 let mut data = bytes.to_vec();
-                let json_str = crate::python::gil::release_gil(py, move || {
+                let json_str = Python::detach(py, move || {
                     match simd_json::serde::from_slice::<serde_json::Value>(&mut data) {
                         Ok(value) => {
                             serde_json::to_string(&value).map_err(|e| e.to_string())

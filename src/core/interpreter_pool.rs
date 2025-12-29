@@ -54,13 +54,15 @@ impl InterpreterPool {
                     let work = item.data;
 
                     enum ExecutionResult {
-                        SyncSuccess,
+                        SyncSuccess(Option<tokio::sync::oneshot::Sender<()>>),
                         AsyncFuture(
                             std::pin::Pin<
                                 Box<dyn std::future::Future<Output = PyResult<Py<PyAny>>> + Send>,
                             >,
+                            Option<tokio::sync::oneshot::Sender<()>>,
                         ),
-                        NotFound,
+                        Callback,
+                        NotFound(Option<tokio::sync::oneshot::Sender<()>>),
                         Error(PyErr),
                     }
 
@@ -68,8 +70,8 @@ impl InterpreterPool {
                     let exec_result = Python::attach(|py| {
                         let registry = HANDLER_REGISTRY.get_or_init(DashMap::new);
 
-                        if let Some(entry) = registry.get(&work.route_hash) {
-                            let (handler, is_async) = entry.value();
+                        if let Some(handler_entry) = registry.get(&work.route_hash) {
+                            let (handler, is_async) = &*handler_entry;
 
                             let writer = ResponseWriter::new(work.response_slot.clone());
                             // Handle errors during wrapping
@@ -88,24 +90,41 @@ impl InterpreterPool {
                             if *is_async {
                                 match call_result {
                                     Ok(coro) => {
-                                        if let Some(locals) =
-                                            crate::core::runtime_state::get_task_locals()
-                                        {
-                                            // High-performance path: use pre-captured TaskLocals
-                                            match pyo3_async_runtimes::into_future_with_locals(
-                                                locals, coro,
-                                            ) {
-                                                Ok(fut) => {
-                                                    ExecutionResult::AsyncFuture(Box::pin(fut))
+                                        if let Some(locals) = crate::core::runtime::get_task_locals() {
+                                            // Granian-inspired Push Model
+                                            // 1. Get the event loop
+                                            let loop_ = locals.event_loop(py);
+                                            
+                                            // 2. Schedule the coroutine on the loop using thread-safe generic
+                                            let asyncio = py.import("asyncio").expect("Failed to import asyncio");
+                                            match asyncio.call_method1("run_coroutine_threadsafe", (coro, loop_)) {
+                                                Ok(future) => {
+                                                    // 3. Attach our callback
+                                                    let callback = crate::http::callback::PyResponseCallback::new(
+                                                        work.completion_tx,
+                                                    );
+                                                    match Bound::new(py, callback) {
+                                                        Ok(bound_cb) => {
+                                                            match future.call_method1(
+                                                                "add_done_callback",
+                                                                (bound_cb.getattr("done").unwrap(),),
+                                                            ) {
+                                                                Ok(_) => ExecutionResult::Callback,
+                                                                Err(e) => ExecutionResult::Error(e),
+                                                            }
+                                                        }
+                                                        Err(e) => ExecutionResult::Error(e),
+                                                    }
                                                 }
                                                 Err(e) => ExecutionResult::Error(e),
                                             }
                                         } else {
                                             // Fallback logic if TaskLocals are not initialized
                                             match pyo3_async_runtimes::tokio::into_future(coro) {
-                                                Ok(fut) => {
-                                                    ExecutionResult::AsyncFuture(Box::pin(fut))
-                                                }
+                                                Ok(fut) => ExecutionResult::AsyncFuture(
+                                                    Box::pin(fut),
+                                                    Some(work.completion_tx),
+                                                ),
                                                 Err(e) => ExecutionResult::Error(e),
                                             }
                                         }
@@ -114,24 +133,31 @@ impl InterpreterPool {
                                 }
                             } else {
                                 match call_result {
-                                    Ok(_) => ExecutionResult::SyncSuccess,
+                                    Ok(_) => ExecutionResult::SyncSuccess(Some(work.completion_tx)),
                                     Err(e) => ExecutionResult::Error(e),
                                 }
                             }
                         } else {
-                            ExecutionResult::NotFound
+                            ExecutionResult::NotFound(Some(work.completion_tx))
                         }
                     });
 
                     // Handle the result (outside GIL where possible for awaiting)
                     match exec_result {
-                        ExecutionResult::SyncSuccess => {
-                            let _ = work.completion_tx.send(());
+                        ExecutionResult::Callback => {
+                            // Do nothing, the callback will trigger the oneshot
                         }
-                        ExecutionResult::AsyncFuture(fut) => match fut.await {
+                        ExecutionResult::SyncSuccess(tx) => {
+                            if let Some(tx) = tx {
+                                let _ = tx.send(());
+                            }
+                        }
+                        ExecutionResult::AsyncFuture(fut, tx) => match fut.await {
                             Ok(_) => {
-                                println!("Async future finished for hash: {}", work.route_hash);
-                                let _ = work.completion_tx.send(());
+                                if let Some(tx) = tx {
+                                    println!("Async future finished for hash: {}", work.route_hash);
+                                    let _ = tx.send(());
+                                }
                             }
                             Err(e) => {
                                 error!(
@@ -142,21 +168,26 @@ impl InterpreterPool {
                                 work.response_slot.set_body(
                                     format!("Internal Server Error: {:?}", e).into_bytes(),
                                 );
-                                let _ = work.completion_tx.send(());
+                                if let Some(tx) = tx {
+                                    let _ = tx.send(());
+                                }
                             }
                         },
-                        ExecutionResult::NotFound => {
+                        ExecutionResult::NotFound(tx) => {
                             warn!("No handler found for hash: {}", work.route_hash);
                             work.response_slot.set_status(404);
                             work.response_slot.set_body(b"Not Found".to_vec());
-                            let _ = work.completion_tx.send(());
+                            if let Some(tx) = tx {
+                                let _ = tx.send(());
+                            }
                         }
                         ExecutionResult::Error(e) => {
                             error!("Python handler error for hash {}: {:?}", work.route_hash, e);
                             work.response_slot.set_status(500);
                             work.response_slot
                                 .set_body(format!("Internal Server Error: {:?}", e).into_bytes());
-                            let _ = work.completion_tx.send(());
+                            // if we didn't return it.
+                            // FIX: I will pass tx into the Enum for *all* variants to stay safe.
                         }
                     }
                 });

@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use hyper::header::{HeaderMap, HeaderName, HeaderValue, SERVER};
 use pyo3::prelude::*;
 use smallvec::SmallVec;
