@@ -44,9 +44,10 @@ pub struct Worker<T: Send + 'static> {
 }
 
 impl<T: Send + 'static> Worker<T> {
-    pub fn new<F>(core_id: usize, queue_size: usize, pin_to_core: bool, handler: F) -> Self
+    pub fn new<F, Fut>(core_id: usize, queue_size: usize, pin_to_core: bool, handler: F) -> Self
     where
-        F: Fn(WorkItem<T>) + Send + 'static,
+        F: Fn(WorkItem<T>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send,
     {
         let (tx, rx) = bounded(queue_size);
 
@@ -61,8 +62,14 @@ impl<T: Send + 'static> Worker<T> {
                         }
                     }
                 }
+                // Initialize Tokio Runtime for this thread
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to build worker runtime");
+
                 // Worker loop
-                Self::worker_loop(rx, handler);
+                Self::worker_loop(rx, handler, &rt);
             })
             .expect("Failed to spawn worker thread");
 
@@ -73,14 +80,15 @@ impl<T: Send + 'static> Worker<T> {
         }
     }
 
-    fn worker_loop<F>(rx: Receiver<WorkItem<T>>, handler: F)
+    fn worker_loop<F, Fut>(rx: Receiver<WorkItem<T>>, handler: F, rt: &tokio::runtime::Runtime)
     where
-        F: Fn(WorkItem<T>),
+        F: Fn(WorkItem<T>) -> Fut,
+        Fut: std::future::Future<Output = ()>,
     {
         loop {
             match rx.recv() {
                 Ok(work_item) => {
-                    handler(work_item);
+                    rt.block_on(handler(work_item));
                 }
                 Err(_) => {
                     // Channel closed, exit loop
@@ -114,9 +122,10 @@ pub struct WorkerPool<T: Send + 'static> {
 }
 
 impl<T: Send + 'static> WorkerPool<T> {
-    pub fn new<F>(config: WorkerPoolConfig, handler: F) -> Self
+    pub fn new<F, Fut>(config: WorkerPoolConfig, handler: F) -> Self
     where
-        F: Fn(WorkItem<T>) + Send + Clone + 'static,
+        F: Fn(WorkItem<T>) -> Fut + Send + Clone + 'static,
+        Fut: std::future::Future<Output = ()> + Send,
     {
         let mut workers = Vec::with_capacity(config.num_workers);
 

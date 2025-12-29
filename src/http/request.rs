@@ -319,17 +319,21 @@ impl FastRequest {
         match body.as_ref() {
             Some(bytes) => {
                 let mut data = bytes.to_vec();
-                match simd_json::serde::from_slice::<serde_json::Value>(&mut data) {
-                    Ok(value) => {
-                        let json_str = serde_json::to_string(&value)
-                            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-                        let json_mod = py.import("json")?;
-                        json_mod.call_method1("loads", (json_str,))
+                let json_str = crate::python::gil::release_gil(py, move || {
+                    match simd_json::serde::from_slice::<serde_json::Value>(&mut data) {
+                        Ok(value) => {
+                            serde_json::to_string(&value).map_err(|e| e.to_string())
+                        }
+                        Err(e) => Err(format!("JSON parse error: {}", e)),
                     }
-                    Err(e) => Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "JSON parse error: {}",
-                        e
-                    ))),
+                });
+
+                match json_str {
+                     Ok(s) => {
+                        let json_mod = py.import("json")?;
+                        json_mod.call_method1("loads", (s,))
+                     },
+                     Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e)),
                 }
             }
             None => Ok(py.None().into_bound(py)),

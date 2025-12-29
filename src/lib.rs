@@ -61,7 +61,6 @@ fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<errors::HypernError>()?;
     module.add_class::<errors::DefaultErrorHandler>()?;
     module.add_class::<errors::ErrorContext>()?;
-    module.add_class::<errors::ErrorContext>()?;
 
     // New performance classes
     module.add_class::<FastRequest>()?;
