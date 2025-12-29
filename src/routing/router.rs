@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::radix::RadixNode;
-use crate::route::Route;
+use super::radix::RadixNode;
+use super::route::Route;
 use crate::middleware::{Middleware, MiddlewareChain};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -17,7 +17,7 @@ pub struct Router {
     routes: Vec<Route>,
 
     radix_tree: RadixNode,
-    
+
     middleware_chain: MiddlewareChain,
 }
 
@@ -38,25 +38,40 @@ impl Router {
         self.middleware_chain.add_before(middleware);
         Ok(())
     }
-    
+
     /// Add middleware that runs after route handlers
     pub fn use_after_middleware(&mut self, middleware: Middleware) -> PyResult<()> {
         self.middleware_chain.add_after(middleware);
         Ok(())
     }
-    
+
     /// Add error handling middleware
     pub fn use_error_middleware(&mut self, middleware: Middleware) -> PyResult<()> {
         self.middleware_chain.add_error(middleware);
         Ok(())
     }
-    
+
     /// Get applicable middleware for a path (Python accessible)
-    pub fn get_middleware_for_path(&self, path: &str) -> (Vec<Middleware>, Vec<Middleware>, Vec<Middleware>) {
+    pub fn get_middleware_for_path(
+        &self,
+        path: &str,
+    ) -> (Vec<Middleware>, Vec<Middleware>, Vec<Middleware>) {
         (
-            self.middleware_chain.get_applicable_before(path).into_iter().cloned().collect(),
-            self.middleware_chain.get_applicable_after(path).into_iter().cloned().collect(),
-            self.middleware_chain.get_applicable_error(path).into_iter().cloned().collect(),
+            self.middleware_chain
+                .get_applicable_before(path)
+                .into_iter()
+                .cloned()
+                .collect(),
+            self.middleware_chain
+                .get_applicable_after(path)
+                .into_iter()
+                .cloned()
+                .collect(),
+            self.middleware_chain
+                .get_applicable_error(path)
+                .into_iter()
+                .cloned()
+                .collect(),
         )
     }
 
@@ -71,10 +86,10 @@ impl Router {
 
         // Add to radix tree
         self.radix_tree.insert(&full_path, route.clone());
-        
+
         // Keep the routes vector for backwards compatibility and iteration
         self.routes.push(route);
-        
+
         Ok(())
     }
 
@@ -120,7 +135,6 @@ impl Router {
             .collect()
     }
 
-   
     pub fn get_full_path(&self, route_path: &str) -> String {
         let base = self.path.trim_end_matches('/');
         let route = route_path.trim_start_matches('/');
@@ -157,26 +171,32 @@ impl Router {
     }
 
     // Find most specific matching route for a path
-    pub fn find_matching_route(&self, path: &str, method: &str) -> Option<(Route, HashMap<String, String>)> {
+    pub fn find_matching_route(
+        &self,
+        path: &str,
+        method: &str,
+    ) -> Option<(Route, HashMap<String, String>)> {
         if let Some((route, params)) = self.radix_tree.find(path, method) {
             return Some((route.clone(), params));
         }
         None
     }
-    
 }
 
 impl Router {
     pub fn iter(&'_ self) -> std::slice::Iter<'_, Route> {
         self.routes.iter()
     }
-    
+
     pub fn routes_count(&self) -> usize {
         self.routes.len()
     }
-    
+
     /// Internal method to get middleware references (for performance)
-    pub fn get_middleware_refs_for_path(&self, path: &str) -> (Vec<&Middleware>, Vec<&Middleware>, Vec<&Middleware>) {
+    pub fn get_middleware_refs_for_path(
+        &self,
+        path: &str,
+    ) -> (Vec<&Middleware>, Vec<&Middleware>, Vec<&Middleware>) {
         (
             self.middleware_chain.get_applicable_before(path),
             self.middleware_chain.get_applicable_after(path),

@@ -1,4 +1,4 @@
-use crate::route::Route;
+use super::route::Route;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
@@ -89,7 +89,9 @@ impl RadixNode {
             });
             // Wildcard captures everything, so mark as endpoint immediately
             wildcard_node.is_endpoint = true;
-            wildcard_node.routes.insert(route.method.to_uppercase(), route);
+            wildcard_node
+                .routes
+                .insert(route.method.to_uppercase(), route);
             return;
         }
 

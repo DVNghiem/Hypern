@@ -6,7 +6,7 @@ pub struct Route {
     pub path: String,
 
     #[pyo3(get, set)]
-    pub function: PyObject,
+    pub function: Py<PyAny>,
 
     #[pyo3(get, set)]
     pub method: String,
@@ -17,13 +17,23 @@ pub struct Route {
 
 impl Clone for Route {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| {
-            Self {
-                path: self.path.clone(),
-                function: self.function.clone_ref(py),
-                method: self.method.clone(),
-                doc: self.doc.clone(),
-            }
+        Python::attach(|py| Self {
+            path: self.path.clone(),
+            function: self.function.clone_ref(py),
+            method: self.method.clone(),
+            doc: self.doc.clone(),
+        })
+    }
+}
+
+impl Route {
+    /// Create an empty route for testing/cache initialization
+    pub fn empty() -> Self {
+        Python::attach(|py| Self {
+            path: String::new(),
+            function: py.None(),
+            method: String::new(),
+            doc: None,
         })
     }
 }
@@ -32,12 +42,12 @@ impl Clone for Route {
 impl Route {
     #[new]
     #[pyo3(signature = (path, function, method, doc = None))]
-    pub fn new(path: &str, function: PyObject, method: String, doc: Option<String>) -> Self {
+    pub fn new(path: &str, function: Py<PyAny>, method: String, doc: Option<String>) -> Self {
         Self {
             path: path.to_string(),
             function,
             method,
-            doc
+            doc,
         }
     }
 
@@ -48,8 +58,10 @@ impl Route {
 
     // Get a formatted representation for debugging
     pub fn __repr__(&self) -> PyResult<String> {
-        Ok(format!("Route(path='{}', method='{}')", 
-            self.path, self.method))
+        Ok(format!(
+            "Route(path='{}', method='{}')",
+            self.path, self.method
+        ))
     }
 
     // Update the route path
@@ -112,7 +124,7 @@ impl Route {
             "DELETE" => 5,
             "HEAD" => 6,
             "OPTIONS" => 7,
-            _ => 99
+            _ => 99,
         }
     }
 
@@ -121,12 +133,8 @@ impl Route {
             return false;
         }
 
-        let route_parts: Vec<&str> = self.path.split('/')
-            .filter(|s| !s.is_empty())
-            .collect();
-        let path_parts: Vec<&str> = path.split('/')
-            .filter(|s| !s.is_empty())
-            .collect();
+        let route_parts: Vec<&str> = self.path.split('/').filter(|s| !s.is_empty()).collect();
+        let path_parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
 
         if route_parts.len() != path_parts.len() {
             return false;
@@ -139,5 +147,10 @@ impl Route {
         }
 
         true
+    }
+
+    pub fn handler_hash(&self) -> u64 {
+        use xxhash_rust::xxh3::xxh3_64;
+        xxh3_64(self.path.as_bytes()) ^ (xxh3_64(self.method.as_bytes()))
     }
 }

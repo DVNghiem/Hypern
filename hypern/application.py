@@ -71,7 +71,8 @@ class Hypern:
         self.shutdown_handler = None
         self.thread_config = ThreadConfigurator().get_config()
 
-        self.router.extend_route(routes)
+        if routes is not None:
+            self.router.extend_route(routes)
     
     def start(
         self,
@@ -107,10 +108,34 @@ class Hypern:
         Adds a route to the router.
 
         Args:
-            method (HTTPMethod): The HTTP method for the route (e.g., GET, POST).
+            method (str): The HTTP method for the route (e.g., GET, POST).
             endpoint (str): The endpoint path for the route.
             handler (Callable[..., Any]): The function that handles requests to the route.
 
         """
-        route = Route(path=endpoint, function=handler, method=method.name)
+        route = Route(path=endpoint, function=handler, method=method.upper())
         self.router.add_route(route=route)
+
+    def get(self, path: str):
+        def decorator(handler: Callable[..., Any]):
+            self.add_route("GET", path, handler)
+            return handler
+        return decorator
+
+    def post(self, path: str):
+        def decorator(handler: Callable[..., Any]):
+            self.add_route("POST", path, handler)
+            return handler
+        return decorator
+
+    def put(self, path: str):
+        def decorator(handler: Callable[..., Any]):
+            self.add_route("PUT", path, handler)
+            return handler
+        return decorator
+
+    def delete(self, path: str):
+        def decorator(handler: Callable[..., Any]):
+            self.add_route("DELETE", path, handler)
+            return handler
+        return decorator

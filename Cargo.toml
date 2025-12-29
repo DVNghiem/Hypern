@@ -30,14 +30,51 @@ form_urlencoded = "1.2.1"
 mime = "0.3.17"
 mimalloc = { version = "0.1.47", optional = true }
 
+# Performance: SIMD JSON parsing
+simd-json = "0.13"
+
+# Performance: Fast hashing
+ahash = "0.8"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+# Performance: Memory optimization
+smallvec = "1.13"
+memmap2 = "0.9"
+bumpalo = "3.14"
+
+# Performance: Routing optimization
+phf = { version = "0.11", features = ["macros"] }
+
+# Performance: Concurrency
+crossbeam = "0.8"
+dashmap = "5.5"
+parking_lot = "0.12"
+
+# Performance: Core affinity (optional)
+core_affinity = "0.8"
+
+# Tracing (optional)
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true }
+
+# Error handling
+thiserror = "1.0"
+
 [target.'cfg(not(any(target_env = "musl", target_os = "freebsd", target_os = "openbsd", target_os = "windows")))'.dependencies]
 tikv-jemallocator = { version = "0.6.0", default-features = false, features = ["disable_initial_exec_tls"] }
+
+# Linux-specific io_uring support
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = { version = "0.6", optional = true }
 
 [build-dependencies]
 pyo3-build-config = "=0.25"
 
 [features]
+default = ["io_uring"]
 mimalloc = ["dep:mimalloc"]
+io_uring = ["io-uring"]
+metrics = ["tracing", "tracing-subscriber"]
 
 [profile.release]
 codegen-units = 1

@@ -4,18 +4,18 @@ use pyo3::prelude::*;
 use pyo3::types::PyType;
 use std::fmt;
 
-create_exception!(_hypern, RequestError, PyRuntimeError, "RequestError");
-create_exception!(_hypern, RequestClosed, PyRuntimeError, "RequestClosed");
+create_exception!(hypern, RequestError, PyRuntimeError);
+create_exception!(hypern, RequestClosed, PyRuntimeError);
 
 macro_rules! error_request {
     () => {
-        Err(crate::errors::RequestError::new_err("Request protocol error").into())
+        Err(crate::http::errors::RequestError::new_err("Request protocol error").into())
     };
 }
 
 macro_rules! error_stream {
     () => {
-        Err(crate::errors::RequestClosed::new_err("Request transport is closed").into())
+        Err(crate::http::errors::RequestClosed::new_err("Request transport is closed").into())
     };
 }
 
@@ -77,6 +77,7 @@ impl ErrorType {
 #[pymethods]
 impl HypernError {
     #[new]
+    #[pyo3(signature = (message, status_code = None, error_type = None))]
     pub fn new(message: String, status_code: Option<u16>, error_type: Option<String>) -> Self {
         let error_type = match error_type.as_deref() {
             Some("BadRequest") => ErrorType::BadRequest,
@@ -209,14 +210,12 @@ impl DefaultErrorHandler {
         Self
     }
 
-    pub fn handle(&self, error: &HypernError) -> PyResult<PyObject> {
-        Python::with_gil(|py| {
-            let error_dict = pyo3::types::PyDict::new(py);
-            error_dict.set_item("error", error.error_type.error_name())?;
-            error_dict.set_item("message", &error.message)?;
-            error_dict.set_item("status_code", error.status_code)?;
-            Ok(error_dict.into())
-        })
+    pub fn handle<'py>(&self, py: Python<'py>, error: &HypernError) -> PyResult<Bound<'py, PyAny>> {
+        let error_dict = pyo3::types::PyDict::new(py);
+        error_dict.set_item("error", error.error_type.error_name())?;
+        error_dict.set_item("message", &error.message)?;
+        error_dict.set_item("status_code", error.status_code)?;
+        Ok(error_dict.into_any())
     }
 }
 
@@ -229,7 +228,7 @@ impl Default for DefaultErrorHandler {
 /// Global error context for handling different types of errors
 #[pyclass]
 pub struct ErrorContext {
-    handlers: std::collections::HashMap<String, PyObject>,
+    handlers: std::collections::HashMap<String, Py<PyAny>>,
     default_handler: DefaultErrorHandler,
 }
 
@@ -244,19 +243,23 @@ impl ErrorContext {
     }
 
     /// Register a custom error handler for a specific error type
-    pub fn register_handler(&mut self, error_type: String, handler: PyObject) -> PyResult<()> {
+    pub fn register_handler(&mut self, error_type: String, handler: Py<PyAny>) -> PyResult<()> {
         self.handlers.insert(error_type, handler);
         Ok(())
     }
 
     /// Handle an error using the appropriate handler
-    pub fn handle_error(&self, error: &HypernError) -> PyResult<PyObject> {
+    pub fn handle_error<'py>(
+        &self,
+        py: Python<'py>,
+        error: &HypernError,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let error_type_name = error.error_type.error_name();
 
         if let Some(handler) = self.handlers.get(error_type_name) {
-            Python::with_gil(|py| handler.call1(py, (error.clone(),)))
+            handler.bind(py).call1((error.clone(),))
         } else {
-            self.default_handler.handle(error)
+            self.default_handler.handle(py, error)
         }
     }
 
