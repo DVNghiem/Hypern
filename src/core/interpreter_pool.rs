@@ -1,7 +1,7 @@
 use crate::core::worker::{WorkItem, WorkerPool, WorkerPoolConfig};
 use crate::http::request::FastRequest;
 use crate::http::response::{ResponseSlot, ResponseWriter};
-use crate::runtime::get_asyncio;
+use crate::runtime::{get_asyncio, get_inspect};
 use dashmap::DashMap;
 use pyo3::prelude::*;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ static HANDLER_REGISTRY: OnceLock<DashMap<u64, (Py<PyAny>, bool)>> = OnceLock::n
 
 pub fn register_handler(hash: u64, handler: Py<PyAny>) {
     let is_async = Python::attach(|py| {
-        let inspect = py.import("inspect").expect("Failed to import inspect");
+        let inspect = get_inspect(py).bind(py);
         inspect
             .call_method1("iscoroutinefunction", (&handler,))
             .expect("Failed to call iscoroutinefunction")
@@ -220,7 +220,7 @@ impl InterpreterPool {
                 },
             },
             route_hash,
-        )
+        ).await
         .expect("Worker pool closed");
 
         // Wait for completion via oneshot

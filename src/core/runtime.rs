@@ -6,6 +6,7 @@ use crate::utils::cpu::num_cpus;
 
 static TASK_LOCALS: OnceLock<TaskLocals> = OnceLock::new();
 static ASYNCIO: OnceLock<Py<PyModule>> = OnceLock::new();
+static INSPECT: OnceLock<Py<PyModule>> = OnceLock::new();
 // Share single multi-threaded runtime
 static SHARED_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
@@ -38,8 +39,11 @@ pub fn get_asyncio(py: Python<'_>) -> &Py<PyModule> {
     ASYNCIO.get_or_init(|| py.import("asyncio").unwrap().into())
 }
 
+pub fn get_inspect(py: Python<'_>) -> &Py<PyModule> {
+    INSPECT.get_or_init(|| py.import("inspect").unwrap().into())
+}
 
-fn get_runtime() -> &'static tokio::runtime::Runtime {
+pub fn get_runtime() -> &'static tokio::runtime::Runtime {
     SHARED_RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(num_cpus(1))

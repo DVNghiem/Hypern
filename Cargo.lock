@@ -541,6 +541,7 @@ dependencies = [
  "crossbeam",
  "dashmap",
  "form_urlencoded",
+ "futures",
  "http-body-util",
  "hyper",
  "hyper-tungstenite",

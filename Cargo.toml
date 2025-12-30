@@ -13,6 +13,7 @@ pyo3 = { version = "0.27.2", features = ["anyhow", "bytes", "extension-module", 
 pyo3-async-runtimes = { version = "0.27.0", features = ["tokio-runtime"] }
 
 tokio = { version = "1.48.0", features = ["full"] }
+futures = "0.3.28"
 socket2 = { version = "0.6.1", features = ["all"] }
 hyper = { version = "1.8.1", features = ["server", "http1", "http2"] }
 http-body-util = "0.1.3"

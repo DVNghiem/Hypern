@@ -1,7 +1,4 @@
-use crossbeam::channel::{bounded, Receiver, Sender};
-use std::thread::{self, JoinHandle};
-
-use crate::utils::cpu::num_cpus;
+use crate::{runtime::get_runtime, utils::cpu::num_cpus};
 
 /// Work item to be processed by a worker
 pub struct WorkItem<T> {
@@ -39,8 +36,8 @@ impl WorkerPoolConfig {
 /// A single worker in the pool
 pub struct Worker<T: Send + 'static> {
     pub core_id: usize,
-    pub sender: Sender<WorkItem<T>>,
-    handle: Option<JoinHandle<()>>,
+    pub sender: tokio::sync::mpsc::Sender<WorkItem<T>>,
+    handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl<T: Send + 'static> Worker<T> {
@@ -49,11 +46,12 @@ impl<T: Send + 'static> Worker<T> {
         F: Fn(WorkItem<T>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = ()> + Send,
     {
-        let (tx, rx) = bounded(queue_size);
+        // let (tx, rx) = bounded(queue_size);
+        let (tx, rx) = tokio::sync::mpsc::channel(queue_size);
 
-        let handle = thread::Builder::new()
-            .name(format!("hypern-worker-{}", core_id))
-            .spawn(move || {
+        // Initialize Tokio Runtime for this thread
+        let rt = get_runtime();
+        let handle = rt.spawn(async move {
                 // Pin to core if enabled
                 if pin_to_core {
                     if let Some(core_ids) = core_affinity::get_core_ids() {
@@ -62,16 +60,9 @@ impl<T: Send + 'static> Worker<T> {
                         }
                     }
                 }
-                // Initialize Tokio Runtime for this thread
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("Failed to build worker runtime");
-
                 // Worker loop
-                Self::worker_loop(rx, handler, &rt);
-            })
-            .expect("Failed to spawn worker thread");
+                Self::worker_loop_async(rx, handler).await;
+            });
 
         Self {
             core_id,
@@ -80,29 +71,46 @@ impl<T: Send + 'static> Worker<T> {
         }
     }
 
-    fn worker_loop<F, Fut>(rx: Receiver<WorkItem<T>>, handler: F, rt: &tokio::runtime::Runtime)
-    where
+    async fn worker_loop_async<F, Fut>(
+        mut rx: tokio::sync::mpsc::Receiver<WorkItem<T>>,
+        handler: F,
+    ) where
         F: Fn(WorkItem<T>) -> Fut,
         Fut: std::future::Future<Output = ()>,
     {
+        let mut batch = Vec::with_capacity(32);
+        
         loop {
-            match rx.recv() {
-                Ok(work_item) => {
-                    rt.block_on(handler(work_item));
+            // Batch receive
+            batch.clear();
+            
+            // Wait for first item
+            if let Some(item) = rx.recv().await {
+                batch.push(item);
+                
+                // Try to fill batch without waiting
+                while batch.len() < 32 {
+                    match rx.try_recv() {
+                        Ok(item) => batch.push(item),
+                        Err(_) => break,
+                    }
                 }
-                Err(_) => {
-                    // Channel closed, exit loop
-                    break;
-                }
+                
+                // Process batch concurrently
+                futures::future::join_all(
+                    batch.drain(..).map(|item| handler(item))
+                ).await;
+            } else {
+                break; // Channel closed
             }
         }
     }
 
-    pub fn submit(
+    pub async fn submit(
         &self,
         item: WorkItem<T>,
-    ) -> Result<(), crossbeam::channel::SendError<WorkItem<T>>> {
-        self.sender.send(item)
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<WorkItem<T>>> {
+        self.sender.send(item).await
     }
 
 }
@@ -110,7 +118,7 @@ impl<T: Send + 'static> Worker<T> {
 impl<T: Send + 'static> Drop for Worker<T> {
     fn drop(&mut self) {
         if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
+            handle.abort();
         }
     }
 }
@@ -146,25 +154,25 @@ impl<T: Send + 'static> WorkerPool<T> {
     }
 
     /// Submit work using round-robin distribution
-    pub fn submit_round_robin(
+    pub async fn submit_round_robin(
         &self,
         item: WorkItem<T>,
-    ) -> Result<(), crossbeam::channel::SendError<WorkItem<T>>> {
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<WorkItem<T>>> {
         let idx = self
             .next_worker
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             % self.workers.len();
-        self.workers[idx].submit(item)
+        self.workers[idx].submit(item).await
     }
 
     /// Submit work to a specific worker based on hash (affinity routing)
-    pub fn submit_affinity(
+    pub async fn submit_affinity(
         &self,
         item: WorkItem<T>,
         hash: u64,
-    ) -> Result<(), crossbeam::channel::SendError<WorkItem<T>>> {
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<WorkItem<T>>> {
         let idx = (hash as usize) % self.workers.len();
-        self.workers[idx].submit(item)
+        self.workers[idx].submit(item).await
     }
     /// Get number of workers
     pub fn num_workers(&self) -> usize {
