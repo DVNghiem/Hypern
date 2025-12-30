@@ -1,7 +1,7 @@
 use crate::core::worker::{WorkItem, WorkerPool, WorkerPoolConfig};
 use crate::http::request::Request;
 use crate::http::response::{ResponseSlot, Response};
-use crate::runtime::{get_asyncio, get_inspect};
+use crate::runtime::get_asyncio;
 use dashmap::DashMap;
 use pyo3::prelude::*;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ static HANDLER_REGISTRY: OnceLock<DashMap<u64, (Py<PyAny>, bool)>> = OnceLock::n
 
 pub fn register_handler(hash: u64, handler: Py<PyAny>) {
     let is_async = Python::attach(|py| {
-        let inspect = get_inspect(py).bind(py);
+        let inspect = get_asyncio(py).bind(py);
         inspect
             .call_method1("iscoroutinefunction", (&handler,))
             .expect("Failed to call iscoroutinefunction")

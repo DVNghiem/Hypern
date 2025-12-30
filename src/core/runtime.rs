@@ -6,7 +6,6 @@ use crate::utils::cpu::num_cpus;
 
 static ASYNCIO: OnceLock<Py<PyModule>> = OnceLock::new();
 static EV_LOOP: OnceLock<Py<PyAny>> = OnceLock::new();
-static INSPECT: OnceLock<Py<PyModule>> = OnceLock::new();
 // Share single multi-threaded runtime
 static SHARED_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 static CONN_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
@@ -39,10 +38,6 @@ pub fn get_event_loop(py: Python<'_>) -> &Py<PyAny> {
             .expect("Failed to get event loop")
             .into()
     })
-}
-
-pub fn get_inspect(py: Python<'_>) -> &Py<PyModule> {
-    INSPECT.get_or_init(|| py.import("inspect").unwrap().into())
 }
 
 pub fn get_runtime() -> &'static tokio::runtime::Runtime {
