@@ -134,7 +134,6 @@ impl Server {
             });
         });
         println!("Server is running...");
-        println!("Server is running...");
         // Keep event loop alive
         // Only run_forever if we are the main thread or if requested.
         // In the original code it was here.

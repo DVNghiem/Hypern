@@ -1,6 +1,7 @@
 use crate::core::worker::{WorkItem, WorkerPool, WorkerPoolConfig};
 use crate::http::request::FastRequest;
 use crate::http::response::{ResponseSlot, ResponseWriter};
+use crate::runtime::get_asyncio;
 use dashmap::DashMap;
 use pyo3::prelude::*;
 use std::sync::Arc;
@@ -29,6 +30,19 @@ pub struct InterpreterPool {
     num_workers: usize,
 }
 
+enum ExecutionResult {
+    SyncSuccess(Option<tokio::sync::oneshot::Sender<()>>),
+    AsyncFuture(
+        std::pin::Pin<
+            Box<dyn std::future::Future<Output = PyResult<Py<PyAny>>> + Send>,
+        >,
+        Option<tokio::sync::oneshot::Sender<()>>,
+    ),
+    Callback,
+    NotFound(Option<tokio::sync::oneshot::Sender<()>>),
+    Error(PyErr),
+}
+
 // Work item data structure
 struct RequestWork {
     route_hash: u64,
@@ -53,27 +67,19 @@ impl InterpreterPool {
                 let pool = WorkerPool::new(config, |item: WorkItem<RequestWork>| async move {
                     let work = item.data;
 
-                    enum ExecutionResult {
-                        SyncSuccess(Option<tokio::sync::oneshot::Sender<()>>),
-                        AsyncFuture(
-                            std::pin::Pin<
-                                Box<dyn std::future::Future<Output = PyResult<Py<PyAny>>> + Send>,
-                            >,
-                            Option<tokio::sync::oneshot::Sender<()>>,
-                        ),
-                        Callback,
-                        NotFound(Option<tokio::sync::oneshot::Sender<()>>),
-                        Error(PyErr),
-                    }
-
+                    
+                    // registry lookup (no GIL needed - DashMap is lock-free)
+                    let handler_entry = {
+                        let registry = HANDLER_REGISTRY.get_or_init(DashMap::new);
+                        registry.get(&work.route_hash)
+                    };
+                    let writer = ResponseWriter::new(work.response_slot.clone());
                     // Run Python logic to get the future or execution result
                     let exec_result = Python::attach(|py| {
-                        let registry = HANDLER_REGISTRY.get_or_init(DashMap::new);
 
-                        if let Some(handler_entry) = registry.get(&work.route_hash) {
+                        if let Some(handler_entry) = handler_entry {
                             let (handler, is_async) = &*handler_entry;
 
-                            let writer = ResponseWriter::new(work.response_slot.clone());
                             // Handle errors during wrapping
                             let py_writer = match Bound::new(py, writer) {
                                 Ok(w) => w,
@@ -96,7 +102,7 @@ impl InterpreterPool {
                                             let loop_ = locals.event_loop(py);
                                             
                                             // 2. Schedule the coroutine on the loop using thread-safe generic
-                                            let asyncio = py.import("asyncio").expect("Failed to import asyncio");
+                                            let asyncio  = get_asyncio(py).bind(py);
                                             match asyncio.call_method1("run_coroutine_threadsafe", (coro, loop_)) {
                                                 Ok(future) => {
                                                     // 3. Attach our callback
@@ -186,8 +192,6 @@ impl InterpreterPool {
                             work.response_slot.set_status(500);
                             work.response_slot
                                 .set_body(format!("Internal Server Error: {:?}", e).into_bytes());
-                            // if we didn't return it.
-                            // FIX: I will pass tx into the Enum for *all* variants to stay safe.
                         }
                     }
                 });
