@@ -7,11 +7,12 @@ use pyo3::pycell::PyRef;
 use std::sync::Arc;
 use std::thread;
 use tokio::net::TcpListener;
-use tracing::{error, warn};
+use tracing::error;
 
 use crate::core::interpreter_pool::InterpreterPool;
 use crate::http::request::FastRequest;
 use crate::routing::router::Router;
+use crate::runtime::{get_connection_semaphore, get_event_loop};
 use crate::socket::SocketHeld;
 use crate::utils::cpu::num_cpus; // Kept for API compatibility
 
@@ -47,6 +48,7 @@ impl Server {
         socket: PyRef<SocketHeld>,
         workers: usize,
         max_blocking_threads: usize,
+        max_connections: usize,
     ) -> PyResult<()> {
         let raw_socket = socket.get_socket();
 
@@ -69,14 +71,7 @@ impl Server {
 
         let pool = self.interpreter_pool.clone();
         let router = self.router.clone();
-        let asyncio = py.import("asyncio")?;
-        let ev_loop = asyncio.call_method0("get_event_loop")?;
-
-        // Initialize TaskLocals for the server
-        let locals = pyo3_async_runtimes::TaskLocals::new(ev_loop.clone());
-        if let Err(_) = crate::core::runtime::set_task_locals(locals) {
-            warn!("Task locals already set, skipping.");
-        }
+        let ev_loop = get_event_loop(py).bind(py);
 
         thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
@@ -91,11 +86,21 @@ impl Server {
                     .expect("Failed to convert listener");
 
                 while let Ok((stream, addr)) = listener.accept().await {
+                    let permit = match get_connection_semaphore(max_connections).try_acquire_owned() {
+                        Ok(p) => p,
+                        Err(_) => {
+                            // Drop connection if at capacity
+                            drop(stream);
+                            continue;
+                        }
+                    };
+
                     let io = TokioIo::new(stream);
                     let pool_ref = pool.clone();
                     let router_ref = router.clone();
 
                     tokio::task::spawn(async move {
+                        let _permit = permit; // Hold permit until done
                         if let Err(err) = http1::Builder::new()
                             .serve_connection(
                                 io,

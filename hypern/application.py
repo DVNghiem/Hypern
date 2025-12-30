@@ -79,6 +79,7 @@ class Hypern:
         port=5000,
         workers=1,
         max_blocking_threads=1,
+        max_connections=10000,
     ):
         """
         Starts the server with the specified configuration.
@@ -89,7 +90,7 @@ class Hypern:
         server = Server()
         server.set_router(router=self.router)
         socket = SocketHeld(host, port)
-        server.start(socket=socket, workers=workers, max_blocking_threads=max_blocking_threads)
+        server.start(socket=socket, workers=workers, max_blocking_threads=max_blocking_threads, max_connections=max_connections)
 
     def add_route(self, method: str, endpoint: str, handler: Callable[..., Any]):
         """

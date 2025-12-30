@@ -32,12 +32,6 @@ pub struct InterpreterPool {
 
 enum ExecutionResult {
     SyncSuccess(Option<tokio::sync::oneshot::Sender<()>>),
-    AsyncFuture(
-        std::pin::Pin<
-            Box<dyn std::future::Future<Output = PyResult<Py<PyAny>>> + Send>,
-        >,
-        Option<tokio::sync::oneshot::Sender<()>>,
-    ),
     Callback,
     NotFound(Option<tokio::sync::oneshot::Sender<()>>),
     Error(PyErr),
@@ -96,44 +90,33 @@ impl InterpreterPool {
                             if *is_async {
                                 match call_result {
                                     Ok(coro) => {
-                                        if let Some(locals) = crate::core::runtime::get_task_locals() {
-                                            // Granian-inspired Push Model
-                                            // 1. Get the event loop
-                                            let loop_ = locals.event_loop(py);
-                                            
-                                            // 2. Schedule the coroutine on the loop using thread-safe generic
-                                            let asyncio  = get_asyncio(py).bind(py);
-                                            match asyncio.call_method1("run_coroutine_threadsafe", (coro, loop_)) {
-                                                Ok(future) => {
-                                                    // 3. Attach our callback
-                                                    let callback = crate::http::callback::PyResponseCallback::new(
-                                                        work.completion_tx,
-                                                    );
-                                                    match Bound::new(py, callback) {
-                                                        Ok(bound_cb) => {
-                                                            match future.call_method1(
-                                                                "add_done_callback",
-                                                                (bound_cb.getattr("done").unwrap(),),
-                                                            ) {
-                                                                Ok(_) => ExecutionResult::Callback,
-                                                                Err(e) => ExecutionResult::Error(e),
-                                                            }
+                                        let asyncio  = get_asyncio(py).bind(py);
+                                        // Schedule the coroutine on the loop using thread-safe generic
+                                        let loop_ = asyncio
+                                            .call_method0("get_event_loop")
+                                            .expect("Failed to get event loop");
+                                        match asyncio.call_method1("run_coroutine_threadsafe", (coro, loop_)) {
+                                            Ok(future) => {
+                                                // 3. Attach our callback
+                                                let callback = crate::http::callback::PyResponseCallback::new(
+                                                    work.completion_tx,
+                                                );
+                                                match Bound::new(py, callback) {
+                                                    Ok(bound_cb) => {
+                                                        match future.call_method1(
+                                                            "add_done_callback",
+                                                            (bound_cb.getattr("done").unwrap(),),
+                                                        ) {
+                                                            Ok(_) => ExecutionResult::Callback,
+                                                            Err(e) => ExecutionResult::Error(e),
                                                         }
-                                                        Err(e) => ExecutionResult::Error(e),
                                                     }
+                                                    Err(e) => ExecutionResult::Error(e),
                                                 }
-                                                Err(e) => ExecutionResult::Error(e),
                                             }
-                                        } else {
-                                            // Fallback logic if TaskLocals are not initialized
-                                            match pyo3_async_runtimes::tokio::into_future(coro) {
-                                                Ok(fut) => ExecutionResult::AsyncFuture(
-                                                    Box::pin(fut),
-                                                    Some(work.completion_tx),
-                                                ),
-                                                Err(e) => ExecutionResult::Error(e),
-                                            }
+                                            Err(e) => ExecutionResult::Error(e),
                                         }
+                                       
                                     }
                                     Err(e) => ExecutionResult::Error(e),
                                 }
@@ -158,27 +141,6 @@ impl InterpreterPool {
                                 let _ = tx.send(());
                             }
                         }
-                        ExecutionResult::AsyncFuture(fut, tx) => match fut.await {
-                            Ok(_) => {
-                                if let Some(tx) = tx {
-                                    println!("Async future finished for hash: {}", work.route_hash);
-                                    let _ = tx.send(());
-                                }
-                            }
-                            Err(e) => {
-                                error!(
-                                    "Python async handler error for hash {}: {:?}",
-                                    work.route_hash, e
-                                );
-                                work.response_slot.set_status(500);
-                                work.response_slot.set_body(
-                                    format!("Internal Server Error: {:?}", e).into_bytes(),
-                                );
-                                if let Some(tx) = tx {
-                                    let _ = tx.send(());
-                                }
-                            }
-                        },
                         ExecutionResult::NotFound(tx) => {
                             warn!("No handler found for hash: {}", work.route_hash);
                             work.response_slot.set_status(404);

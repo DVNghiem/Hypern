@@ -18,6 +18,7 @@ socket2 = { version = "0.6.1", features = ["all"] }
 hyper = { version = "1.8.1", features = ["server", "http1", "http2"] }
 http-body-util = "0.1.3"
 hyper-util = { version = "0.1.19", features = ["tokio"]}
+tower = "0.5.2"
 bytes = "1.11.0"
 tungstenite = "0.28.0"
 hyper-tungstenite = "0.19.0"
@@ -47,7 +48,6 @@ bumpalo = "3.14"
 phf = { version = "0.13.1", features = ["macros"] }
 
 # Performance: Concurrency
-crossbeam = "0.8"
 dashmap = "6.1.0"
 parking_lot = "0.12.5"
 
@@ -64,18 +64,11 @@ thiserror = "2.0.17"
 [target.'cfg(not(any(target_env = "musl", target_os = "freebsd", target_os = "openbsd", target_os = "windows")))'.dependencies]
 tikv-jemallocator = { version = "0.6.1", default-features = false, features = ["disable_initial_exec_tls"] }
 
-# Linux-specific io_uring support
-[target.'cfg(target_os = "linux")'.dependencies]
-io-uring = { version = "0.7.11", optional = true }
-
 [build-dependencies]
 pyo3-build-config = "=0.27.2"
 
 [features]
-default = ["io_uring"]
 mimalloc = ["dep:mimalloc"]
-io_uring = ["io-uring"]
-metrics = []
 
 [profile.release]
 codegen-units = 1
