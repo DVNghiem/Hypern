@@ -18,7 +18,6 @@ use pyo3::prelude::*;
 pub use crate::core::runtime;
 pub use crate::core::socket;
 pub use crate::http::body;
-pub use crate::http::errors;
 
 // Core performance modules
 pub mod core;
@@ -33,8 +32,8 @@ pub mod utils;
 
 pub use crate::core::server::Server;
 pub use crate::http::headers::{FastHeaders, HypernHeaders};
-pub use crate::http::request::{FastRequest, Request};
-pub use crate::http::response::{ResponseSlot, ResponseWriter};
+pub use crate::http::request::Request;
+pub use crate::http::response::{ResponseSlot, Response};
 pub use crate::middleware::Middleware;
 pub use crate::routing::cache::RouteCache;
 pub use crate::routing::route::Route;
@@ -53,16 +52,12 @@ fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<Router>()?;
     module.add_class::<Middleware>()?;
 
-    module.add_class::<ResponseWriter>()?;
-    module.add_class::<Request>()?;
+    module.add_class::<Response>()?;
     module.add_class::<HypernHeaders>()?;
     module.add_class::<socket::SocketHeld>()?;
-    module.add_class::<errors::HypernError>()?;
-    module.add_class::<errors::DefaultErrorHandler>()?;
-    module.add_class::<errors::ErrorContext>()?;
 
     // New performance classes
-    module.add_class::<FastRequest>()?;
+    module.add_class::<Request>()?;
     module.add_class::<FastHeaders>()?;
 
     Ok(())

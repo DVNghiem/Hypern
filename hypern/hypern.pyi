@@ -3,19 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List
 
+
 class Request:
-    path: str
-    query_params: Dict[str, str]
-    headers: Dict[str, str]
-    body: Any
+    pass
 
-    async def __call__(self, *args, **kwds): ...
-
-class ResponseWriter:
-    def status(self, status: int) -> ResponseWriter: ...
-    def header(self, key: str, value: str) -> ResponseWriter: ...
-    def body(self, body: bytes) -> ResponseWriter: ...
-    def body_str(self, body: str) -> ResponseWriter: ...
+class Response:
+    def status(self, status: int) -> Response: ...
+    def header(self, key: str, value: str) -> Response: ...
+    def body(self, body: bytes) -> Response: ...
+    def body_str(self, body: str) -> Response: ...
     def finish(self) -> None: ...
     
 @dataclass
@@ -32,7 +28,7 @@ class Server:
 
 class Route:
     path: str
-    function: Callable[[Request, ResponseWriter], Any]
+    function: Callable[[Request, Response], Any]
     method: str
     doc: str | None = None
 

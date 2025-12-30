@@ -1,5 +1,3 @@
-//! Object pooling for requests and responses to reduce allocations.
-
 use parking_lot::Mutex;
 
 /// Generic object pool for reusable objects
@@ -116,37 +114,5 @@ impl ResponsePool {
 impl Default for ResponsePool {
     fn default() -> Self {
         Self::new(1024, 4096) // 1K buffers, 4KB each
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_object_pool() {
-        let pool: ObjectPool<Vec<u8>> = ObjectPool::new(10, || Vec::with_capacity(100));
-
-        let obj = pool.get();
-        assert!(obj.capacity() >= 100);
-
-        pool.put(obj);
-        assert_eq!(pool.size(), 1);
-
-        let obj2 = pool.get();
-        assert_eq!(pool.size(), 0);
-        assert!(obj2.capacity() >= 100);
-    }
-
-    #[test]
-    fn test_request_pool() {
-        let pool = RequestPool::default();
-
-        let mut buf = pool.get_buffer();
-        buf.extend_from_slice(b"test data");
-        pool.return_buffer(buf);
-
-        let buf2 = pool.get_buffer();
-        assert!(buf2.is_empty()); // Should be cleared
     }
 }

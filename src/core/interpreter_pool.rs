@@ -1,6 +1,6 @@
 use crate::core::worker::{WorkItem, WorkerPool, WorkerPoolConfig};
-use crate::http::request::FastRequest;
-use crate::http::response::{ResponseSlot, ResponseWriter};
+use crate::http::request::Request;
+use crate::http::response::{ResponseSlot, Response};
 use crate::runtime::{get_asyncio, get_inspect};
 use dashmap::DashMap;
 use pyo3::prelude::*;
@@ -40,7 +40,7 @@ enum ExecutionResult {
 // Work item data structure
 struct RequestWork {
     route_hash: u64,
-    request: FastRequest,
+    request: Request,
     response_slot: Arc<ResponseSlot>,
     completion_tx: tokio::sync::oneshot::Sender<()>,
 }
@@ -67,7 +67,7 @@ impl InterpreterPool {
                         let registry = HANDLER_REGISTRY.get_or_init(DashMap::new);
                         registry.get(&work.route_hash)
                     };
-                    let writer = ResponseWriter::new(work.response_slot.clone());
+                    let writer = Response::new(work.response_slot.clone());
                     // Run Python logic to get the future or execution result
                     let exec_result = Python::attach(|py| {
 
@@ -165,7 +165,7 @@ impl InterpreterPool {
     pub async fn execute(
         &self,
         route_hash: u64,
-        request: FastRequest,
+        request: Request,
     ) -> hyper::Response<crate::body::HTTPResponseBody> {
         let response_slot = ResponseSlot::new();
         let (tx, rx) = tokio::sync::oneshot::channel();

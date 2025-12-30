@@ -10,7 +10,8 @@ use tokio::net::TcpListener;
 use tracing::error;
 
 use crate::core::interpreter_pool::InterpreterPool;
-use crate::http::request::FastRequest;
+use crate::http::request::Request;
+use crate::http::response::RESPONSE_404;
 use crate::routing::router::Router;
 use crate::runtime::{get_connection_semaphore, get_event_loop};
 use crate::socket::SocketHeld;
@@ -108,8 +109,7 @@ impl Server {
                                     let pool = pool_ref.clone();
                                     let router = router_ref.clone();
                                     async move {
-                                        // Parse request to FastRequest
-                                        let fast_req = FastRequest::from_hyper(req).await;
+                                        let fast_req = Request::from_hyper(req).await;
                                         // Match route to get pattern-based hash and params
                                         if let Some((route, params)) = router.find_matching_route(
                                             fast_req.path(),
@@ -120,12 +120,7 @@ impl Server {
                                             let res = pool.execute(route_hash, fast_req).await;
                                             Ok::<_, hyper::Error>(res)
                                         } else {
-                                            // 404 Not Found
-                                            let mut res = hyper::Response::new(
-                                                crate::http::body::full_http(b"Not Found".to_vec()),
-                                            );
-                                            *res.status_mut() = hyper::StatusCode::NOT_FOUND;
-                                            Ok(res)
+                                            Ok(RESPONSE_404.clone())
                                         }
                                     }
                                 }),

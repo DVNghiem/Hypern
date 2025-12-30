@@ -1,19 +1,11 @@
-//! Zero-copy request handling for high-performance HTTP processing.
-//!
-//! This module provides `FastRequest` which uses Arc and Bytes for zero-copy
-//! access to request data, avoiding allocations in the hot path.
-
 use ahash::AHashMap;
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
-use pyo3_async_runtimes::tokio::future_into_py;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 
-use crate::errors::{error_request, error_stream};
-use crate::http::headers::HypernHeaders;
 
 /// HTTP method enum for fast comparison (no string allocation)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -115,11 +107,11 @@ impl QueryParams {
 
 /// Fast header map using AHashMap for O(1) lookups
 #[derive(Clone, Debug, Default)]
-pub struct FastHeaderMap {
+pub struct HeaderMap {
     headers: AHashMap<String, String>,
 }
 
-impl FastHeaderMap {
+impl HeaderMap {
     pub fn new() -> Self {
         Self {
             headers: AHashMap::with_capacity(16),
@@ -153,10 +145,10 @@ impl FastHeaderMap {
 
 /// Zero-copy request structure for high-performance request handling.
 #[pyclass(frozen)]
-pub struct FastRequest {
+pub struct Request {
     path: Arc<str>,
     method: Method,
-    headers: Arc<FastHeaderMap>,
+    headers: Arc<HeaderMap>,
     #[pyo3(get)]
     query_string: String,
     query_params: parking_lot::RwLock<QueryParams>,
@@ -165,7 +157,7 @@ pub struct FastRequest {
     route_hash: u64,
 }
 
-impl Clone for FastRequest {
+impl Clone for Request {
     fn clone(&self) -> Self {
         Self {
             path: self.path.clone(),
@@ -180,11 +172,11 @@ impl Clone for FastRequest {
     }
 }
 
-impl FastRequest {
+impl Request {
     pub fn new(
         path: &str,
         method: Method,
-        headers: FastHeaderMap,
+        headers: HeaderMap,
         query_string: &str,
         body: Option<Bytes>,
     ) -> Self {
@@ -222,7 +214,7 @@ impl FastRequest {
         );
 
         let method = Method::from(&parts.method);
-        let headers = FastHeaderMap::from_hyper(&parts.headers);
+        let headers = HeaderMap::from_hyper(&parts.headers);
 
         let body_bytes = match body.collect().await {
             Ok(collected) => Some(collected.to_bytes()),
@@ -255,7 +247,7 @@ impl FastRequest {
 }
 
 #[pymethods]
-impl FastRequest {
+impl Request {
     #[getter(path)]
     fn py_path(&self) -> &str {
         &self.path
@@ -348,137 +340,6 @@ impl FastRequest {
         self.content_type()
             .map(|ct| ct.to_lowercase().contains(&content_type.to_lowercase()))
             .unwrap_or(false)
-    }
-
-    pub fn is_json(&self) -> bool {
-        self.is_content_type("application/json")
-    }
-
-    pub fn is_form(&self) -> bool {
-        self.is_content_type("application/x-www-form-urlencoded")
-    }
-
-    pub fn is_multipart(&self) -> bool {
-        self.is_content_type("multipart/")
-    }
-}
-
-/// Legacy Request support for backwards compatibility
-#[pyclass(frozen)]
-pub struct Request {
-    path: String,
-    query_string: String,
-    headers: HypernHeaders,
-    method: String,
-    path_params: HashMap<String, String>,
-    query_params: HashMap<String, String>,
-    body: Mutex<Option<hyper::body::Incoming>>,
-}
-
-impl Request {
-    pub async fn new(req: hyper::Request<hyper::body::Incoming>) -> Self {
-        use percent_encoding::percent_decode_str;
-        let (req_part, body_part) = req.into_parts();
-        let (path, query_string) = req_part.uri.path_and_query().map_or_else(
-            || (vec![], ""),
-            |pq| {
-                (
-                    percent_decode_str(pq.path()).collect(),
-                    pq.query().unwrap_or(""),
-                )
-            },
-        );
-
-        let headers = HypernHeaders::new(req_part.headers);
-        let method = req_part.method.to_string();
-
-        let query_params = if query_string.is_empty() {
-            HashMap::new()
-        } else {
-            form_urlencoded::parse(query_string.as_bytes())
-                .into_owned()
-                .collect()
-        };
-
-        Self {
-            path: String::from_utf8_lossy(&path).to_string(),
-            query_string: query_string.to_string(),
-            headers,
-            method,
-            path_params: HashMap::new(),
-            query_params,
-            body: Mutex::new(Some(body_part)),
-        }
-    }
-}
-
-#[pymethods]
-impl Request {
-    fn __call__<'p>(&self, py: Python<'p>) -> PyResult<Bound<'p, PyAny>> {
-        let body = self.body.lock().unwrap().take();
-
-        future_into_py(py, async move {
-            if let Some(body) = body {
-                return match body.collect().await {
-                    Ok(data) => {
-                        let bytes = data.to_bytes();
-                        Ok(bytes.to_vec())
-                    }
-                    Err(_) => error_request!(),
-                };
-            }
-            error_stream!()
-        })
-    }
-
-    #[getter(path)]
-    fn path(&self) -> &str {
-        &self.path
-    }
-
-    #[getter(query_string)]
-    fn query_string(&self) -> &str {
-        &self.query_string
-    }
-
-    #[getter(headers)]
-    fn headers(&self) -> HypernHeaders {
-        self.headers.clone()
-    }
-
-    #[getter(method)]
-    fn method(&self) -> &str {
-        &self.method
-    }
-
-    #[getter(path_params)]
-    fn path_params(&self) -> &HashMap<String, String> {
-        &self.path_params
-    }
-
-    #[getter(query_params)]
-    fn query_params(&self) -> &HashMap<String, String> {
-        &self.query_params
-    }
-
-    pub fn query(&self, name: &str) -> Option<&String> {
-        self.query_params.get(name)
-    }
-
-    pub fn param(&self, name: &str) -> Option<&String> {
-        self.path_params.get(name)
-    }
-
-    pub fn content_type(&self) -> Option<String> {
-        self.headers.get_header("content-type")
-    }
-
-    pub fn is_content_type(&self, content_type: &str) -> bool {
-        if let Some(ct) = self.content_type() {
-            ct.to_lowercase().contains(&content_type.to_lowercase())
-        } else {
-            false
-        }
     }
 
     pub fn is_json(&self) -> bool {

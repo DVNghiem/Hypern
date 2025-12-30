@@ -9,8 +9,7 @@ name = "hypern"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-pyo3 = { version = "0.27.2", features = ["anyhow", "bytes", "extension-module", "generate-import-lib"] }
-pyo3-async-runtimes = { version = "0.27.0", features = ["tokio-runtime"] }
+pyo3 = { version = "0.27.2", features = ["extension-module", "generate-import-lib"] }
 
 tokio = { version = "1.48.0", features = ["full"] }
 futures = "0.3.28"
@@ -23,14 +22,14 @@ bytes = "1.11.0"
 tungstenite = "0.28.0"
 hyper-tungstenite = "0.19.0"
 tokio-tungstenite = "0.28.0"
-anyhow = "1.0.100"
 percent-encoding = "2.3.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.148"
-url = "2.5.7"
 form_urlencoded = "1.2.1"
 mime = "0.3.17"
 mimalloc = { version = "0.1.48", optional = true }
+libc = "0.2.178"
+once_cell = "1.20.0"
 
 # Performance: SIMD JSON parsing
 simd-json = "0.17.0"
@@ -43,9 +42,6 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 smallvec = "1.15.1"
 memmap2 = "0.9"
 bumpalo = "3.14"
-
-# Performance: Routing optimization
-phf = { version = "0.13.1", features = ["macros"] }
 
 # Performance: Concurrency
 dashmap = "6.1.0"
@@ -60,6 +56,9 @@ tracing-subscriber = { version = "0.3.22"}
 
 # Error handling
 thiserror = "2.0.17"
+
+# Smart String optimization
+smartstring = "1.0.1"
 
 [target.'cfg(not(any(target_env = "musl", target_os = "freebsd", target_os = "openbsd", target_os = "windows")))'.dependencies]
 tikv-jemallocator = { version = "0.6.1", default-features = false, features = ["disable_initial_exec_tls"] }

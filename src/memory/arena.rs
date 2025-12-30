@@ -6,10 +6,6 @@ thread_local! {
     static THREAD_ARENA: RefCell<ThreadArena> = RefCell::new(ThreadArena::new());
 }
 
-/// Arena allocator for per-request allocations.
-///
-/// Provides O(1) allocation and batch deallocation by resetting
-/// the entire arena after each request.
 pub struct ThreadArena {
     arena: Bump,
     allocation_count: usize,

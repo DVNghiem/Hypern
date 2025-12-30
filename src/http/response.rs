@@ -1,19 +1,19 @@
 use hyper::header::{HeaderMap, HeaderName, HeaderValue, SERVER};
+use once_cell::sync::Lazy;
 use pyo3::prelude::*;
 use smallvec::SmallVec;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
 
-use crate::body::HTTPResponseBody;
+use crate::body::{HTTPResponseBody, full_http};
 
-/// Pre-allocated response slot for zero-allocation response handling.
-///
-/// Uses atomic operations for lock-free completion signaling.
+type SmallString = smartstring::SmartString<smartstring::LazyCompact>;
+
 pub struct ResponseSlot {
     /// HTTP status code
     status: AtomicU16,
     /// Response headers (small vector optimization for common case)
-    headers: parking_lot::RwLock<SmallVec<[(String, String); 8]>>,
+    headers: parking_lot::RwLock<SmallVec<[(SmallString, SmallString); 8]>>,
     /// Response body
     body: parking_lot::RwLock<Vec<u8>>,
     /// Completion flag
@@ -25,7 +25,7 @@ impl ResponseSlot {
         Arc::new(Self {
             status: AtomicU16::new(200),
             headers: parking_lot::RwLock::new(SmallVec::new()),
-            body: parking_lot::RwLock::new(Vec::with_capacity(4096)),
+            body: parking_lot::RwLock::new(Vec::with_capacity(8192)),
             ready: AtomicBool::new(false),
         })
     }
@@ -40,14 +40,18 @@ impl ResponseSlot {
         self.status.load(Ordering::Acquire)
     }
 
-    pub fn set_headers(&self, headers: Vec<(String, String)>) {
-        let mut h = self.headers.write();
-        h.clear();
-        h.extend(headers);
+    pub fn set_headers(&self, headers: impl IntoIterator<Item = (String, String)>) {
+        let mut header_guard = self.headers.write();
+        header_guard.clear();
+        header_guard.extend(
+            headers.into_iter().map(|(k, v)| {
+                (SmallString::from(k), SmallString::from(v))
+            })
+        );
     }
 
     pub fn add_header(&self, key: String, value: String) {
-        self.headers.write().push((key, value));
+        self.headers.write().push((SmallString::from(key), SmallString::from(value)));
     }
 
     pub fn set_body(&self, body: Vec<u8>) {
@@ -117,12 +121,12 @@ impl Default for ResponseSlot {
 
 /// Response writer for efficient response construction
 #[pyclass]
-pub struct ResponseWriter {
+pub struct Response {
     slot: Arc<ResponseSlot>,
 }
 
 #[pymethods]
-impl ResponseWriter {
+impl Response {
     #[pyo3(signature = (status=200))]
     pub fn status<'py>(pyself: PyRef<'py, Self>, status: u16) -> PyRef<'py, Self> {
         pyself.slot.set_status(status);
@@ -154,7 +158,7 @@ impl ResponseWriter {
     }
 }
 
-impl ResponseWriter {
+impl Response {
     pub fn new(slot: Arc<ResponseSlot>) -> Self {
         Self { slot }
     }
@@ -178,3 +182,19 @@ impl PyEmptyAwaitable {
         None
     }
 }
+
+pub static RESPONSE_404: Lazy<hyper::Response<HTTPResponseBody>> = Lazy::new(|| {
+    hyper::Response::builder()
+        .status(404)
+        .header("content-type", "text/plain")
+        .body(full_http(b"Not Found".to_vec()))
+        .unwrap()
+});
+
+pub static RESPONSE_500: Lazy<hyper::Response<HTTPResponseBody>> = Lazy::new(|| {
+    hyper::Response::builder()
+        .status(500)
+        .header("content-type", "text/plain")
+        .body(full_http(b"Internal Server Error".to_vec()))
+        .unwrap()
+});

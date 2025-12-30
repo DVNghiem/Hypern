@@ -1,4 +1,3 @@
-/// Parse HTTP request line efficiently
 pub struct RequestParser;
 
 impl RequestParser {

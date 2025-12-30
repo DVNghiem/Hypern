@@ -1,11 +1,9 @@
-//! Fast header handling with AHashMap for O(1) lookups and legacy support.
-
 use ahash::AHashMap;
 use hyper::HeaderMap;
 use pyo3::prelude::*;
 use pyo3::types::{PyIterator, PyList, PyString};
 
-/// Fast headers using AHashMap for O(1) lookups
+/// headers using AHashMap for O(1) lookups
 #[pyclass(frozen)]
 #[derive(Clone, Debug, Default)]
 pub struct FastHeaders {
