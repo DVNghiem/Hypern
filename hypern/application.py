@@ -1,39 +1,13 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Callable, List, TypeVar
-
-import psutil
 from typing_extensions import Annotated, Doc
 
 from hypern.hypern import Router, Server, SocketHeld
 from hypern.hypern import Route
 
 AppType = TypeVar("AppType", bound="Hypern")
-
-
-@dataclass
-class ThreadConfig:
-    workers: int
-    max_blocking_threads: int
-
-
-class ThreadConfigurator:
-    def __init__(self):
-        self._cpu_count = psutil.cpu_count(logical=True)
-        self._memory_gb = psutil.virtual_memory().total / (1024**3)
-
-    def get_config(self, concurrent_requests: int = None) -> ThreadConfig:
-        """Calculate optimal thread configuration based on system resources."""
-        workers = max(2, self._cpu_count)
-
-        if concurrent_requests:
-            max_blocking = min(max(32, concurrent_requests * 2), workers * 4, int(self._memory_gb * 8))
-        else:
-            max_blocking = min(workers * 4, int(self._memory_gb * 8), 256)
-
-        return ThreadConfig(workers=workers, max_blocking_threads=max_blocking)
 
 
 class Hypern:
@@ -68,7 +42,6 @@ class Hypern:
         self.response_headers = {}
         self.start_up_handler = None
         self.shutdown_handler = None
-        self.thread_config = ThreadConfigurator().get_config()
 
         if routes is not None:
             self.router.extend_route(routes)
