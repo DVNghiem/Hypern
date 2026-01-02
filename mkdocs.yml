@@ -1,0 +1,159 @@
+site_name: Hypern Documentation
+site_description: A Fast Async Python backend with a Rust runtime
+site_author: Martin Dang
+site_url: https://hypern.dev
+
+repo_name: hypern
+repo_url: https://github.com/martindang/hypern
+edit_uri: edit/main/docs/
+
+theme:
+    name: material
+    palette:
+        # Palette toggle for light mode
+        - scheme: default
+          primary: indigo
+          accent: indigo
+          toggle:
+              icon: material/brightness-7
+              name: Switch to dark mode
+        # Palette toggle for dark mode
+        - scheme: slate
+          primary: indigo
+          accent: indigo
+          toggle:
+              icon: material/brightness-4
+              name: Switch to light mode
+    font:
+        text: Roboto
+        code: Roboto Mono
+    features:
+        - navigation.instant
+        - navigation.tracking
+        - navigation.tabs
+        - navigation.tabs.sticky
+        - navigation.sections
+        - navigation.expand
+        - navigation.path
+        - navigation.top
+        - navigation.footer
+        - search.suggest
+        - search.highlight
+        - content.tabs.link
+        - content.code.annotation
+        - content.code.copy
+        - toc.follow
+    language: en
+    icon:
+        repo: fontawesome/brands/github
+        logo: material/lightning-bolt
+
+plugins:
+    - search:
+          lang: en
+    - mkdocstrings:
+          handlers:
+              python:
+                  options:
+                      docstring_style: google
+                      show_source: true
+                      show_root_heading: true
+                      show_category_heading: true
+                      show_bases: true
+                      show_submodules: true
+
+markdown_extensions:
+    - pymdownx.highlight:
+          anchor_linenums: true
+          line_spans: __span
+          pygments_lang_class: true
+    - pymdownx.inlinehilite
+    - pymdownx.snippets
+    - pymdownx.superfences:
+          custom_fences:
+              - name: mermaid
+                class: mermaid
+                format: !!python/name:pymdownx.superfences.fence_code_format
+    - pymdownx.tabbed:
+          alternate_style: true
+    - pymdownx.tasklist:
+          custom_checkbox: true
+    - pymdownx.emoji:
+          emoji_index: !!python/name:material.extensions.emoji.twemoji
+          emoji_generator: !!python/name:material.extensions.emoji.to_svg
+    - admonition
+    - pymdownx.details
+    - attr_list
+    - md_in_html
+    - def_list
+    - tables
+    - toc:
+          permalink: true
+          toc_depth: 3
+
+nav:
+    - Home: index.md
+    - Getting Started:
+          - Installation: getting-started/installation.md
+          - Quick Start: getting-started/quickstart.md
+          - Basic Concepts: getting-started/concepts.md
+          - Project Structure: getting-started/project-structure.md
+    - User Guide:
+          - Application: guide/application.md
+          - Routing: guide/routing.md
+          - Request Handling: guide/requests.md
+          - Response Building: guide/responses.md
+          - Middleware: guide/middleware.md
+          - Configuration: guide/configuration.md
+          - Error Handling: guide/error-handling.md
+    - Advanced Topics:
+          - Performance Optimization: advanced/performance.md
+          - WebSocket Support: advanced/websockets.md
+          - Background Tasks: advanced/background-tasks.md
+          - File Upload: advanced/file-upload.md
+          - Database Integration: advanced/database.md
+          - Testing: advanced/testing.md
+          - Deployment: advanced/deployment.md
+    - API Reference:
+          - Core:
+                - Hypern: api/core/hypern.md
+                - Server: api/core/server.md
+                - Router: api/core/router.md
+                - Route: api/core/route.md
+          - HTTP:
+                - Request: api/http/request.md
+                - Response: api/http/response.md
+                - Headers: api/http/headers.md
+          - Middleware:
+                - Overview: api/middleware/overview.md
+                - Built-in Middleware: api/middleware/builtin.md
+                - Custom Middleware: api/middleware/custom.md
+    - Architecture:
+          - Overview: architecture/overview.md
+          - Rust Core: architecture/rust-core.md
+          - Python Integration: architecture/python-integration.md
+          - Performance Model: architecture/performance.md
+    - Examples:
+          - Basic API: examples/basic-api.md
+          - REST API: examples/rest-api.md
+          - WebSocket Chat: examples/websocket.md
+          - File Upload: examples/file-upload.md
+    - Contributing:
+          - Guidelines: contributing/guidelines.md
+          - Development Setup: contributing/development.md
+          - Code of Conduct: contributing/code-of-conduct.md
+    - Changelog: changelog.md
+
+extra:
+    social:
+        - icon: fontawesome/brands/github
+          link: https://github.com/martindang/hypern
+        - icon: fontawesome/brands/python
+          link: https://pypi.org/project/hypern/
+    version:
+        provider: mike
+
+extra_css:
+    - stylesheets/extra.css
+
+copyright: Copyright &copy; 2024 Martin Dang

@@ -1,0 +1,16 @@
+# Documentation build requirements for Hypern
+
+# Core MkDocs
+mkdocs>=1.5.3
+mkdocs-material>=9.5.0
+
+# Plugins
+mkdocstrings[python]>=0.24.0
+mkdocs-autorefs>=0.5.0
+
+# Extensions
+pymdown-extensions>=10.7
+pygments>=2.17.0
+
+# Optional but recommended
+mike>=2.0.0  # Documentation versioning
