@@ -1,7 +1,7 @@
+use crate::core::global::{get_asyncio, get_event_loop};
 use crate::core::worker::{WorkItem, WorkerPool, WorkerPoolConfig};
 use crate::http::request::Request;
 use crate::http::response::{Response, ResponseSlot};
-use crate::runtime::{get_asyncio, get_event_loop};
 use dashmap::DashMap;
 use pyo3::prelude::*;
 use std::sync::Arc;
@@ -66,33 +66,23 @@ impl InterpreterPool {
                         let registry = HANDLER_REGISTRY.get_or_init(DashMap::new);
                         registry.get(&work.route_hash)
                     };
-                    let writer = Response::new(work.response_slot.clone());
+                    let response = Response::new(work.response_slot.clone());
                     // Run Python logic to get the future or execution result
                     let exec_result = Python::attach(|py| {
                         if let Some(handler_entry) = handler_entry {
                             let (handler, is_async) = &*handler_entry;
 
-                            // Handle errors during wrapping
-                            let py_writer = match Bound::new(py, writer) {
-                                Ok(w) => w,
-                                Err(e) => return ExecutionResult::Error(e),
-                            };
-                            let py_req = match Bound::new(py, work.request.clone()) {
-                                Ok(r) => r,
-                                Err(e) => return ExecutionResult::Error(e),
-                            };
-
-                            let args = (py_req, py_writer);
+                            let args = (work.request, response);
                             let call_result = handler.bind(py).call1(args);
 
                             if *is_async {
                                 match call_result {
                                     Ok(coro) => {
-                                        let asyncio = get_asyncio(py).bind(py);
+                                        let asyncio = get_asyncio(py);
                                         // Schedule the coroutine on the loop using thread-safe generic
-                                        let loop_ = get_event_loop(py).bind(py);
+                                        let loop_ = get_event_loop(py);
                                         match asyncio
-                                            .call_method1("run_coroutine_threadsafe", (coro, loop_))
+                                            .call_method1(py, "run_coroutine_threadsafe", (coro, loop_))
                                         {
                                             Ok(future) => {
                                                 // 3. Attach our callback
@@ -103,6 +93,7 @@ impl InterpreterPool {
                                                 match Bound::new(py, callback) {
                                                     Ok(bound_cb) => {
                                                         match future.call_method1(
+                                                            py,
                                                             "add_done_callback",
                                                             (bound_cb.getattr("done").unwrap(),),
                                                         ) {

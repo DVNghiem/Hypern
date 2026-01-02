@@ -1,4 +1,4 @@
-use crate::{runtime::get_runtime, utils::cpu::num_cpus};
+use crate::{core::global::get_runtime, utils::cpu::num_cpus};
 
 /// Work item to be processed by a worker
 pub struct WorkItem<T> {

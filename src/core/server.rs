@@ -14,7 +14,7 @@ use crate::http::request::Request;
 use crate::http::response::RESPONSE_404;
 use crate::middleware::{MiddlewareChain, MiddlewareContext, MiddlewareResponse, MiddlewareResult};
 use crate::routing::router::Router;
-use crate::runtime::{get_connection_semaphore, get_event_loop};
+use crate::core::global::{get_connection_semaphore, get_event_loop};
 use crate::socket::SocketHeld;
 use crate::utils::cpu::num_cpus;
 
