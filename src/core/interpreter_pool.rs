@@ -1,7 +1,7 @@
 use crate::core::worker::{WorkItem, WorkerPool, WorkerPoolConfig};
 use crate::http::request::Request;
 use crate::http::response::{ResponseSlot, Response};
-use crate::runtime::get_asyncio;
+use crate::runtime::{get_asyncio, get_event_loop};
 use dashmap::DashMap;
 use pyo3::prelude::*;
 use std::sync::Arc;
@@ -92,9 +92,7 @@ impl InterpreterPool {
                                     Ok(coro) => {
                                         let asyncio  = get_asyncio(py).bind(py);
                                         // Schedule the coroutine on the loop using thread-safe generic
-                                        let loop_ = asyncio
-                                            .call_method0("get_event_loop")
-                                            .expect("Failed to get event loop");
+                                        let loop_ = get_event_loop(py).bind(py);
                                         match asyncio.call_method1("run_coroutine_threadsafe", (coro, loop_)) {
                                             Ok(future) => {
                                                 // 3. Attach our callback

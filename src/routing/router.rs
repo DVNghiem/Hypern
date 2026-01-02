@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use super::radix::RadixNode;
 use super::route::Route;
-use crate::middleware::{Middleware, MiddlewareChain};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -17,8 +16,6 @@ pub struct Router {
     routes: Vec<Route>,
 
     radix_tree: RadixNode,
-
-    middleware_chain: MiddlewareChain,
 }
 
 #[pymethods]
@@ -29,50 +26,7 @@ impl Router {
             path: path.to_string(),
             routes: Vec::new(),
             radix_tree: RadixNode::new(),
-            middleware_chain: MiddlewareChain::new(),
         }
-    }
-
-    /// Add middleware that runs before route handlers
-    pub fn use_middleware(&mut self, middleware: Middleware) -> PyResult<()> {
-        self.middleware_chain.add_before(middleware);
-        Ok(())
-    }
-
-    /// Add middleware that runs after route handlers
-    pub fn use_after_middleware(&mut self, middleware: Middleware) -> PyResult<()> {
-        self.middleware_chain.add_after(middleware);
-        Ok(())
-    }
-
-    /// Add error handling middleware
-    pub fn use_error_middleware(&mut self, middleware: Middleware) -> PyResult<()> {
-        self.middleware_chain.add_error(middleware);
-        Ok(())
-    }
-
-    /// Get applicable middleware for a path (Python accessible)
-    pub fn get_middleware_for_path(
-        &self,
-        path: &str,
-    ) -> (Vec<Middleware>, Vec<Middleware>, Vec<Middleware>) {
-        (
-            self.middleware_chain
-                .get_applicable_before(path)
-                .into_iter()
-                .cloned()
-                .collect(),
-            self.middleware_chain
-                .get_applicable_after(path)
-                .into_iter()
-                .cloned()
-                .collect(),
-            self.middleware_chain
-                .get_applicable_error(path)
-                .into_iter()
-                .cloned()
-                .collect(),
-        )
     }
 
     /// Add a new route to the router
@@ -192,15 +146,4 @@ impl Router {
         self.routes.len()
     }
 
-    /// Internal method to get middleware references (for performance)
-    pub fn get_middleware_refs_for_path(
-        &self,
-        path: &str,
-    ) -> (Vec<&Middleware>, Vec<&Middleware>, Vec<&Middleware>) {
-        (
-            self.middleware_chain.get_applicable_before(path),
-            self.middleware_chain.get_applicable_after(path),
-            self.middleware_chain.get_applicable_error(path),
-        )
-    }
 }

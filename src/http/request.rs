@@ -6,70 +6,7 @@ use pyo3::types::{PyBytes, PyDict};
 use std::collections::HashMap;
 use std::sync::{Arc};
 
-
-/// HTTP method enum for fast comparison (no string allocation)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Method {
-    GET,
-    POST,
-    PUT,
-    DELETE,
-    PATCH,
-    HEAD,
-    OPTIONS,
-    CONNECT,
-    TRACE,
-}
-
-impl Method {
-    #[inline]
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        match bytes {
-            b"GET" => Some(Method::GET),
-            b"POST" => Some(Method::POST),
-            b"PUT" => Some(Method::PUT),
-            b"DELETE" => Some(Method::DELETE),
-            b"PATCH" => Some(Method::PATCH),
-            b"HEAD" => Some(Method::HEAD),
-            b"OPTIONS" => Some(Method::OPTIONS),
-            b"CONNECT" => Some(Method::CONNECT),
-            b"TRACE" => Some(Method::TRACE),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Method::GET => "GET",
-            Method::POST => "POST",
-            Method::PUT => "PUT",
-            Method::DELETE => "DELETE",
-            Method::PATCH => "PATCH",
-            Method::HEAD => "HEAD",
-            Method::OPTIONS => "OPTIONS",
-            Method::CONNECT => "CONNECT",
-            Method::TRACE => "TRACE",
-        }
-    }
-}
-
-impl From<&hyper::Method> for Method {
-    fn from(method: &hyper::Method) -> Self {
-        match *method {
-            hyper::Method::GET => Method::GET,
-            hyper::Method::POST => Method::POST,
-            hyper::Method::PUT => Method::PUT,
-            hyper::Method::DELETE => Method::DELETE,
-            hyper::Method::PATCH => Method::PATCH,
-            hyper::Method::HEAD => Method::HEAD,
-            hyper::Method::OPTIONS => Method::OPTIONS,
-            hyper::Method::CONNECT => Method::CONNECT,
-            hyper::Method::TRACE => Method::TRACE,
-            _ => Method::GET, // Fallback
-        }
-    }
-}
+use crate::http::method::HttpMethod;
 
 /// Query parameters with lazy parsing
 #[derive(Clone, Debug, Default)]
@@ -147,7 +84,7 @@ impl HeaderMap {
 #[pyclass(frozen)]
 pub struct Request {
     path: Arc<str>,
-    method: Method,
+    method: HttpMethod,
     headers: Arc<HeaderMap>,
     #[pyo3(get)]
     query_string: String,
@@ -175,7 +112,7 @@ impl Clone for Request {
 impl Request {
     pub fn new(
         path: &str,
-        method: Method,
+        method: HttpMethod,
         headers: HeaderMap,
         query_string: &str,
         body: Option<Bytes>,
@@ -213,7 +150,7 @@ impl Request {
             },
         );
 
-        let method = Method::from(&parts.method);
+        let method = HttpMethod::from(&parts.method);
         let headers = HeaderMap::from_hyper(&parts.headers);
 
         let body_bytes = match body.collect().await {
@@ -237,12 +174,26 @@ impl Request {
         &self.path
     }
 
-    pub fn method(&self) -> Method {
+    pub fn method(&self) -> HttpMethod {
         self.method
     }
 
     pub fn take_body(&self) -> Option<Bytes> {
         self.body.write().take()
+    }
+    
+    pub fn body_ref(&self) -> Option<Bytes> {
+        self.body.read().as_ref().cloned()
+    }
+
+    pub fn headers_map(&self) -> HashMap<String, String> {
+        self.headers.iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
+    pub fn query_string(&self) -> &str {
+        &self.query_string
     }
 }
 
