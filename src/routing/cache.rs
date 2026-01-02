@@ -140,7 +140,6 @@ impl RouteMatcher {
         let hash = Self::compute_hash(path, method);
         self.cache.insert(hash, route, params);
     }
-
 }
 
 impl Default for RouteMatcher {

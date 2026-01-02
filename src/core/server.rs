@@ -12,10 +12,7 @@ use crate::core::interpreter_pool::InterpreterPool;
 use crate::http::method::HttpMethod;
 use crate::http::request::Request;
 use crate::http::response::RESPONSE_404;
-use crate::middleware::{
-    MiddlewareContext, MiddlewareResponse, MiddlewareResult,
-    MiddlewareChain,
-};
+use crate::middleware::{MiddlewareChain, MiddlewareContext, MiddlewareResponse, MiddlewareResult};
 use crate::routing::router::Router;
 use crate::runtime::{get_connection_semaphore, get_event_loop};
 use crate::socket::SocketHeld;
@@ -26,11 +23,11 @@ fn middleware_response_to_hyper(
     response: MiddlewareResponse,
 ) -> hyper::Response<crate::body::HTTPResponseBody> {
     let mut builder = hyper::Response::builder().status(response.status);
-    
+
     for (key, value) in &response.headers {
         builder = builder.header(key.as_str(), value.as_str());
     }
-    
+
     builder
         .body(crate::body::full_http(response.body))
         .unwrap_or_else(|_| {
@@ -114,7 +111,8 @@ impl Server {
                     .expect("Failed to convert listener");
 
                 while let Ok((stream, addr)) = listener.accept().await {
-                    let permit = match get_connection_semaphore(max_connections).try_acquire_owned() {
+                    let permit = match get_connection_semaphore(max_connections).try_acquire_owned()
+                    {
                         Ok(p) => p,
                         Err(_) => {
                             // Drop connection if at capacity
@@ -139,14 +137,15 @@ impl Server {
                                     let middleware = middleware_ref.clone();
                                     async move {
                                         let fast_req = Request::from_hyper(req).await;
-                                        
+
                                         // Create middleware context from request
-                                        let method = HttpMethod::from_str(fast_req.method().as_str())
-                                            .unwrap_or(HttpMethod::GET);
-                                        
+                                        let method =
+                                            HttpMethod::from_str(fast_req.method().as_str())
+                                                .unwrap_or(HttpMethod::GET);
+
                                         // Build headers map for middleware context
                                         let headers_map = fast_req.headers_map();
-                                        
+
                                         let mw_ctx = MiddlewareContext::new(
                                             fast_req.path(),
                                             method,
@@ -154,7 +153,7 @@ impl Server {
                                             fast_req.query_string(),
                                             fast_req.body_ref(),
                                         );
-                                        
+
                                         // Execute "before" middleware (pure Rust, no GIL)
                                         match middleware.execute_before(&mw_ctx).await {
                                             MiddlewareResult::Continue() => {
@@ -163,21 +162,24 @@ impl Server {
                                             MiddlewareResult::Response(response) => {
                                                 // Middleware short-circuited with a response
                                                 return Ok::<_, hyper::Error>(
-                                                    middleware_response_to_hyper(response)
+                                                    middleware_response_to_hyper(response),
                                                 );
                                             }
                                             MiddlewareResult::Error(err) => {
                                                 // Middleware returned an error
-                                                if let Some(response) = middleware
-                                                    .execute_error(&mw_ctx, &err)
-                                                    .await
+                                                if let Some(response) =
+                                                    middleware.execute_error(&mw_ctx, &err).await
                                                 {
-                                                    return Ok(middleware_response_to_hyper(response));
+                                                    return Ok(middleware_response_to_hyper(
+                                                        response,
+                                                    ));
                                                 }
-                                                return Ok(middleware_response_to_hyper(err.to_response()));
+                                                return Ok(middleware_response_to_hyper(
+                                                    err.to_response(),
+                                                ));
                                             }
                                         }
-                                        
+
                                         // Match route to get pattern-based hash and params
                                         if let Some((route, params)) = router.find_matching_route(
                                             fast_req.path(),
@@ -186,15 +188,15 @@ impl Server {
                                             // Set path params from routing
                                             fast_req.set_path_params(params.clone());
                                             mw_ctx.set_params(params);
-                                            
+
                                             let route_hash = route.handler_hash();
-                                            
+
                                             // Execute Python handler (this is where GIL is acquired)
                                             let res = pool.execute(route_hash, fast_req).await;
-                                            
+
                                             // Execute "after" middleware (pure Rust, no GIL)
                                             let _ = middleware.execute_after(&mw_ctx).await;
-                                            
+
                                             Ok::<_, hyper::Error>(res)
                                         } else {
                                             Ok(RESPONSE_404.clone())
@@ -220,14 +222,20 @@ impl Server {
 
 impl Server {
     /// Add a pure Rust middleware that runs before handlers (no GIL overhead)
-    pub fn use_rust_middleware<M: crate::middleware::RustMiddleware + 'static>(&mut self, middleware: M) {
+    pub fn use_rust_middleware<M: crate::middleware::RustMiddleware + 'static>(
+        &mut self,
+        middleware: M,
+    ) {
         Arc::get_mut(&mut self.rust_middleware)
             .expect("Cannot modify middleware after server start")
             .use_before(middleware);
     }
 
     /// Add a pure Rust middleware that runs after handlers (no GIL overhead)
-    pub fn use_rust_middleware_after<M: crate::middleware::RustMiddleware + 'static>(&mut self, middleware: M) {
+    pub fn use_rust_middleware_after<M: crate::middleware::RustMiddleware + 'static>(
+        &mut self,
+        middleware: M,
+    ) {
         Arc::get_mut(&mut self.rust_middleware)
             .expect("Cannot modify middleware after server start")
             .use_after(middleware);
@@ -237,7 +245,7 @@ impl Server {
     pub fn set_rust_middleware_chain(&mut self, chain: MiddlewareChain) {
         self.rust_middleware = Arc::new(chain);
     }
-    
+
     /// Get middleware statistics
     pub fn middleware_stats(&self) -> (usize, usize, usize) {
         self.rust_middleware.stats()

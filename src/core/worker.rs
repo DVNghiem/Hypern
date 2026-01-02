@@ -52,17 +52,17 @@ impl<T: Send + 'static> Worker<T> {
         // Initialize Tokio Runtime for this thread
         let rt = get_runtime();
         let handle = rt.spawn(async move {
-                // Pin to core if enabled
-                if pin_to_core {
-                    if let Some(core_ids) = core_affinity::get_core_ids() {
-                        if core_id < core_ids.len() {
-                            core_affinity::set_for_current(core_ids[core_id]);
-                        }
+            // Pin to core if enabled
+            if pin_to_core {
+                if let Some(core_ids) = core_affinity::get_core_ids() {
+                    if core_id < core_ids.len() {
+                        core_affinity::set_for_current(core_ids[core_id]);
                     }
                 }
-                // Worker loop
-                Self::worker_loop_async(rx, handler).await;
-            });
+            }
+            // Worker loop
+            Self::worker_loop_async(rx, handler).await;
+        });
 
         Self {
             core_id,
@@ -71,23 +71,21 @@ impl<T: Send + 'static> Worker<T> {
         }
     }
 
-    async fn worker_loop_async<F, Fut>(
-        mut rx: tokio::sync::mpsc::Receiver<WorkItem<T>>,
-        handler: F,
-    ) where
+    async fn worker_loop_async<F, Fut>(mut rx: tokio::sync::mpsc::Receiver<WorkItem<T>>, handler: F)
+    where
         F: Fn(WorkItem<T>) -> Fut,
         Fut: std::future::Future<Output = ()>,
     {
         let mut batch = Vec::with_capacity(32);
-        
+
         loop {
             // Batch receive
             batch.clear();
-            
+
             // Wait for first item
             if let Some(item) = rx.recv().await {
                 batch.push(item);
-                
+
                 // Try to fill batch without waiting
                 while batch.len() < 32 {
                     match rx.try_recv() {
@@ -95,11 +93,9 @@ impl<T: Send + 'static> Worker<T> {
                         Err(_) => break,
                     }
                 }
-                
+
                 // Process batch concurrently
-                futures::future::join_all(
-                    batch.drain(..).map(|item| handler(item))
-                ).await;
+                futures::future::join_all(batch.drain(..).map(|item| handler(item))).await;
             } else {
                 break; // Channel closed
             }
@@ -112,7 +108,6 @@ impl<T: Send + 'static> Worker<T> {
     ) -> Result<(), tokio::sync::mpsc::error::SendError<WorkItem<T>>> {
         self.sender.send(item).await
     }
-
 }
 
 impl<T: Send + 'static> Drop for Worker<T> {
@@ -179,4 +174,3 @@ impl<T: Send + 'static> WorkerPool<T> {
         self.workers.len()
     }
 }
-

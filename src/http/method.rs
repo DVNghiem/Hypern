@@ -74,7 +74,6 @@ impl HttpMethod {
     }
 }
 
-
 impl From<&hyper::Method> for HttpMethod {
     fn from(method: &hyper::Method) -> Self {
         match *method {

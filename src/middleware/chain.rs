@@ -61,13 +61,15 @@ impl MiddlewareResponse {
 
     #[pyo3(name = "with_json_body")]
     pub fn with_json_body_py(&mut self, body: String) {
-        self.headers.push(("content-type".to_string(), "application/json".to_string()));
+        self.headers
+            .push(("content-type".to_string(), "application/json".to_string()));
         self.body = body.into_bytes();
     }
 
     #[pyo3(name = "with_text_body")]
     pub fn with_text_body_py(&mut self, body: String) {
-        self.headers.push(("content-type".to_string(), "text/plain".to_string()));
+        self.headers
+            .push(("content-type".to_string(), "text/plain".to_string()));
         self.body = body.into_bytes();
     }
 }
@@ -89,13 +91,15 @@ impl MiddlewareResponse {
     }
 
     pub fn with_json_body(mut self, body: impl AsRef<str>) -> Self {
-        self.headers.push(("content-type".to_string(), "application/json".to_string()));
+        self.headers
+            .push(("content-type".to_string(), "application/json".to_string()));
         self.body = body.as_ref().as_bytes().to_vec();
         self
     }
 
     pub fn with_text_body(mut self, body: impl Into<String>) -> Self {
-        self.headers.push(("content-type".to_string(), "text/plain".to_string()));
+        self.headers
+            .push(("content-type".to_string(), "text/plain".to_string()));
         self.body = body.into().into_bytes();
         self
     }
@@ -163,11 +167,10 @@ impl MiddlewareError {
 impl MiddlewareError {
     /// Convert to a response
     pub fn to_response(&self) -> MiddlewareResponse {
-        MiddlewareResponse::new(self.status)
-            .with_json_body(format!(
-                r#"{{"error":"{}","message":"{}"}}"#,
-                self.code, self.message
-            ))
+        MiddlewareResponse::new(self.status).with_json_body(format!(
+            r#"{{"error":"{}","message":"{}"}}"#,
+            self.code, self.message
+        ))
     }
 }
 
@@ -183,16 +186,16 @@ pub struct MiddlewareContext {
     pub query_params: Arc<HashMap<String, String>>,
     pub path_params: Arc<RwLock<HashMap<String, String>>>,
     pub body: Arc<RwLock<Option<Bytes>>>,
-    
+
     // Middleware state (mutable, shared between middleware)
     pub state: Arc<RwLock<MiddlewareState>>,
-    
+
     // Response modifications (accumulated by middleware)
     pub response_headers: Arc<RwLock<Vec<(String, String)>>>,
-    
+
     // Timing information
     pub start_time: std::time::Instant,
-    
+
     // Request ID for tracing
     pub request_id: Arc<str>,
 }
@@ -203,19 +206,19 @@ pub struct MiddlewareContext {
 pub struct MiddlewareState {
     /// Custom key-value store for middleware communication
     pub values: HashMap<String, StateValue>,
-    
+
     /// User ID if authenticated
     #[pyo3(get, set)]
     pub user_id: Option<String>,
-    
+
     /// Request is authenticated
     #[pyo3(get, set)]
     pub is_authenticated: bool,
-    
+
     /// Additional roles/permissions
     #[pyo3(get, set)]
     pub roles: Vec<String>,
-    
+
     /// Trace/correlation ID
     #[pyo3(get, set)]
     pub trace_id: Option<String>,
@@ -348,7 +351,10 @@ impl MiddlewareContext {
 
     /// Get the request body
     pub fn body(&self, py: Python<'_>) -> Option<Py<pyo3::types::PyBytes>> {
-        self.body.read().as_ref().map(|b| pyo3::types::PyBytes::new(py, b).into())
+        self.body
+            .read()
+            .as_ref()
+            .map(|b| pyo3::types::PyBytes::new(py, b).into())
     }
 }
 
@@ -362,12 +368,12 @@ impl MiddlewareContext {
         body: Option<Bytes>,
     ) -> Self {
         use xxhash_rust::xxh3::xxh3_64;
-        
+
         // Generate request ID
         let now = std::time::Instant::now();
         let id_seed = format!("{}{}{:?}", path, query_string, now);
         let request_id = format!("{:016x}", xxh3_64(id_seed.as_bytes()));
-        
+
         // Parse query params
         let query_params: HashMap<String, String> = if query_string.is_empty() {
             HashMap::new()
@@ -376,7 +382,7 @@ impl MiddlewareContext {
                 .into_owned()
                 .collect()
         };
-        
+
         Self {
             path: Arc::from(path),
             method,
@@ -409,7 +415,9 @@ impl MiddlewareContext {
 
     /// Add a response header (will be added to the final response)
     pub fn add_response_header(&self, name: impl Into<String>, value: impl Into<String>) {
-        self.response_headers.write().push((name.into(), value.into()));
+        self.response_headers
+            .write()
+            .push((name.into(), value.into()));
     }
 
     /// Set a state value
@@ -450,19 +458,19 @@ impl MiddlewareContext {
 pub trait RustMiddleware: Send + Sync {
     /// The name of this middleware (for logging/debugging)
     fn name(&self) -> &'static str;
-    
+
     /// Execute the middleware - returns a future for async execution
     fn execute<'a>(
         &'a self,
         ctx: &'a MiddlewareContext,
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>>;
-    
+
     /// Optional: Check if this middleware should run for the given path
     /// Default returns true (run for all paths)
     fn applies_to(&self, _path: &str) -> bool {
         true
     }
-    
+
     /// Optional: Check if this middleware should run for the given method
     /// Default returns true (run for all methods)
     fn applies_to_method(&self, _method: HttpMethod) -> bool {
@@ -541,7 +549,7 @@ impl MiddlewareChain {
             if !middleware.applies_to(&ctx.path) || !middleware.applies_to_method(ctx.method) {
                 continue;
             }
-            
+
             match middleware.execute(ctx).await {
                 MiddlewareResult::Continue() => continue,
                 result => return result,
@@ -556,7 +564,7 @@ impl MiddlewareChain {
             if !middleware.applies_to(&ctx.path) || !middleware.applies_to_method(ctx.method) {
                 continue;
             }
-            
+
             match middleware.execute(ctx).await {
                 MiddlewareResult::Continue() => continue,
                 result => return result,
@@ -566,29 +574,46 @@ impl MiddlewareChain {
     }
 
     /// Execute error handlers
-    pub async fn execute_error(&self, ctx: &MiddlewareContext, error: &MiddlewareError) -> Option<MiddlewareResponse> {
+    pub async fn execute_error(
+        &self,
+        ctx: &MiddlewareContext,
+        error: &MiddlewareError,
+    ) -> Option<MiddlewareResponse> {
         // Store error in context state for error handlers to access
-        ctx.set_state("error_code".to_string(), StateValue::String(error.code.clone()));
-        ctx.set_state("error_message".to_string(), StateValue::String(error.message.clone()));
-        ctx.set_state("error_status".to_string(), StateValue::Int(error.status as i64));
-        
+        ctx.set_state(
+            "error_code".to_string(),
+            StateValue::String(error.code.clone()),
+        );
+        ctx.set_state(
+            "error_message".to_string(),
+            StateValue::String(error.message.clone()),
+        );
+        ctx.set_state(
+            "error_status".to_string(),
+            StateValue::Int(error.status as i64),
+        );
+
         for handler in &self.error_handlers {
             if !handler.applies_to(&ctx.path) {
                 continue;
             }
-            
+
             if let MiddlewareResult::Response(response) = handler.execute(ctx).await {
                 return Some(response);
             }
         }
-        
+
         // Default error response if no handler caught it
         Some(error.to_response())
     }
 
     /// Get counts for debugging
     pub fn stats(&self) -> (usize, usize, usize) {
-        (self.before.len(), self.after.len(), self.error_handlers.len())
+        (
+            self.before.len(),
+            self.after.len(),
+            self.error_handlers.len(),
+        )
     }
 }
 

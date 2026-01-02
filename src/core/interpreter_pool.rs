@@ -1,6 +1,6 @@
 use crate::core::worker::{WorkItem, WorkerPool, WorkerPoolConfig};
 use crate::http::request::Request;
-use crate::http::response::{ResponseSlot, Response};
+use crate::http::response::{Response, ResponseSlot};
 use crate::runtime::{get_asyncio, get_event_loop};
 use dashmap::DashMap;
 use pyo3::prelude::*;
@@ -61,7 +61,6 @@ impl InterpreterPool {
                 let pool = WorkerPool::new(config, |item: WorkItem<RequestWork>| async move {
                     let work = item.data;
 
-                    
                     // registry lookup (no GIL needed - DashMap is lock-free)
                     let handler_entry = {
                         let registry = HANDLER_REGISTRY.get_or_init(DashMap::new);
@@ -70,7 +69,6 @@ impl InterpreterPool {
                     let writer = Response::new(work.response_slot.clone());
                     // Run Python logic to get the future or execution result
                     let exec_result = Python::attach(|py| {
-
                         if let Some(handler_entry) = handler_entry {
                             let (handler, is_async) = &*handler_entry;
 
@@ -90,15 +88,18 @@ impl InterpreterPool {
                             if *is_async {
                                 match call_result {
                                     Ok(coro) => {
-                                        let asyncio  = get_asyncio(py).bind(py);
+                                        let asyncio = get_asyncio(py).bind(py);
                                         // Schedule the coroutine on the loop using thread-safe generic
                                         let loop_ = get_event_loop(py).bind(py);
-                                        match asyncio.call_method1("run_coroutine_threadsafe", (coro, loop_)) {
+                                        match asyncio
+                                            .call_method1("run_coroutine_threadsafe", (coro, loop_))
+                                        {
                                             Ok(future) => {
                                                 // 3. Attach our callback
-                                                let callback = crate::http::callback::PyResponseCallback::new(
-                                                    work.completion_tx,
-                                                );
+                                                let callback =
+                                                    crate::http::callback::PyResponseCallback::new(
+                                                        work.completion_tx,
+                                                    );
                                                 match Bound::new(py, callback) {
                                                     Ok(bound_cb) => {
                                                         match future.call_method1(
@@ -114,7 +115,6 @@ impl InterpreterPool {
                                             }
                                             Err(e) => ExecutionResult::Error(e),
                                         }
-                                       
                                     }
                                     Err(e) => ExecutionResult::Error(e),
                                 }
@@ -180,7 +180,8 @@ impl InterpreterPool {
                 },
             },
             route_hash,
-        ).await
+        )
+        .await
         .expect("Worker pool closed");
 
         // Wait for completion via oneshot

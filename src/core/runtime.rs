@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
-use tokio::sync::Semaphore;
 use std::sync::{Arc, OnceLock};
+use tokio::sync::Semaphore;
 
 use crate::utils::cpu::num_cpus;
 

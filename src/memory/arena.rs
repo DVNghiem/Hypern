@@ -41,7 +41,6 @@ impl ThreadArena {
         self.allocation_count = 0;
         self.bytes_allocated = 0;
     }
-
 }
 
 impl Default for ThreadArena {

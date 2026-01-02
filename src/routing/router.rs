@@ -145,5 +145,4 @@ impl Router {
     pub fn routes_count(&self) -> usize {
         self.routes.len()
     }
-
 }

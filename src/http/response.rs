@@ -5,7 +5,7 @@ use smallvec::SmallVec;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
 
-use crate::body::{HTTPResponseBody, full_http};
+use crate::body::{full_http, HTTPResponseBody};
 
 type SmallString = smartstring::SmartString<smartstring::LazyCompact>;
 
@@ -44,14 +44,16 @@ impl ResponseSlot {
         let mut header_guard = self.headers.write();
         header_guard.clear();
         header_guard.extend(
-            headers.into_iter().map(|(k, v)| {
-                (SmallString::from(k), SmallString::from(v))
-            })
+            headers
+                .into_iter()
+                .map(|(k, v)| (SmallString::from(k), SmallString::from(v))),
         );
     }
 
     pub fn add_header(&self, key: String, value: String) {
-        self.headers.write().push((SmallString::from(key), SmallString::from(value)));
+        self.headers
+            .write()
+            .push((SmallString::from(key), SmallString::from(value)));
     }
 
     pub fn set_body(&self, body: Vec<u8>) {

@@ -11,8 +11,7 @@ use parking_lot::RwLock;
 use crate::http::method::HttpMethod;
 
 use super::chain::{
-    MiddlewareContext, MiddlewareResponse, MiddlewareResult,
-    RustMiddleware, StateValue,
+    MiddlewareContext, MiddlewareResponse, MiddlewareResult, RustMiddleware, StateValue,
 };
 
 /// Configuration for CORS middleware
@@ -114,9 +113,10 @@ impl CorsMiddleware {
     }
 
     fn is_origin_allowed(&self, origin: &str) -> bool {
-        self.config.allowed_origins.iter().any(|allowed| {
-            allowed == "*" || allowed == origin
-        })
+        self.config
+            .allowed_origins
+            .iter()
+            .any(|allowed| allowed == "*" || allowed == origin)
     }
 
     fn methods_string(&self) -> String {
@@ -144,7 +144,7 @@ impl RustMiddleware for CorsMiddleware {
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
         Box::pin(async move {
             let origin = ctx.get_header("origin").cloned().unwrap_or_default();
-            
+
             // If no origin header, this is not a CORS request
             if origin.is_empty() {
                 return MiddlewareResult::Continue();
@@ -152,14 +152,14 @@ impl RustMiddleware for CorsMiddleware {
 
             // Check if origin is allowed
             if !self.is_origin_allowed(&origin) {
-                return MiddlewareResult::Response(
-                    MiddlewareResponse::forbidden("Origin not allowed")
-                );
+                return MiddlewareResult::Response(MiddlewareResponse::forbidden(
+                    "Origin not allowed",
+                ));
             }
 
             // Add CORS headers to response
-            let allowed_origin = if self.config.allowed_origins.contains(&"*".to_string()) 
-                && !self.config.allow_credentials 
+            let allowed_origin = if self.config.allowed_origins.contains(&"*".to_string())
+                && !self.config.allow_credentials
             {
                 "*".to_string()
             } else {
@@ -167,7 +167,7 @@ impl RustMiddleware for CorsMiddleware {
             };
 
             ctx.add_response_header("Access-Control-Allow-Origin", allowed_origin);
-            
+
             if self.config.allow_credentials {
                 ctx.add_response_header("Access-Control-Allow-Credentials", "true");
             }
@@ -202,7 +202,7 @@ impl RustMiddleware for CorsMiddleware {
                     "Access-Control-Max-Age".to_string(),
                     self.config.max_age.to_string(),
                 ));
-                
+
                 if self.config.allow_credentials {
                     response.headers.push((
                         "Access-Control-Allow-Credentials".to_string(),
@@ -323,18 +323,23 @@ impl RateLimitMiddleware {
                 return value.clone();
             }
         }
-        
+
         // Try X-Forwarded-For
         if let Some(xff) = ctx.get_header("x-forwarded-for") {
             // Take first IP (client IP)
-            return xff.split(',').next().unwrap_or("unknown").trim().to_string();
+            return xff
+                .split(',')
+                .next()
+                .unwrap_or("unknown")
+                .trim()
+                .to_string();
         }
-        
+
         // Try X-Real-IP
         if let Some(real_ip) = ctx.get_header("x-real-ip") {
             return real_ip.clone();
         }
-        
+
         // Fallback
         "unknown".to_string()
     }
@@ -342,14 +347,14 @@ impl RateLimitMiddleware {
     fn check_fixed_window(&self, state: &RateLimitState) -> (bool, u64) {
         let now = Instant::now();
         let mut window_start = state.window_start.write();
-        
+
         // Check if window has expired
         if now.duration_since(*window_start) >= self.config.window {
             *window_start = now;
             state.count.store(1, Ordering::SeqCst);
             return (true, self.config.max_requests as u64 - 1);
         }
-        
+
         let count = state.count.fetch_add(1, Ordering::SeqCst) + 1;
         let remaining = (self.config.max_requests as u64).saturating_sub(count);
         (count <= self.config.max_requests as u64, remaining)
@@ -359,36 +364,41 @@ impl RateLimitMiddleware {
         let now = Instant::now();
         let mut window_start = state.window_start.write();
         let elapsed = now.duration_since(*window_start);
-        
+
         if elapsed >= self.config.window {
             // Window fully expired, reset
             *window_start = now;
             state.count.store(1, Ordering::SeqCst);
             return (true, self.config.max_requests as u64 - 1);
         }
-        
+
         // Calculate weighted count based on position in window
         let window_ratio = elapsed.as_secs_f64() / self.config.window.as_secs_f64();
         let prev_count = state.count.load(Ordering::SeqCst);
         let weighted_count = (prev_count as f64 * (1.0 - window_ratio)) as u64;
-        
+
         let new_count = weighted_count + 1;
         state.count.store(new_count, Ordering::SeqCst);
-        
+
         let remaining = (self.config.max_requests as u64).saturating_sub(new_count);
         (new_count <= self.config.max_requests as u64, remaining)
     }
 
-    fn check_token_bucket(&self, state: &RateLimitState, bucket_size: u32, refill_rate: f64) -> (bool, u64) {
+    fn check_token_bucket(
+        &self,
+        state: &RateLimitState,
+        bucket_size: u32,
+        refill_rate: f64,
+    ) -> (bool, u64) {
         let now = Instant::now();
         let mut tokens = state.tokens.write();
         let mut last_refill = state.last_refill.write();
-        
+
         // Refill tokens based on time elapsed
         let elapsed = now.duration_since(*last_refill).as_secs_f64();
         *tokens = (*tokens + elapsed * refill_rate).min(bucket_size as f64);
         *last_refill = now;
-        
+
         // Try to consume a token
         if *tokens >= 1.0 {
             *tokens -= 1.0;
@@ -410,14 +420,20 @@ impl RustMiddleware for RateLimitMiddleware {
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
         Box::pin(async move {
             // Skip certain paths
-            if self.config.skip_paths.iter().any(|p| ctx.path.starts_with(p)) {
+            if self
+                .config
+                .skip_paths
+                .iter()
+                .any(|p| ctx.path.starts_with(p))
+            {
                 return MiddlewareResult::Continue();
             }
 
             let client_key = self.get_client_key(ctx);
-            
+
             // Get or create client state
-            let state = self.clients
+            let state = self
+                .clients
                 .entry(client_key.clone())
                 .or_insert_with(|| Arc::new(RateLimitState::new()))
                 .clone();
@@ -425,9 +441,10 @@ impl RustMiddleware for RateLimitMiddleware {
             let (allowed, remaining) = match self.config.algorithm {
                 RateLimitAlgorithm::FixedWindow => self.check_fixed_window(&state),
                 RateLimitAlgorithm::SlidingWindow => self.check_sliding_window(&state),
-                RateLimitAlgorithm::TokenBucket { bucket_size, refill_rate } => {
-                    self.check_token_bucket(&state, bucket_size, refill_rate)
-                }
+                RateLimitAlgorithm::TokenBucket {
+                    bucket_size,
+                    refill_rate,
+                } => self.check_token_bucket(&state, bucket_size, refill_rate),
             };
 
             // Add rate limit headers
@@ -442,7 +459,7 @@ impl RustMiddleware for RateLimitMiddleware {
                 ctx.add_response_header("Retry-After", self.config.window.as_secs().to_string());
                 return MiddlewareResult::Response(
                     MiddlewareResponse::too_many_requests("Rate limit exceeded")
-                        .with_header("Retry-After", self.config.window.as_secs().to_string())
+                        .with_header("Retry-After", self.config.window.as_secs().to_string()),
                 );
             }
 
@@ -537,7 +554,12 @@ impl RustMiddleware for LogMiddleware {
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
         Box::pin(async move {
             // Skip certain paths
-            if self.config.skip_paths.iter().any(|p| ctx.path.starts_with(p)) {
+            if self
+                .config
+                .skip_paths
+                .iter()
+                .any(|p| ctx.path.starts_with(p))
+            {
                 return MiddlewareResult::Continue();
             }
 
@@ -566,7 +588,10 @@ impl RustMiddleware for LogMiddleware {
             }
 
             // Store start time in state for after middleware
-            ctx.set_state("log_start_time", StateValue::Int(ctx.start_time.elapsed().as_nanos() as i64));
+            ctx.set_state(
+                "log_start_time",
+                StateValue::Int(ctx.start_time.elapsed().as_nanos() as i64),
+            );
 
             MiddlewareResult::Continue()
         })
@@ -594,7 +619,12 @@ impl RustMiddleware for LogAfterMiddleware {
         ctx: &'a MiddlewareContext,
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
         Box::pin(async move {
-            if self.config.skip_paths.iter().any(|p| ctx.path.starts_with(p)) {
+            if self
+                .config
+                .skip_paths
+                .iter()
+                .any(|p| ctx.path.starts_with(p))
+            {
                 return MiddlewareResult::Continue();
             }
 
@@ -665,7 +695,7 @@ impl RustMiddleware for RequestIdMiddleware {
 
             // Add to response headers
             ctx.add_response_header(&self.header_name, &request_id);
-            
+
             // Store in state for other middleware/handlers
             ctx.set_state("request_id", StateValue::String(request_id));
 
@@ -886,8 +916,11 @@ impl RustMiddleware for CompressionMiddleware {
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
         Box::pin(async move {
             // Check Accept-Encoding header
-            let accept_encoding = ctx.get_header("accept-encoding").cloned().unwrap_or_default();
-            
+            let accept_encoding = ctx
+                .get_header("accept-encoding")
+                .cloned()
+                .unwrap_or_default();
+
             let supports_gzip = accept_encoding.contains("gzip");
             let supports_deflate = accept_encoding.contains("deflate");
             let supports_br = accept_encoding.contains("br");
@@ -901,7 +934,10 @@ impl RustMiddleware for CompressionMiddleware {
                 ctx.set_state("compression", StateValue::String("deflate".to_string()));
             }
 
-            ctx.set_state("compression_min_size", StateValue::Int(self.min_size as i64));
+            ctx.set_state(
+                "compression_min_size",
+                StateValue::Int(self.min_size as i64),
+            );
 
             MiddlewareResult::Continue()
         })
@@ -943,7 +979,7 @@ impl BasicAuthMiddleware {
 // Simple base64 decoder (to avoid external dependency)
 fn base64_decode(input: &str) -> Option<Vec<u8>> {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    
+
     let input = input.trim_end_matches('=');
     let mut output = Vec::with_capacity(input.len() * 3 / 4);
     let mut buffer: u32 = 0;
@@ -978,8 +1014,10 @@ impl RustMiddleware for BasicAuthMiddleware {
                 Some(h) => h,
                 None => {
                     return MiddlewareResult::Response(
-                        MiddlewareResponse::unauthorized("Authentication required")
-                            .with_header("WWW-Authenticate", format!("Basic realm=\"{}\"", self.realm))
+                        MiddlewareResponse::unauthorized("Authentication required").with_header(
+                            "WWW-Authenticate",
+                            format!("Basic realm=\"{}\"", self.realm),
+                        ),
                     );
                 }
             };
@@ -987,9 +1025,9 @@ impl RustMiddleware for BasicAuthMiddleware {
             let (username, password) = match self.decode_basic_auth(auth_header) {
                 Some(creds) => creds,
                 None => {
-                    return MiddlewareResult::Response(
-                        MiddlewareResponse::unauthorized("Invalid authentication format")
-                    );
+                    return MiddlewareResult::Response(MiddlewareResponse::unauthorized(
+                        "Invalid authentication format",
+                    ));
                 }
             };
 
@@ -999,17 +1037,16 @@ impl RustMiddleware for BasicAuthMiddleware {
                     ctx.set_authenticated(&username, vec![]);
                     MiddlewareResult::Continue()
                 }
-                _ => {
-                    MiddlewareResult::Response(
-                        MiddlewareResponse::unauthorized("Invalid credentials")
-                            .with_header("WWW-Authenticate", format!("Basic realm=\"{}\"", self.realm))
-                    )
-                }
+                _ => MiddlewareResult::Response(
+                    MiddlewareResponse::unauthorized("Invalid credentials").with_header(
+                        "WWW-Authenticate",
+                        format!("Basic realm=\"{}\"", self.realm),
+                    ),
+                ),
             }
         })
     }
 }
-
 
 /// Wrapper that makes any middleware path-specific
 pub struct PathMiddleware<M: RustMiddleware> {
@@ -1062,7 +1099,10 @@ pub struct MethodMiddleware<M: RustMiddleware> {
 
 impl<M: RustMiddleware> MethodMiddleware<M> {
     pub fn new(middleware: M, methods: Vec<HttpMethod>) -> Self {
-        Self { inner: middleware, methods }
+        Self {
+            inner: middleware,
+            methods,
+        }
     }
 }
 

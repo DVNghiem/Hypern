@@ -159,7 +159,6 @@ impl StaticFileHandler {
     pub fn clear_cache(&self) {
         self.cache.write().clear();
     }
-
 }
 
 /// Static file errors

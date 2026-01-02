@@ -4,7 +4,7 @@ use http_body_util::BodyExt;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 use std::collections::HashMap;
-use std::sync::{Arc};
+use std::sync::Arc;
 
 use crate::http::method::HttpMethod;
 
@@ -181,13 +181,14 @@ impl Request {
     pub fn take_body(&self) -> Option<Bytes> {
         self.body.write().take()
     }
-    
+
     pub fn body_ref(&self) -> Option<Bytes> {
         self.body.read().as_ref().cloned()
     }
 
     pub fn headers_map(&self) -> HashMap<String, String> {
-        self.headers.iter()
+        self.headers
+            .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
     }
@@ -264,19 +265,17 @@ impl Request {
                 let mut data = bytes.to_vec();
                 let json_str = Python::detach(py, move || {
                     match simd_json::serde::from_slice::<serde_json::Value>(&mut data) {
-                        Ok(value) => {
-                            serde_json::to_string(&value).map_err(|e| e.to_string())
-                        }
+                        Ok(value) => serde_json::to_string(&value).map_err(|e| e.to_string()),
                         Err(e) => Err(format!("JSON parse error: {}", e)),
                     }
                 });
 
                 match json_str {
-                     Ok(s) => {
+                    Ok(s) => {
                         let json_mod = py.import("json")?;
                         json_mod.call_method1("loads", (s,))
-                     },
-                     Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e)),
+                    }
+                    Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e)),
                 }
             }
             None => Ok(py.None().into_bound(py)),
