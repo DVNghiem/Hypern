@@ -56,13 +56,7 @@ docs/
 Install required packages:
 
 ```bash
-pip install mkdocs mkdocs-material mkdocstrings[python] pymdown-extensions
-```
-
-Or install from the project's requirements:
-
-```bash
-pip install -r requirements-docs.txt  # If available
+poetry install --with docs
 ```
 
 ### Serve Locally

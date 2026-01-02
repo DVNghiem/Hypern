@@ -98,9 +98,9 @@ For development, see our [Installation Guide](getting-started/installation.md).
 
 ## 🌟 Community & Support
 
-- **GitHub**: [github.com/martindang/hypern](https://github.com/martindang/hypern)
+- **GitHub**: [github.com/DVNghiem/hypern](https://github.com/DVNghiem/hypern)
 - **PyPI**: [pypi.org/project/hypern](https://pypi.org/project/hypern/)
-- **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/martindang/hypern/issues)
+- **Issues**: Report bugs and request features on [GitHub Issues](https://github.com/DVNghiem/hypern/issues)
 
 ## 🤝 Contributing
 
@@ -108,7 +108,7 @@ We welcome contributions! See our [Contributing Guide](contributing/guidelines.m
 
 ## 📄 License
 
-Hypern is released under the MIT License. See the [LICENSE](https://github.com/martindang/hypern/blob/main/LICENSE) file for details.
+Hypern is released under the MIT License. See the [LICENSE](https://github.com/DVNghiem/hypern/blob/main/LICENSE) file for details.
 
 ---
 

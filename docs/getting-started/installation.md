@@ -30,7 +30,7 @@ If you want to contribute to Hypern or modify the source code, follow these step
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/martindang/hypern.git
+git clone https://github.com/DVNghiem/hypern.git
 cd hypern
 ```
 
@@ -60,10 +60,16 @@ pip install pre-commit poetry maturin
 
 ### 4. Install Dependencies
 
-Install all development and test dependencies:
+Install all development, test, and documentation dependencies:
 
 ```bash
-poetry install --with dev --with test
+poetry install --with dev --with test --with docs
+```
+
+Or if you only need documentation dependencies:
+
+```bash
+poetry install --with docs
 ```
 
 ### 5. Install Pre-commit Hooks
@@ -178,6 +184,18 @@ If you get import errors after installation:
 2. Verify the installation: `pip list | grep hypern`
 3. Reinstall if necessary: `pip install --force-reinstall hypern`
 
+### Documentation Build Errors
+
+If you encounter errors building documentation:
+
+```bash
+# With Poetry
+poetry install --with docs
+
+# With pip
+pip install -r requirements-docs.txt
+```
+
 ## Updating Hypern
 
 To update to the latest version:
@@ -190,7 +208,7 @@ For development installations:
 
 ```bash
 git pull origin main
-poetry install --with dev --with test
+poetry install --with dev --with test --with docs
 maturin develop --release
 ```
 
@@ -204,6 +222,6 @@ Now that you have Hypern installed, proceed to:
 
 ## Additional Resources
 
-- [GitHub Repository](https://github.com/martindang/hypern)
+- [GitHub Repository](https://github.com/DVNghiem/hypern)
 - [PyPI Package](https://pypi.org/project/hypern/)
-- [Issue Tracker](https://github.com/martindang/hypern/issues)
+- [Issue Tracker](https://github.com/DVNghiem/hypern/issues)

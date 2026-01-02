@@ -92,10 +92,10 @@ We welcome contributions! Please see our [Contributing Guide](contributing/guide
 
 ## Support
 
-- **GitHub Issues**: [Report bugs or request features](https://github.com/martindang/hypern/issues)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/DVNghiem/hypern/issues)
 - **Documentation**: [Read the full documentation](https://hypern.dev)
 - **Community**: Join our community discussions
 
 ## License
 
-Hypern is released under the MIT License. See [LICENSE](https://github.com/martindang/hypern/blob/main/LICENSE) for details.
+Hypern is released under the MIT License. See [LICENSE](https://github.com/DVNghiem/hypern/blob/main/LICENSE) for details.

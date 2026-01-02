@@ -13,7 +13,7 @@ A comprehensive documentation system has been created for the Hypern project, co
 ```
 Hypern-clone/
 ├── mkdocs.yml                    # MkDocs configuration with full navigation
-├── requirements-docs.txt         # Documentation build dependencies
+├── pyproject.toml               # Poetry dependencies (includes docs group)
 ├── DOCS_BUILD.md                # Guide for building documentation
 └── DOCUMENTATION_SUMMARY.md     # This file
 ```
@@ -208,10 +208,10 @@ Documentation README:
 - Configuration information
 - Resources and help
 
-### 12. **requirements-docs.txt** (16 lines)
-Documentation dependencies:
-- MkDocs core
-- Material theme
+### 12. **pyproject.toml** (Poetry configuration)
+Documentation dependencies in `[tool.poetry.group.docs.dependencies]`:
+- MkDocs core (^1.5.3)
+- Material theme (^9.5.0)
 - Plugins (mkdocstrings, autorefs)
 - Extensions (pymdown-extensions, pygments)
 - Optional tools (mike for versioning)
@@ -321,7 +321,7 @@ The following files are referenced in the navigation but need to be created:
 
 ```bash
 # Install dependencies
-pip install -r requirements-docs.txt
+poetry install --with docs
 
 # Serve locally (with live reload)
 mkdocs serve

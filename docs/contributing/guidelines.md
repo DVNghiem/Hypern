@@ -31,7 +31,7 @@ Before contributing, ensure you have:
 
 ### Finding Issues to Work On
 
-1. Check the [issue tracker](https://github.com/martindang/hypern/issues)
+1. Check the [issue tracker](https://github.com/DVNghiem/hypern/issues)
 2. Look for issues labeled `good first issue` or `help wanted`
 3. Comment on the issue to express interest
 4. Wait for maintainer approval before starting work

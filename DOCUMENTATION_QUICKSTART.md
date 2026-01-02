@@ -7,13 +7,7 @@ Welcome! This guide will get you up and running with the Hypern documentation in
 ### Step 1: Install Dependencies
 
 ```bash
-pip install -r requirements-docs.txt
-```
-
-Or install manually:
-
-```bash
-pip install mkdocs mkdocs-material mkdocstrings[python] pymdown-extensions
+poetry install --with docs
 ```
 
 ### Step 2: Serve Documentation
@@ -178,7 +172,7 @@ mkdocs serve -a localhost:8001
 ### Module Not Found
 
 ```bash
-pip install -r requirements-docs.txt
+poetry install --with docs
 ```
 
 ### Changes Not Showing

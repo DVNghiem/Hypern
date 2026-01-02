@@ -4,7 +4,7 @@ site_author: Martin Dang
 site_url: https://hypern.dev
 
 repo_name: hypern
-repo_url: https://github.com/martindang/hypern
+repo_url: https://github.com/DVNghiem/hypern
 edit_uri: edit/main/docs/
 
 theme:
@@ -147,7 +147,7 @@ nav:
 extra:
     social:
         - icon: fontawesome/brands/github
-          link: https://github.com/martindang/hypern
+          link: https://github.com/DVNghiem/hypern
         - icon: fontawesome/brands/python
           link: https://pypi.org/project/hypern/
     version:

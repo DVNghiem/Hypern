@@ -378,7 +378,7 @@ If you encounter issues:
 
 - Check the [User Guide](../guide/application.md) for detailed documentation
 - Review [Examples](../examples/basic-api.md) for common use cases
-- Visit the [GitHub Issues](https://github.com/martindang/hypern/issues) page
+- Visit the [GitHub Issues](https://github.com/DVNghiem/hypern/issues) page
 - Read the [API Reference](../api/core/hypern.md)
 
 Happy coding with Hypern! 🚀

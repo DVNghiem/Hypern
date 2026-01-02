@@ -7,7 +7,7 @@ This guide explains how to build and view the Hypern documentation locally using
 Before building the documentation, ensure you have:
 
 - Python 3.11 or higher
-- pip package manager
+- Poetry package manager
 - Git (for cloning the repository)
 
 ## Quick Start
@@ -15,13 +15,7 @@ Before building the documentation, ensure you have:
 ### 1. Install Documentation Dependencies
 
 ```bash
-pip install -r requirements-docs.txt
-```
-
-Or install packages individually:
-
-```bash
-pip install mkdocs mkdocs-material mkdocstrings[python] pymdown-extensions
+poetry install --with docs
 ```
 
 ### 2. Serve Documentation Locally
@@ -51,7 +45,7 @@ This creates a `site/` directory containing the generated documentation.
 ```
 Hypern-clone/
 ├── mkdocs.yml              # MkDocs configuration
-├── requirements-docs.txt   # Documentation dependencies
+├── pyproject.toml          # Poetry dependencies (includes docs group)
 ├── docs/                   # Documentation source files
 │   ├── index.md           # Home page
 │   ├── getting-started/   # Getting started guides
@@ -253,6 +247,14 @@ mkdocs build --strict --verbose
 - Check terminal for any error messages
 - Try stopping and restarting `mkdocs serve`
 
+### Module Not Found
+
+If you get module not found errors:
+
+```bash
+poetry install --with docs
+```
+
 ## Documentation Standards
 
 ### Style Guide
@@ -284,7 +286,7 @@ If you encounter issues:
 
 1. Check this guide
 2. Review [MkDocs documentation](https://www.mkdocs.org/)
-3. Check [GitHub Issues](https://github.com/martindang/hypern/issues)
+3. Check [GitHub Issues](https://github.com/DVNghiem/hypern/issues)
 4. Ask in GitHub Discussions
 
 ## Contributing

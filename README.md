@@ -24,7 +24,7 @@ pip install pre-commit poetry maturin
 ```
 - Install development dependencies
 ```
-poetry install --with dev --with test
+poetry install --with dev --with test --with docs
 ```
 - Install pre-commit git hooks
 ```
@@ -102,5 +102,42 @@ You can open swagger UI at path `/docs`
 - CORS configuration
 - Rate limiting
 - Request validation
+
+## 📚 Documentation
+
+Comprehensive documentation is available with installation guides, tutorials, API references, and examples.
+
+### View Documentation
+
+```bash
+# Install documentation dependencies
+poetry install --with docs
+
+# Serve locally with live reload
+mkdocs serve
+
+# Open browser to http://127.0.0.1:8000
+```
+
+### Documentation Includes
+
+- **Getting Started** - Installation, quick start, core concepts
+- **User Guides** - Application development, routing, requests/responses
+- **API Reference** - Complete API documentation
+- **Advanced Topics** - Performance, WebSockets, deployment
+- **Examples** - Real-world code examples
+- **Contributing** - Guidelines for contributors
+
+### Quick Links
+
+- [Installation Guide](docs/getting-started/installation.md)
+- [Quick Start Tutorial](docs/getting-started/quickstart.md)
+- [Application Guide](docs/guide/application.md)
+- [Routing Guide](docs/guide/routing.md)
+- [API Reference](docs/api/core/hypern.md)
+- [Contributing Guidelines](docs/contributing/guidelines.md)
+
+For more information, see [DOCUMENTATION_QUICKSTART.md](DOCUMENTATION_QUICKSTART.md)
+
 
 
