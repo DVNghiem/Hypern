@@ -1,0 +1,271 @@
+/* Custom CSS for Hypern Documentation */
+
+/* Root variables for consistent theming */
+:root {
+    --hypern-primary: #4f46e5;
+    --hypern-accent: #818cf8;
+    --hypern-success: #10b981;
+    --hypern-warning: #f59e0b;
+    --hypern-danger: #ef4444;
+}
+
+/* Custom styling for the home page */
+.md-typeset h1 {
+    font-weight: 700;
+    color: var(--hypern-primary);
+}
+
+/* Code block enhancements */
+.md-typeset code {
+    border-radius: 0.25rem;
+}
+
+.md-typeset pre > code {
+    border-radius: 0.5rem;
+}
+
+/* Admonition customization */
+.md-typeset .admonition {
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+}
+
+/* Table styling */
+.md-typeset table:not([class]) {
+    border-radius: 0.5rem;
+    overflow: hidden;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+}
+
+.md-typeset table:not([class]) th {
+    background-color: var(--md-primary-fg-color);
+    color: white;
+    font-weight: 600;
+}
+
+/* Custom badge styles */
+.badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.badge-success {
+    background-color: var(--hypern-success);
+    color: white;
+}
+
+.badge-warning {
+    background-color: var(--hypern-warning);
+    color: white;
+}
+
+.badge-danger {
+    background-color: var(--hypern-danger);
+    color: white;
+}
+
+/* Improve link visibility */
+.md-typeset a {
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s;
+}
+
+.md-typeset a:hover {
+    border-bottom-color: var(--md-accent-fg-color);
+}
+
+/* Navigation improvements */
+.md-nav__item--active > .md-nav__link {
+    font-weight: 600;
+}
+
+/* Search box styling */
+.md-search__input {
+    border-radius: 0.5rem;
+}
+
+/* Footer customization */
+.md-footer {
+    background-color: var(--md-primary-fg-color);
+}
+
+/* Custom container for centered content */
+.centered-content {
+    text-align: center;
+    margin: 2rem auto;
+}
+
+/* Feature grid for home page */
+.feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 2rem;
+    margin: 2rem 0;
+}
+
+.feature-item {
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    background-color: var(--md-code-bg-color);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.feature-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Command line styling */
+.md-typeset .language-bash::before,
+.md-typeset .language-shell::before {
+    content: "$ ";
+    color: var(--hypern-accent);
+    user-select: none;
+}
+
+/* API reference improvements */
+.api-signature {
+    background-color: var(--md-code-bg-color);
+    padding: 1rem;
+    border-radius: 0.5rem;
+    border-left: 4px solid var(--hypern-primary);
+    margin: 1rem 0;
+}
+
+/* Parameter table styling */
+.parameter-table {
+    width: 100%;
+    margin: 1rem 0;
+}
+
+.parameter-table th {
+    text-align: left;
+    background-color: var(--md-code-bg-color);
+    padding: 0.75rem;
+}
+
+.parameter-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--md-default-fg-color--lightest);
+}
+
+/* Status indicators */
+.status-indicator {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+}
+
+.status-indicator.success {
+    background-color: var(--hypern-success);
+}
+
+.status-indicator.warning {
+    background-color: var(--hypern-warning);
+}
+
+.status-indicator.danger {
+    background-color: var(--hypern-danger);
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+    .feature-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Print styles */
+@media print {
+    .md-header,
+    .md-sidebar,
+    .md-footer {
+        display: none;
+    }
+
+    .md-content {
+        max-width: 100%;
+    }
+}
+
+/* Dark mode adjustments */
+[data-md-color-scheme="slate"] {
+    --hypern-primary: #818cf8;
+    --hypern-accent: #a5b4fc;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+    background-color: var(--md-primary-fg-color--dark);
+}
+
+/* Syntax highlighting improvements */
+.highlight .c1 { color: #6a737d; } /* Comments */
+.highlight .k { color: #d73a49; } /* Keywords */
+.highlight .s { color: #032f62; } /* Strings */
+.highlight .n { color: #24292e; } /* Names */
+
+/* Version badge */
+.version-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, var(--hypern-primary), var(--hypern-accent));
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+}
+
+/* Callout boxes */
+.callout {
+    padding: 1rem;
+    margin: 1rem 0;
+    border-radius: 0.5rem;
+    border-left: 4px solid;
+}
+
+.callout.info {
+    border-color: var(--hypern-primary);
+    background-color: rgba(79, 70, 229, 0.1);
+}
+
+.callout.tip {
+    border-color: var(--hypern-success);
+    background-color: rgba(16, 185, 129, 0.1);
+}
+
+.callout.warning {
+    border-color: var(--hypern-warning);
+    background-color: rgba(245, 158, 11, 0.1);
+}
+
+/* Smooth scrolling */
+html {
+    scroll-behavior: smooth;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--md-default-fg-color--lightest);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--md-default-fg-color--lighter);
+}
