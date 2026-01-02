@@ -131,21 +131,9 @@ pub(crate) fn init_runtime_mt(
     )
 }
 
-/// High-performance future_into_py implementation.
-/// 
-/// For both sync and async handlers: runs directly on blocking thread pool
-/// This avoids event loop overhead and provides consistent performance
-/// 
-/// # Arguments
-/// * `rt` - Reference to the RuntimeRef for spawning tasks
-/// * `route_hash` - Hash to look up handler
-/// * `is_async` - Whether the handler is an async coroutine function
-/// * `args_builder` - Closure to build handler and arguments (called with GIL)
-/// * `on_complete` - Callback invoked when handler completes
 #[inline]
 pub fn future_into_py<F, C>(
     rt: &RuntimeRef,
-    _route_hash: u64,
     is_async: bool,
     args_builder: F,
     on_complete: C,

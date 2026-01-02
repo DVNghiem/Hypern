@@ -9,15 +9,13 @@ use tokio::net::TcpListener;
 use tracing::error;
 
 use crate::core::global::{get_connection_semaphore, get_event_loop, set_global_runtime};
-use crate::core::interpreter_pool::InterpreterPool;
+use crate::core::interpreter::http_execute;
 use crate::http::method::HttpMethod;
 use crate::http::request::Request;
 use crate::http::response::RESPONSE_404;
 use crate::middleware::{MiddlewareChain, MiddlewareContext, MiddlewareResponse, MiddlewareResult};
 use crate::routing::router::Router;
 use crate::socket::SocketHeld;
-use crate::utils::cpu::num_cpus;
-use crate::core::multiprocess::{WorkerConfig, spawn_workers, wait_for_workers};
 
 /// Convert a MiddlewareResponse to a hyper Response
 fn middleware_response_to_hyper(
@@ -43,7 +41,6 @@ fn middleware_response_to_hyper(
 pub struct Server {
     router: Arc<Router>,
     http2: bool,
-    interpreter_pool: Arc<InterpreterPool>,
     rust_middleware: Arc<MiddlewareChain>,
 }
 
@@ -54,7 +51,6 @@ impl Server {
         Self {
             router: Arc::new(Router::default()),
             http2: false,
-            interpreter_pool: Arc::new(InterpreterPool::new(num_cpus(4))),
             rust_middleware: Arc::new(MiddlewareChain::new()),
         }
     }
@@ -79,7 +75,7 @@ impl Server {
 
         // Register all routes in the interpreter pool
         for route in self.router.iter() {
-            crate::core::interpreter_pool::register_handler(
+            crate::core::interpreter::register_handler(
                 route.handler_hash(),
                 route.function.clone_ref(py),
             );
@@ -94,7 +90,6 @@ impl Server {
             .try_clone()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyOSError, _>(e.to_string()))?;
 
-        let pool = self.interpreter_pool.clone();
         let router = self.router.clone();
         let rust_middleware = self.rust_middleware.clone();
         let ev_loop = get_event_loop(py).bind(py);
@@ -131,7 +126,6 @@ impl Server {
                     };
 
                     let io = TokioIo::new(stream);
-                    let pool_ref = pool.clone();
                     let router_ref = router.clone();
                     let middleware_ref = rust_middleware.clone();
 
@@ -141,18 +135,9 @@ impl Server {
                             .serve_connection(
                                 io,
                                 service_fn(move |req| {
-                                    let pool = pool_ref.clone();
                                     let router = router_ref.clone();
                                     let middleware = middleware_ref.clone();
                                     async move {
-                                        // BENCHMARK: Pure Rust response - uncomment to test raw hyper performance
-                                        // return Ok::<_, hyper::Error>(
-                                        //     hyper::Response::builder()
-                                        //         .status(200)
-                                        //         .body(crate::body::full_http(b"Hello, /hello".to_vec()))
-                                        //         .unwrap()
-                                        // );
-                                        
                                         let fast_req = Request::from_hyper(req).await;
 
                                         // Create middleware context from request
@@ -209,7 +194,7 @@ impl Server {
                                             let route_hash = route.handler_hash();
 
                                             // Execute Python handler (this is where GIL is acquired)
-                                            let res = pool.execute(route_hash, fast_req).await;
+                                            let res = http_execute(route_hash, fast_req).await;
 
                                             // Execute "after" middleware (pure Rust, no GIL)
                                             let _ = middleware.execute_after(&mw_ctx).await;
@@ -237,49 +222,6 @@ impl Server {
         Ok(())
     }
 
-    /// Start the server in multiprocess mode (pure Rust fork)
-    /// Each worker process has its own Python interpreter and GIL
-    #[pyo3(signature = (host, port, num_processes=8, tokio_workers_per_process=1, max_blocking_threads=16, max_connections=10000))]
-    pub fn start_multiprocess(
-        &mut self,
-        py: Python,
-        host: String,
-        port: u16,
-        num_processes: usize,
-        tokio_workers_per_process: usize,
-        max_blocking_threads: usize,
-        max_connections: usize,
-    ) -> PyResult<()> {
-        // Collect handlers before fork
-        let mut handlers: Vec<(u64, Py<PyAny>)> = Vec::new();
-        for route in self.router.iter() {
-            handlers.push((route.handler_hash(), route.function.clone_ref(py)));
-        }
-
-        let config = WorkerConfig {
-            worker_id: 0,
-            host,
-            port,
-            tokio_workers: tokio_workers_per_process,
-            max_blocking_threads,
-            max_connections,
-        };
-
-        let router = self.router.clone();
-        let middleware = self.rust_middleware.clone();
-
-        println!("Starting {} worker processes...", num_processes);
-
-        // Spawn worker processes using fork
-        let pids = spawn_workers(num_processes, config, router, middleware, handlers);
-
-        println!("All {} workers started", pids.len());
-
-        // Parent process waits for all workers
-        wait_for_workers(&pids);
-
-        Ok(())
-    }
 }
 
 impl Server {
