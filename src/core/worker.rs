@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::{runtime::get_runtime, utils::cpu::num_cpus};
 
 /// Work item to be processed by a worker
@@ -12,14 +14,18 @@ pub struct WorkerPoolConfig {
     pub num_workers: usize,
     pub queue_size: usize,
     pub pin_to_cores: bool,
+    pub batch_size: usize,
+    pub batch_timeout_us: u64
 }
 
 impl Default for WorkerPoolConfig {
     fn default() -> Self {
         Self {
             num_workers: num_cpus(1),
-            queue_size: 1024,
+            queue_size: 2048,
             pin_to_cores: true,
+            batch_size: 128,
+            batch_timeout_us: 100,
         }
     }
 }
@@ -33,76 +39,38 @@ impl WorkerPoolConfig {
     }
 }
 
-/// A single worker in the pool
-pub struct Worker<T: Send + 'static> {
+pub struct Worker<T: Send + Sync + Clone + 'static> {
     pub core_id: usize,
     pub sender: tokio::sync::mpsc::Sender<WorkItem<T>>,
     handle: Option<tokio::task::JoinHandle<()>>,
 }
 
-impl<T: Send + 'static> Worker<T> {
-    pub fn new<F, Fut>(core_id: usize, queue_size: usize, pin_to_core: bool, handler: F) -> Self
+impl<T: Send + Sync + Clone + 'static> Worker<T> {
+    pub fn new<F, Fut>(core_id: usize, config: &WorkerPoolConfig, handler: F) -> Self
     where
-        F: Fn(WorkItem<T>) -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = ()> + Send,
+        F: Fn(WorkItem<T>) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
     {
-        // let (tx, rx) = bounded(queue_size);
-        let (tx, rx) = tokio::sync::mpsc::channel(queue_size);
-
-        // Initialize Tokio Runtime for this thread
+        let (tx, rx) = tokio::sync::mpsc::channel(config.queue_size);
+        let batch_size = config.batch_size;
+        let batch_timeout = Duration::from_micros(config.batch_timeout_us);
+        let pin_to_core = config.pin_to_cores;
         let rt = get_runtime();
         let handle = rt.spawn(async move {
-                // Pin to core if enabled
-                if pin_to_core {
-                    if let Some(core_ids) = core_affinity::get_core_ids() {
-                        if core_id < core_ids.len() {
-                            core_affinity::set_for_current(core_ids[core_id]);
-                        }
+            if pin_to_core {
+                if let Some(core_ids) = core_affinity::get_core_ids() {
+                    if core_id < core_ids.len() {
+                        core_affinity::set_for_current(core_ids[core_id]);
                     }
                 }
-                // Worker loop
-                Self::worker_loop_async(rx, handler).await;
-            });
+            }
+            worker_loop_optimized(rx, handler, batch_size, batch_timeout).await;
+        });
 
         Self {
             core_id,
             sender: tx,
             handle: Some(handle),
-        }
-    }
-
-    async fn worker_loop_async<F, Fut>(
-        mut rx: tokio::sync::mpsc::Receiver<WorkItem<T>>,
-        handler: F,
-    ) where
-        F: Fn(WorkItem<T>) -> Fut,
-        Fut: std::future::Future<Output = ()>,
-    {
-        let mut batch = Vec::with_capacity(32);
-        
-        loop {
-            // Batch receive
-            batch.clear();
-            
-            // Wait for first item
-            if let Some(item) = rx.recv().await {
-                batch.push(item);
-                
-                // Try to fill batch without waiting
-                while batch.len() < 32 {
-                    match rx.try_recv() {
-                        Ok(item) => batch.push(item),
-                        Err(_) => break,
-                    }
-                }
-                
-                // Process batch concurrently
-                futures::future::join_all(
-                    batch.drain(..).map(|item| handler(item))
-                ).await;
-            } else {
-                break; // Channel closed
-            }
         }
     }
 
@@ -112,10 +80,77 @@ impl<T: Send + 'static> Worker<T> {
     ) -> Result<(), tokio::sync::mpsc::error::SendError<WorkItem<T>>> {
         self.sender.send(item).await
     }
-
 }
 
-impl<T: Send + 'static> Drop for Worker<T> {
+async fn worker_loop_optimized<T, F, Fut>(
+    mut rx: tokio::sync::mpsc::Receiver<WorkItem<T>>,
+    handler: F,
+    batch_size: usize,
+    batch_timeout: Duration,
+) where
+    T: Send + Sync + Clone + 'static,
+    F: Fn(WorkItem<T>) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    let mut batch = Vec::with_capacity(batch_size);
+    
+    loop {
+        batch.clear();
+        
+        while batch.len() < batch_size {
+            match rx.try_recv() {
+                Ok(item) => batch.push(item),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    if !batch.is_empty() {
+                        process_batch_parallel(&batch, &handler).await;
+                    }
+                    return;
+                }
+            }
+        }
+        
+        if batch.is_empty() {
+            match tokio::time::timeout(batch_timeout, rx.recv()).await {
+                Ok(Some(item)) => {
+                    batch.push(item);
+                    while batch.len() < batch_size {
+                        match rx.try_recv() {
+                            Ok(item) => batch.push(item),
+                            Err(_) => break,
+                        }
+                    }
+                }
+                Ok(None) => return,
+                Err(_) => continue,
+            }
+        }
+        
+        if !batch.is_empty() {
+            process_batch_parallel(&batch, &handler).await;
+        }
+    }
+}
+
+#[inline]
+async fn process_batch_parallel<T, F, Fut>(batch: &[WorkItem<T>], handler: &F)
+where
+    T: Send + Sync + Clone + 'static,
+    F: Fn(WorkItem<T>) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    for item in batch {
+        let fut = handler(WorkItem {
+            id: item.id,
+            data: item.data.clone(),
+        });
+        tokio::spawn(fut);
+    }
+    
+    tokio::task::yield_now().await;
+}
+
+impl<T: Send + Sync + Clone + 'static> Drop for Worker<T> {
     fn drop(&mut self) {
         if let Some(handle) = self.handle.take() {
             handle.abort();
@@ -123,25 +158,23 @@ impl<T: Send + 'static> Drop for Worker<T> {
     }
 }
 
-/// Worker pool for distributing work across CPU cores
-pub struct WorkerPool<T: Send + 'static> {
+pub struct WorkerPool<T: Send + Sync + Clone + 'static> {
     workers: Vec<Worker<T>>,
     next_worker: std::sync::atomic::AtomicUsize,
 }
 
-impl<T: Send + 'static> WorkerPool<T> {
+impl<T: Send + Sync + Clone + 'static> WorkerPool<T> {
     pub fn new<F, Fut>(config: WorkerPoolConfig, handler: F) -> Self
     where
-        F: Fn(WorkItem<T>) -> Fut + Send + Clone + 'static,
-        Fut: std::future::Future<Output = ()> + Send,
+        F: Fn(WorkItem<T>) -> Fut + Send + Sync + Clone + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
     {
         let mut workers = Vec::with_capacity(config.num_workers);
 
         for core_id in 0..config.num_workers {
             let worker = Worker::new(
                 core_id,
-                config.queue_size,
-                config.pin_to_cores,
+                &config,
                 handler.clone(),
             );
             workers.push(worker);
@@ -153,7 +186,6 @@ impl<T: Send + 'static> WorkerPool<T> {
         }
     }
 
-    /// Submit work using round-robin distribution
     pub async fn submit_round_robin(
         &self,
         item: WorkItem<T>,
@@ -165,7 +197,6 @@ impl<T: Send + 'static> WorkerPool<T> {
         self.workers[idx].submit(item).await
     }
 
-    /// Submit work to a specific worker based on hash (affinity routing)
     pub async fn submit_affinity(
         &self,
         item: WorkItem<T>,
@@ -174,9 +205,8 @@ impl<T: Send + 'static> WorkerPool<T> {
         let idx = (hash as usize) % self.workers.len();
         self.workers[idx].submit(item).await
     }
-    /// Get number of workers
+
     pub fn num_workers(&self) -> usize {
         self.workers.len()
     }
 }
-

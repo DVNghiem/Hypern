@@ -1,7 +1,7 @@
 use crate::core::worker::{WorkItem, WorkerPool, WorkerPoolConfig};
 use crate::http::request::Request;
 use crate::http::response::{ResponseSlot, Response};
-use crate::runtime::get_asyncio;
+use crate::runtime::{get_asyncio, get_event_loop};
 use dashmap::DashMap;
 use pyo3::prelude::*;
 use std::sync::Arc;
@@ -31,18 +31,19 @@ pub struct InterpreterPool {
 }
 
 enum ExecutionResult {
-    SyncSuccess(Option<tokio::sync::oneshot::Sender<()>>),
+    SyncSuccess(Option<Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>>),
     Callback,
-    NotFound(Option<tokio::sync::oneshot::Sender<()>>),
+    NotFound(Option<Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>>),
     Error(PyErr),
 }
 
 // Work item data structure
+#[derive(Clone)]
 struct RequestWork {
     route_hash: u64,
     request: Request,
     response_slot: Arc<ResponseSlot>,
-    completion_tx: tokio::sync::oneshot::Sender<()>,
+    completion_tx: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
 
 impl InterpreterPool {
@@ -91,27 +92,32 @@ impl InterpreterPool {
                                 match call_result {
                                     Ok(coro) => {
                                         let asyncio  = get_asyncio(py).bind(py);
-                                        // Schedule the coroutine on the loop using thread-safe generic
-                                        let loop_ = asyncio
-                                            .call_method0("get_event_loop")
-                                            .expect("Failed to get event loop");
+                                        // Use the stored event loop from runtime
+                                        let loop_ = get_event_loop(py).bind(py);
                                         match asyncio.call_method1("run_coroutine_threadsafe", (coro, loop_)) {
                                             Ok(future) => {
                                                 // 3. Attach our callback
-                                                let callback = crate::http::callback::PyResponseCallback::new(
-                                                    work.completion_tx,
-                                                );
-                                                match Bound::new(py, callback) {
-                                                    Ok(bound_cb) => {
-                                                        match future.call_method1(
-                                                            "add_done_callback",
-                                                            (bound_cb.getattr("done").unwrap(),),
-                                                        ) {
-                                                            Ok(_) => ExecutionResult::Callback,
-                                                            Err(e) => ExecutionResult::Error(e),
+                                                let tx = work.completion_tx.lock().unwrap().take();
+                                                if let Some(tx) = tx {
+                                                    let callback = crate::http::callback::PyResponseCallback::new(tx);
+                                                    match Bound::new(py, callback) {
+                                                        Ok(bound_cb) => {
+                                                            match future.call_method1(
+                                                                "add_done_callback",
+                                                                (bound_cb.getattr("done").unwrap(),),
+                                                            ) {
+                                                                Ok(_) => ExecutionResult::Callback,
+                                                                Err(e) => ExecutionResult::Error(e),
+                                                            }
                                                         }
+                                                        Err(e) => ExecutionResult::Error(e),
                                                     }
-                                                    Err(e) => ExecutionResult::Error(e),
+                                                } else {
+                                                    ExecutionResult::Error(
+                                                        pyo3::exceptions::PyRuntimeError::new_err(
+                                                            "Completion sender already taken"
+                                                        ).into()
+                                                    )
                                                 }
                                             }
                                             Err(e) => ExecutionResult::Error(e),
@@ -122,12 +128,12 @@ impl InterpreterPool {
                                 }
                             } else {
                                 match call_result {
-                                    Ok(_) => ExecutionResult::SyncSuccess(Some(work.completion_tx)),
+                                    Ok(_) => ExecutionResult::SyncSuccess(Some(work.completion_tx.clone())),
                                     Err(e) => ExecutionResult::Error(e),
                                 }
                             }
                         } else {
-                            ExecutionResult::NotFound(Some(work.completion_tx))
+                            ExecutionResult::NotFound(Some(work.completion_tx.clone()))
                         }
                     });
 
@@ -138,7 +144,9 @@ impl InterpreterPool {
                         }
                         ExecutionResult::SyncSuccess(tx) => {
                             if let Some(tx) = tx {
-                                let _ = tx.send(());
+                                if let Some(sender) = tx.lock().unwrap().take() {
+                                    let _ = sender.send(());
+                                }
                             }
                         }
                         ExecutionResult::NotFound(tx) => {
@@ -146,7 +154,9 @@ impl InterpreterPool {
                             work.response_slot.set_status(404);
                             work.response_slot.set_body(b"Not Found".to_vec());
                             if let Some(tx) = tx {
-                                let _ = tx.send(());
+                                if let Some(sender) = tx.lock().unwrap().take() {
+                                    let _ = sender.send(());
+                                }
                             }
                         }
                         ExecutionResult::Error(e) => {
@@ -178,7 +188,7 @@ impl InterpreterPool {
                     route_hash,
                     request,
                     response_slot: response_slot.clone(),
-                    completion_tx: tx,
+                    completion_tx: Arc::new(std::sync::Mutex::new(Some(tx))),
                 },
             },
             route_hash,
