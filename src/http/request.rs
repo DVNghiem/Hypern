@@ -244,6 +244,21 @@ impl Request {
     pub fn take_body(&self) -> Option<Bytes> {
         self.body.write().take()
     }
+
+    /// Get all headers as a HashMap (for middleware context)
+    pub fn headers_map(&self) -> HashMap<String, String> {
+        self.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
+
+    /// Get body reference (for middleware context)
+    pub fn body_ref(&self) -> Option<Bytes> {
+        self.body.read().clone()
+    }
+
+    /// Get query string
+    pub fn query_string(&self) -> &str {
+        &self.query_string
+    }
 }
 
 #[pymethods]

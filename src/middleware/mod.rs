@@ -1,9 +1,66 @@
+//! Middleware system for Hypern framework.
+//! 
+//! This module provides two middleware systems:
+//! 
+//! 1. **Pure Rust Middleware** (recommended for performance):
+//!    - Zero Python/GIL overhead
+//!    - Runs entirely in Rust async runtime
+//!    - Use `RustMiddleware` trait and built-in middleware from `builtin` module
+//! 
+//! 2. **Python-compatible Middleware** (for flexibility):
+//!    - Allows Python functions as middleware
+//!    - Has GIL overhead but provides Python interoperability
+//!    - Use `Middleware` struct with Python callables
+
 use pyo3::prelude::*;
 
 pub mod builtin;
 pub mod chain;
 
-/// Middleware function type - takes request/response and can modify them
+// Re-export pure Rust middleware types
+pub use chain::{
+    HttpMethod,
+    MiddlewareChainBuilder,
+    MiddlewareContext,
+    MiddlewareError,
+    MiddlewareResponse,
+    MiddlewareResult,
+    MiddlewareState,
+    RustMiddleware,
+    RustMiddlewareChain,
+    StateValue,
+    BoxedMiddleware,
+};
+
+// Re-export built-in middleware
+pub use builtin::{
+    BasicAuthMiddleware,
+    CompressionMiddleware,
+    CorsConfig,
+    CorsMiddleware,
+    LogConfig,
+    LogLevel,
+    LogMiddleware,
+    LogAfterMiddleware,
+    MethodMiddleware,
+    PathMiddleware,
+    RateLimitAlgorithm,
+    RateLimitConfig,
+    RateLimitMiddleware,
+    RequestIdMiddleware,
+    SecurityHeadersConfig,
+    SecurityHeadersMiddleware,
+    TimeoutMiddleware,
+};
+
+// ============================================================================
+// Python-compatible Middleware (legacy, has GIL overhead)
+// ============================================================================
+
+/// Middleware function type - takes request/response and can modify them.
+/// 
+/// **Note**: This middleware type calls Python functions and has GIL overhead.
+/// For maximum performance, use the pure Rust middleware system instead.
 #[pyclass]
 pub struct Middleware {
     #[pyo3(get, set)]
@@ -57,7 +114,9 @@ impl Middleware {
     }
 }
 
-/// Collection of middleware organized by execution order
+/// Collection of Python-compatible middleware organized by execution order.
+/// 
+/// **Note**: For pure Rust middleware, use `RustMiddlewareChain` instead.
 #[derive(Clone, Default)]
 pub struct MiddlewareChain {
     pub before: Vec<Middleware>, // Executed before route handler
