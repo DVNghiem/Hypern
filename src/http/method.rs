@@ -1,5 +1,7 @@
+use pyo3::prelude::*;
 
 /// HTTP Method enum for fast matching
+#[pyclass]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HttpMethod {
     GET,
@@ -13,7 +15,9 @@ pub enum HttpMethod {
     TRACE,
 }
 
+#[pymethods]
 impl HttpMethod {
+    #[staticmethod]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
             "GET" => Some(HttpMethod::GET),
@@ -43,6 +47,16 @@ impl HttpMethod {
         }
     }
 
+    fn __str__(&self) -> &'static str {
+        self.as_str()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("HttpMethod.{}", self.as_str())
+    }
+}
+
+impl HttpMethod {
     #[inline]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         match bytes {

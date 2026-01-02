@@ -157,7 +157,7 @@ impl Server {
                                         
                                         // Execute "before" middleware (pure Rust, no GIL)
                                         match middleware.execute_before(&mw_ctx).await {
-                                            MiddlewareResult::Continue => {
+                                            MiddlewareResult::Continue() => {
                                                 // Middleware passed, continue to route handler
                                             }
                                             MiddlewareResult::Response(response) => {

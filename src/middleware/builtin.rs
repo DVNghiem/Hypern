@@ -147,7 +147,7 @@ impl RustMiddleware for CorsMiddleware {
             
             // If no origin header, this is not a CORS request
             if origin.is_empty() {
-                return MiddlewareResult::Continue;
+                return MiddlewareResult::Continue();
             }
 
             // Check if origin is allowed
@@ -213,7 +213,7 @@ impl RustMiddleware for CorsMiddleware {
                 return MiddlewareResult::Response(response);
             }
 
-            MiddlewareResult::Continue
+            MiddlewareResult::Continue()
         })
     }
 }
@@ -411,7 +411,7 @@ impl RustMiddleware for RateLimitMiddleware {
         Box::pin(async move {
             // Skip certain paths
             if self.config.skip_paths.iter().any(|p| ctx.path.starts_with(p)) {
-                return MiddlewareResult::Continue;
+                return MiddlewareResult::Continue();
             }
 
             let client_key = self.get_client_key(ctx);
@@ -446,7 +446,7 @@ impl RustMiddleware for RateLimitMiddleware {
                 );
             }
 
-            MiddlewareResult::Continue
+            MiddlewareResult::Continue()
         })
     }
 }
@@ -538,7 +538,7 @@ impl RustMiddleware for LogMiddleware {
         Box::pin(async move {
             // Skip certain paths
             if self.config.skip_paths.iter().any(|p| ctx.path.starts_with(p)) {
-                return MiddlewareResult::Continue;
+                return MiddlewareResult::Continue();
             }
 
             // Log the request (this runs before handler)
@@ -568,7 +568,7 @@ impl RustMiddleware for LogMiddleware {
             // Store start time in state for after middleware
             ctx.set_state("log_start_time", StateValue::Int(ctx.start_time.elapsed().as_nanos() as i64));
 
-            MiddlewareResult::Continue
+            MiddlewareResult::Continue()
         })
     }
 }
@@ -595,7 +595,7 @@ impl RustMiddleware for LogAfterMiddleware {
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
         Box::pin(async move {
             if self.config.skip_paths.iter().any(|p| ctx.path.starts_with(p)) {
-                return MiddlewareResult::Continue;
+                return MiddlewareResult::Continue();
             }
 
             let duration = ctx.elapsed();
@@ -607,7 +607,7 @@ impl RustMiddleware for LogAfterMiddleware {
                 "Request completed"
             );
 
-            MiddlewareResult::Continue
+            MiddlewareResult::Continue()
         })
     }
 }
@@ -669,7 +669,7 @@ impl RustMiddleware for RequestIdMiddleware {
             // Store in state for other middleware/handlers
             ctx.set_state("request_id", StateValue::String(request_id));
 
-            MiddlewareResult::Continue
+            MiddlewareResult::Continue()
         })
     }
 }
@@ -786,7 +786,7 @@ impl RustMiddleware for SecurityHeadersMiddleware {
                 ctx.add_response_header("Permissions-Policy", permissions);
             }
 
-            MiddlewareResult::Continue
+            MiddlewareResult::Continue()
         })
     }
 }
@@ -832,7 +832,7 @@ impl RustMiddleware for TimeoutMiddleware {
                 StateValue::Int(timeout.as_millis() as i64),
             );
 
-            MiddlewareResult::Continue
+            MiddlewareResult::Continue()
         })
     }
 }
@@ -903,7 +903,7 @@ impl RustMiddleware for CompressionMiddleware {
 
             ctx.set_state("compression_min_size", StateValue::Int(self.min_size as i64));
 
-            MiddlewareResult::Continue
+            MiddlewareResult::Continue()
         })
     }
 }
@@ -997,7 +997,7 @@ impl RustMiddleware for BasicAuthMiddleware {
             match self.credentials.get(&username) {
                 Some(stored_password) if stored_password == &password => {
                     ctx.set_authenticated(&username, vec![]);
-                    MiddlewareResult::Continue
+                    MiddlewareResult::Continue()
                 }
                 _ => {
                     MiddlewareResult::Response(
