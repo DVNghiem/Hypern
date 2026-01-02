@@ -1,12 +1,15 @@
-use crate::core::global::{get_asyncio, get_event_loop};
+use crate::core::global::{get_asyncio, get_global_runtime};
 use crate::core::worker::{WorkItem, WorkerPool, WorkerPoolConfig};
 use crate::http::request::Request;
 use crate::http::response::{Response, ResponseSlot};
+use crate::runtime::future_into_py_handler;
 use dashmap::DashMap;
 use pyo3::prelude::*;
+use pyo3::IntoPyObjectExt;
+use pyo3::types::PyTuple;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use tracing::{error, warn};
+use tracing::warn;
 
 static HANDLER_REGISTRY: OnceLock<DashMap<u64, (Py<PyAny>, bool)>> = OnceLock::new();
 
@@ -28,13 +31,6 @@ pub fn register_handler(hash: u64, handler: Py<PyAny>) {
 pub struct InterpreterPool {
     pool: OnceLock<Arc<WorkerPool<RequestWork>>>,
     num_workers: usize,
-}
-
-enum ExecutionResult {
-    SyncSuccess(Option<tokio::sync::oneshot::Sender<()>>),
-    Callback,
-    NotFound(Option<tokio::sync::oneshot::Sender<()>>),
-    Error(PyErr),
 }
 
 // Work item data structure
@@ -61,89 +57,39 @@ impl InterpreterPool {
                 let pool = WorkerPool::new(config, |item: WorkItem<RequestWork>| async move {
                     let work = item.data;
 
-                    // registry lookup (no GIL needed - DashMap is lock-free)
-                    let handler_entry = {
+                    // Registry lookup (no GIL needed - DashMap is lock-free)
+                    let handler_data = {
                         let registry = HANDLER_REGISTRY.get_or_init(DashMap::new);
-                        registry.get(&work.route_hash)
+                        registry.get(&work.route_hash).map(|entry| {
+                            Python::attach(|py| (entry.0.clone_ref(py), entry.1))
+                        })
                     };
-                    let response = Response::new(work.response_slot.clone());
-                    // Run Python logic to get the future or execution result
-                    let exec_result = Python::attach(|py| {
-                        if let Some(handler_entry) = handler_entry {
-                            let (handler, is_async) = &*handler_entry;
 
-                            let args = (work.request, response);
-                            let call_result = handler.bind(py).call1(args);
-
-                            if *is_async {
-                                match call_result {
-                                    Ok(coro) => {
-                                        let asyncio = get_asyncio(py);
-                                        // Schedule the coroutine on the loop using thread-safe generic
-                                        let loop_ = get_event_loop(py);
-                                        match asyncio
-                                            .call_method1(py, "run_coroutine_threadsafe", (coro, loop_))
-                                        {
-                                            Ok(future) => {
-                                                // 3. Attach our callback
-                                                let callback =
-                                                    crate::http::callback::PyResponseCallback::new(
-                                                        work.completion_tx,
-                                                    );
-                                                match Bound::new(py, callback) {
-                                                    Ok(bound_cb) => {
-                                                        match future.call_method1(
-                                                            py,
-                                                            "add_done_callback",
-                                                            (bound_cb.getattr("done").unwrap(),),
-                                                        ) {
-                                                            Ok(_) => ExecutionResult::Callback,
-                                                            Err(e) => ExecutionResult::Error(e),
-                                                        }
-                                                    }
-                                                    Err(e) => ExecutionResult::Error(e),
-                                                }
-                                            }
-                                            Err(e) => ExecutionResult::Error(e),
-                                        }
-                                    }
-                                    Err(e) => ExecutionResult::Error(e),
-                                }
-                            } else {
-                                match call_result {
-                                    Ok(_) => ExecutionResult::SyncSuccess(Some(work.completion_tx)),
-                                    Err(e) => ExecutionResult::Error(e),
-                                }
-                            }
-                        } else {
-                            ExecutionResult::NotFound(Some(work.completion_tx))
-                        }
-                    });
-
-                    // Handle the result (outside GIL where possible for awaiting)
-                    match exec_result {
-                        ExecutionResult::Callback => {
-                            // Do nothing, the callback will trigger the oneshot
-                        }
-                        ExecutionResult::SyncSuccess(tx) => {
-                            if let Some(tx) = tx {
-                                let _ = tx.send(());
-                            }
-                        }
-                        ExecutionResult::NotFound(tx) => {
-                            warn!("No handler found for hash: {}", work.route_hash);
-                            work.response_slot.set_status(404);
-                            work.response_slot.set_body(b"Not Found".to_vec());
-                            if let Some(tx) = tx {
-                                let _ = tx.send(());
-                            }
-                        }
-                        ExecutionResult::Error(e) => {
-                            error!("Python handler error for hash {}: {:?}", work.route_hash, e);
-                            work.response_slot.set_status(500);
-                            work.response_slot
-                                .set_body(format!("Internal Server Error: {:?}", e).into_bytes());
-                        }
+                    if let Some((handler, is_async)) = handler_data {
+                        let response = Response::new(work.response_slot.clone());
+                        let rt_ref = get_global_runtime().handler();
+                        
+                        // Use closure to build args with GIL
+                        future_into_py_handler(
+                            &rt_ref,
+                            handler,
+                            is_async,
+                            move |py| {
+                                let req_any = work.request.into_bound_py_any(py).expect("Failed to convert request").unbind();
+                                let res_any = response.into_bound_py_any(py).expect("Failed to convert response").unbind();
+                                PyTuple::new(py, vec![req_any, res_any])
+                                    .expect("Failed to create tuple")
+                                    .unbind()
+                            },
+                            move || {
+                                let _ = work.completion_tx.send(());
+                            },
+                        );
+                    } else {
+                        warn!("No handler found for hash: {}", work.route_hash);
+                        work.response_slot.set_status(404);
+                        work.response_slot.set_body(b"Not Found".to_vec());
+                        let _ = work.completion_tx.send(());
                     }
                 });
                 Arc::new(pool)

@@ -2,13 +2,17 @@ use pyo3::prelude::*;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Semaphore;
 
-use crate::utils::cpu::num_cpus;
+use crate::{
+    runtime::{init_runtime_mt, RuntimeWrapper},
+    utils::cpu::num_cpus,
+};
 
 static ASYNCIO: OnceLock<Py<PyModule>> = OnceLock::new();
 static EV_LOOP: OnceLock<Py<PyAny>> = OnceLock::new();
 // Share single multi-threaded runtime
 static SHARED_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 static CONN_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
+static RUNTIME: OnceLock<Arc<RuntimeWrapper>> = OnceLock::new();
 
 pub fn get_asyncio(py: Python<'_>) -> &Py<PyModule> {
     ASYNCIO.get_or_init(|| py.import("asyncio").unwrap().into())
@@ -37,5 +41,31 @@ pub fn get_runtime() -> &'static tokio::runtime::Runtime {
 pub fn get_connection_semaphore(max_connections: usize) -> Arc<Semaphore> {
     CONN_SEMAPHORE
         .get_or_init(|| Arc::new(Semaphore::new(max_connections)))
+        .clone()
+}
+
+pub fn set_global_runtime(
+    threads: usize,
+    blocking_threads: usize,
+    py_threads: usize,
+    py_threads_idle_timeout: u64,
+    py_loop: Arc<Py<PyAny>>,
+) {
+    let wrapper = init_runtime_mt(
+        threads,
+        blocking_threads,
+        py_threads,
+        py_threads_idle_timeout,
+        py_loop,
+    );
+    RUNTIME
+        .set(Arc::new(wrapper))
+        .expect("Global runtime already set");
+}
+
+pub(crate) fn get_global_runtime() -> Arc<RuntimeWrapper> {
+    RUNTIME
+        .get()
+        .expect("Global runtime not initialized")
         .clone()
 }

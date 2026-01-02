@@ -8,13 +8,13 @@ use std::thread;
 use tokio::net::TcpListener;
 use tracing::error;
 
+use crate::core::global::{get_connection_semaphore, get_event_loop, set_global_runtime};
 use crate::core::interpreter_pool::InterpreterPool;
 use crate::http::method::HttpMethod;
 use crate::http::request::Request;
 use crate::http::response::RESPONSE_404;
 use crate::middleware::{MiddlewareChain, MiddlewareContext, MiddlewareResponse, MiddlewareResult};
 use crate::routing::router::Router;
-use crate::core::global::{get_connection_semaphore, get_event_loop};
 use crate::socket::SocketHeld;
 use crate::utils::cpu::num_cpus;
 
@@ -97,6 +97,13 @@ impl Server {
         let router = self.router.clone();
         let rust_middleware = self.rust_middleware.clone();
         let ev_loop = get_event_loop(py).bind(py);
+        set_global_runtime(
+            workers,
+            max_blocking_threads,
+            4,
+            60,
+            Arc::new(ev_loop.clone().unbind()),
+        );
 
         thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
