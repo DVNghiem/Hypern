@@ -1,9 +1,10 @@
-use crate::{core::blocking::BlockingRunner, http::callback::PyFutureAwaitable};
+use crate::core::blocking::BlockingRunner;
 use pyo3::prelude::*;
-use pyo3::types::{PyTuple, PyDict};
-use std::{future::Future, sync::Arc};
+use pyo3::types::PyTuple;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio::runtime::Builder as RuntimeBuilder;
+use std::future::Future;
 
 pub trait JoinError {
     #[allow(dead_code)]
@@ -130,101 +131,100 @@ pub(crate) fn init_runtime_mt(
     )
 }
 
-#[allow(dead_code)]
-#[warn(unused_must_use)]
-pub(crate) fn future_into_py<R, F>(rt: R, py: Python, fut: F) -> PyResult<Bound<PyAny>>
-where
-    R: Runtime + ContextExt + Clone,
-    F: Future<Output = Py<PyAny>> + Send + 'static,
-{
-    let event_loop = rt.py_event_loop(py);
-    let (aw, cancel_tx) = PyFutureAwaitable::new(event_loop).to_spawn(py)?;
-    let py_fut = aw.clone_ref(py);
-    let rth = rt.clone();
-
-    let _ = rt.spawn(async move {
-        tokio::select! {
-            biased;
-            result = fut => rth.spawn_blocking(move |py| PyFutureAwaitable::set_result(aw, py, result)),
-            () = cancel_tx.notified() => rth.spawn_blocking(move |py| aw.drop_ref(py)),
-        }
-    });
-    Ok(py_fut.into_any().into_bound(py))
-}
-
-/// Handles both sync and async Python handlers via rt (tokio) or br (blocking runner)
-pub(crate) fn future_into_py_handler<F, A>(
+/// High-performance future_into_py implementation.
+/// 
+/// For both sync and async handlers: runs directly on blocking thread pool
+/// This avoids event loop overhead and provides consistent performance
+/// 
+/// # Arguments
+/// * `rt` - Reference to the RuntimeRef for spawning tasks
+/// * `route_hash` - Hash to look up handler
+/// * `is_async` - Whether the handler is an async coroutine function
+/// * `args_builder` - Closure to build handler and arguments (called with GIL)
+/// * `on_complete` - Callback invoked when handler completes
+#[inline]
+pub fn future_into_py<F, C>(
     rt: &RuntimeRef,
-    handler: Py<PyAny>,
+    _route_hash: u64,
     is_async: bool,
-    args_provider: A,
-    on_complete: F,
-) where
-    F: FnOnce() + Send + 'static,
-    A: FnOnce(Python) -> Py<PyTuple> + Send + 'static,
+    args_builder: F,
+    on_complete: C,
+)
+where
+    F: FnOnce(Python) -> (Py<PyAny>, Py<PyTuple>) + Send + 'static,
+    C: FnOnce() + Send + 'static,
 {
     if is_async {
-        // Async handler: call handler, schedule on event loop
-        let on_complete = Arc::new(std::sync::Mutex::new(Some(on_complete)));
+        // For async handlers: call and step coroutine on blocking thread
         rt.spawn_blocking(move |py| {
-            let handler_bound = handler.bind(py);
-            let args = args_provider(py);
-            match handler_bound.call1(args) {
-                Ok(coro) => {
-                    let asyncio = crate::core::global::get_asyncio(py);
-                    let loop_ = crate::core::global::get_event_loop(py);
-                    match asyncio.call_method1(py, "call_soon_threadsafe", (coro, loop_)) {
-                        Ok(future) => {
-                            // Create callback wrapper that calls on_complete
-                            let on_complete_clone = on_complete.clone();
-                            let callback = pyo3::types::PyCFunction::new_closure(
-                                py,
-                                None,
-                                None,
-                                move |_args: &Bound<PyTuple>, _kwargs: Option<&Bound<PyDict>>| -> PyResult<()> {
-                                    if let Some(callback) = on_complete_clone.lock().unwrap().take() {
-                                        callback();
-                                    }
-                                    Ok(())
-                                },
-                            );
-                            if let Ok(callback) = callback {
-                                let _ = future.call_method1(py, "add_done_callback", (callback,));
-                            } else {
-                                if let Some(callback) = on_complete.lock().unwrap().take() {
-                                    callback();
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to schedule coroutine: {:?}", e);
-                            if let Some(callback) = on_complete.lock().unwrap().take() {
-                                callback();
-                            }
-                        }
-                    }
+            let (handler, args) = args_builder(py);
+            
+            // Call handler to get coroutine and step it to completion
+            // Using raw C API for maximum speed
+            unsafe {
+                let coro_ptr = pyo3::ffi::PyObject_Call(
+                    handler.as_ptr(),
+                    args.as_ptr(),
+                    std::ptr::null_mut()
+                );
+                
+                if coro_ptr.is_null() {
+                    pyo3::ffi::PyErr_Print();
+                    on_complete();
+                    return;
                 }
-                Err(e) => {
-                    tracing::error!("Failed to call async handler: {:?}", e);
-                    if let Some(callback) = on_complete.lock().unwrap().take() {
-                        callback();
+                
+                // Step coroutine to completion
+                let none_ptr = pyo3::ffi::Py_None();
+                loop {
+                    let mut result_ptr = std::ptr::null_mut::<pyo3::ffi::PyObject>();
+                    let send_result = pyo3::ffi::PyIter_Send(coro_ptr, none_ptr, &raw mut result_ptr);
+                    
+                    match send_result {
+                        pyo3::ffi::PySendResult::PYGEN_RETURN => {
+                            if !result_ptr.is_null() {
+                                pyo3::ffi::Py_DECREF(result_ptr);
+                            }
+                            pyo3::ffi::Py_DECREF(coro_ptr);
+                            break;
+                        }
+                        pyo3::ffi::PySendResult::PYGEN_NEXT => {
+                            if !result_ptr.is_null() {
+                                pyo3::ffi::Py_DECREF(result_ptr);
+                            }
+                            continue;
+                        }
+                        pyo3::ffi::PySendResult::PYGEN_ERROR => {
+                            if pyo3::ffi::PyErr_ExceptionMatches(pyo3::ffi::PyExc_StopIteration) != 0 {
+                                pyo3::ffi::PyErr_Clear();
+                            } else {
+                                pyo3::ffi::PyErr_Print();
+                            }
+                            pyo3::ffi::Py_DECREF(coro_ptr);
+                            break;
+                        }
                     }
                 }
             }
+            on_complete();
         });
     } else {
-        // Sync handler: call directly on blocking runner
+        // For sync handlers: run directly on blocking thread using raw C API
         rt.spawn_blocking(move |py| {
-            let handler_bound = handler.bind(py);
-            let args = args_provider(py);
-            match handler_bound.call1(args) {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::error!("Failed to call sync handler: {:?}", e);
+            let (handler, args) = args_builder(py);
+            unsafe {
+                let result = pyo3::ffi::PyObject_Call(
+                    handler.as_ptr(),
+                    args.as_ptr(),
+                    std::ptr::null_mut()
+                );
+                if result.is_null() {
+                    pyo3::ffi::PyErr_Print();
+                } else {
+                    pyo3::ffi::Py_DECREF(result);
                 }
             }
             on_complete();
         });
     }
 }
-

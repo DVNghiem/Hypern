@@ -65,6 +65,58 @@ class Hypern:
         socket = SocketHeld(host, port)
         server.start(socket=socket, workers=workers, max_blocking_threads=max_blocking_threads, max_connections=max_connections)
 
+    def start_with_fd(
+        self,
+        fd: int,
+        host='0.0.0.0',
+        port=5000,
+        workers=1,
+        max_blocking_threads=1,
+        max_connections=10000,
+    ):
+        """
+        Starts the server using an existing socket file descriptor.
+        This is used for multiprocess worker mode where the parent
+        creates a shared socket and passes the fd to child processes.
+        """
+        server = Server()
+        server.set_router(router=self.router)
+        socket = SocketHeld.from_fd(fd, host, port)
+        server.start(socket=socket, workers=workers, max_blocking_threads=max_blocking_threads, max_connections=max_connections)
+
+    def start_multiprocess(
+        self,
+        host='0.0.0.0',
+        port=5000,
+        num_processes=8,
+        tokio_workers_per_process=1,
+        max_blocking_threads=16,
+        max_connections=10000,
+    ):
+        """
+        Starts the server in multiprocess mode using pure Rust fork().
+        Each worker process has its own Python interpreter and GIL,
+        allowing true parallel execution without GIL contention.
+        
+        Args:
+            host: Host address to bind to
+            port: Port to listen on  
+            num_processes: Number of worker processes (typically = CPU cores)
+            tokio_workers_per_process: Tokio async workers per process
+            max_blocking_threads: Max blocking threads for Python execution per process
+            max_connections: Maximum concurrent connections per process
+        """
+        server = Server()
+        server.set_router(router=self.router)
+        server.start_multiprocess(
+            host=host,
+            port=port,
+            num_processes=num_processes,
+            tokio_workers_per_process=tokio_workers_per_process,
+            max_blocking_threads=max_blocking_threads,
+            max_connections=max_connections,
+        )
+
     def add_route(self, method: str, endpoint: str, handler: Callable[..., Any]):
         """
         Adds a route to the router.

@@ -17,6 +17,7 @@ use crate::middleware::{MiddlewareChain, MiddlewareContext, MiddlewareResponse, 
 use crate::routing::router::Router;
 use crate::socket::SocketHeld;
 use crate::utils::cpu::num_cpus;
+use crate::core::multiprocess::{WorkerConfig, spawn_workers, wait_for_workers};
 
 /// Convert a MiddlewareResponse to a hyper Response
 fn middleware_response_to_hyper(
@@ -97,10 +98,11 @@ impl Server {
         let router = self.router.clone();
         let rust_middleware = self.rust_middleware.clone();
         let ev_loop = get_event_loop(py).bind(py);
+        // Use max_blocking_threads for py_threads to maximize Python concurrency
         set_global_runtime(
             workers,
             max_blocking_threads,
-            4,
+            max_blocking_threads,  // py_threads = max_blocking_threads
             60,
             Arc::new(ev_loop.clone().unbind()),
         );
@@ -143,6 +145,14 @@ impl Server {
                                     let router = router_ref.clone();
                                     let middleware = middleware_ref.clone();
                                     async move {
+                                        // BENCHMARK: Pure Rust response - uncomment to test raw hyper performance
+                                        // return Ok::<_, hyper::Error>(
+                                        //     hyper::Response::builder()
+                                        //         .status(200)
+                                        //         .body(crate::body::full_http(b"Hello, /hello".to_vec()))
+                                        //         .unwrap()
+                                        // );
+                                        
                                         let fast_req = Request::from_hyper(req).await;
 
                                         // Create middleware context from request
@@ -219,9 +229,54 @@ impl Server {
                 }
             });
         });
-        println!("Server is running...");
-        // Keep event loop alive
+        println!("Server is running (worker process)...");
+        
+        // Keep event loop alive in this worker process
         let _ = ev_loop.call_method0("run_forever");
+
+        Ok(())
+    }
+
+    /// Start the server in multiprocess mode (pure Rust fork)
+    /// Each worker process has its own Python interpreter and GIL
+    #[pyo3(signature = (host, port, num_processes=8, tokio_workers_per_process=1, max_blocking_threads=16, max_connections=10000))]
+    pub fn start_multiprocess(
+        &mut self,
+        py: Python,
+        host: String,
+        port: u16,
+        num_processes: usize,
+        tokio_workers_per_process: usize,
+        max_blocking_threads: usize,
+        max_connections: usize,
+    ) -> PyResult<()> {
+        // Collect handlers before fork
+        let mut handlers: Vec<(u64, Py<PyAny>)> = Vec::new();
+        for route in self.router.iter() {
+            handlers.push((route.handler_hash(), route.function.clone_ref(py)));
+        }
+
+        let config = WorkerConfig {
+            worker_id: 0,
+            host,
+            port,
+            tokio_workers: tokio_workers_per_process,
+            max_blocking_threads,
+            max_connections,
+        };
+
+        let router = self.router.clone();
+        let middleware = self.rust_middleware.clone();
+
+        println!("Starting {} worker processes...", num_processes);
+
+        // Spawn worker processes using fork
+        let pids = spawn_workers(num_processes, config, router, middleware, handlers);
+
+        println!("All {} workers started", pids.len());
+
+        // Parent process waits for all workers
+        wait_for_workers(&pids);
 
         Ok(())
     }

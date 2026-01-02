@@ -39,19 +39,30 @@ pub(crate) struct BlockingRunner {
 impl BlockingRunner {
     pub fn new(max_threads: usize, idle_timeout: u64) -> Self {
         let (qtx, qrx) = channel::unbounded();
-        let ret = Self {
+        let threads = Arc::new(atomic::AtomicUsize::new(0));
+        
+        // Pre-spawn threads up to max_threads for immediate availability
+        let initial_threads = max_threads.min(32); // Start with up to 32 threads
+        for _ in 0..initial_threads {
+            let queue = qrx.clone();
+            let tcount = threads.clone();
+            tcount.fetch_add(1, atomic::Ordering::Release);
+            thread::spawn(move || {
+                blocking_worker(queue);
+                tcount.fetch_sub(1, atomic::Ordering::Release);
+            });
+        }
+        
+        Self {
             queue: qtx,
-            tq: qrx.clone(),
-            threads: Arc::new(1.into()),
+            tq: qrx,
+            threads,
             tmax: max_threads,
             birth: time::Instant::now(),
             spawning: false.into(),
             spawn_tick: 0.into(),
             idle_timeout: time::Duration::from_secs(idle_timeout),
-        };
-        // always spawn the first thread
-        thread::spawn(move || blocking_worker(qrx));
-        ret
+        }
     }
 
     #[inline(always)]
