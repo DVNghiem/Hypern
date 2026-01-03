@@ -1,7 +1,7 @@
 use crossbeam_channel as channel;
 use pyo3::prelude::*;
 use std::{
-    sync::{Arc, atomic},
+    sync::{atomic, Arc},
     thread, time,
 };
 
@@ -15,7 +15,9 @@ impl BlockingTask {
     where
         T: FnOnce(Python) + Send + 'static,
     {
-        Self { inner: Box::new(inner) }
+        Self {
+            inner: Box::new(inner),
+        }
     }
 
     #[inline(always)]
@@ -40,7 +42,7 @@ impl BlockingRunner {
     pub fn new(max_threads: usize, idle_timeout: u64) -> Self {
         let (qtx, qrx) = channel::unbounded();
         let threads = Arc::new(atomic::AtomicUsize::new(0));
-        
+
         // Pre-spawn threads up to max_threads for immediate availability
         let initial_threads = max_threads.min(32); // Start with up to 32 threads
         for _ in 0..initial_threads {
@@ -52,7 +54,7 @@ impl BlockingRunner {
                 tcount.fetch_sub(1, atomic::Ordering::Release);
             });
         }
-        
+
         Self {
             queue: qtx,
             tq: qrx,
@@ -73,7 +75,12 @@ impl BlockingRunner {
         }
         if self
             .spawning
-            .compare_exchange(false, true, atomic::Ordering::Relaxed, atomic::Ordering::Relaxed)
+            .compare_exchange(
+                false,
+                true,
+                atomic::Ordering::Relaxed,
+                atomic::Ordering::Relaxed,
+            )
             .is_err()
         {
             return;
@@ -88,8 +95,10 @@ impl BlockingRunner {
             tcount.fetch_sub(1, atomic::Ordering::Release);
         });
 
-        self.spawn_tick
-            .store(self.birth.elapsed().as_micros() as u64, atomic::Ordering::Relaxed);
+        self.spawn_tick.store(
+            self.birth.elapsed().as_micros() as u64,
+            atomic::Ordering::Relaxed,
+        );
         self.spawning.store(false, atomic::Ordering::Relaxed);
     }
 

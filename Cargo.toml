@@ -49,7 +49,7 @@ parking_lot = "0.12.5"
 
 # Tracing (optional)
 tracing = { version = "0.1.44"}
-tracing-subscriber = { version = "0.3.22"}
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
 # Error handling
 thiserror = "2.0.17"

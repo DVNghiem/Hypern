@@ -14,3 +14,23 @@ pub use builtin::{
     RateLimitConfig, RateLimitMiddleware, RequestIdMiddleware, SecurityHeadersConfig,
     SecurityHeadersMiddleware, TimeoutMiddleware,
 };
+
+/// Convert a MiddlewareResponse to a hyper Response
+pub fn middleware_response_to_hyper(
+    response: MiddlewareResponse,
+) -> hyper::Response<crate::body::HTTPResponseBody> {
+    let mut builder = hyper::Response::builder().status(response.status);
+
+    for (key, value) in &response.headers {
+        builder = builder.header(key.as_str(), value.as_str());
+    }
+
+    builder
+        .body(crate::body::full_http(response.body))
+        .unwrap_or_else(|_| {
+            hyper::Response::builder()
+                .status(500)
+                .body(crate::body::full_http(b"Internal Server Error".to_vec()))
+                .unwrap()
+        })
+}

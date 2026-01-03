@@ -30,7 +30,7 @@ pub mod utils;
 
 // Re-exports for backward compatibility
 pub use crate::core::server::Server;
-pub use crate::http::headers::{FastHeaders};
+pub use crate::http::headers::FastHeaders;
 pub use crate::http::request::Request;
 pub use crate::http::response::{Response, ResponseSlot};
 pub use crate::routing::cache::RouteCache;
@@ -50,7 +50,6 @@ fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<Router>()?;
 
     module.add_class::<Response>()?;
-    module.add_class::<socket::SocketHeld>()?;
 
     // New performance classes
     module.add_class::<Request>()?;

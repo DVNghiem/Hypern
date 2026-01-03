@@ -4,8 +4,8 @@ use crate::http::response::{Response, ResponseSlot};
 use crate::runtime::future_into_py;
 use dashmap::DashMap;
 use pyo3::prelude::*;
-use pyo3::IntoPyObjectExt;
 use pyo3::types::PyTuple;
+use pyo3::IntoPyObjectExt;
 use std::sync::OnceLock;
 use tracing::warn;
 
@@ -60,7 +60,7 @@ pub async fn http_execute(
 
     let response = Response::new(response_slot.clone());
     let rt_ref = get_global_runtime().handler();
-    
+
     // Direct call to blocking runner - no WorkerPool overhead
     future_into_py(
         &rt_ref,
@@ -68,8 +68,14 @@ pub async fn http_execute(
         move |py| {
             // Get handler with GIL
             let handler = get_handler(py, route_hash).expect("Handler must exist");
-            let req_any = request.into_bound_py_any(py).expect("Failed to convert request").unbind();
-            let res_any = response.into_bound_py_any(py).expect("Failed to convert response").unbind();
+            let req_any = request
+                .into_bound_py_any(py)
+                .expect("Failed to convert request")
+                .unbind();
+            let res_any = response
+                .into_bound_py_any(py)
+                .expect("Failed to convert response")
+                .unbind();
             let args = PyTuple::new(py, vec![req_any, res_any])
                 .expect("Failed to create tuple")
                 .unbind();

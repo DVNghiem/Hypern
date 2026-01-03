@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Callable, List, TypeVar
 from typing_extensions import Annotated, Doc
 
-from hypern.hypern import Router, Server, SocketHeld
+from hypern.hypern import Router, Server
 from hypern.hypern import Route
 
 AppType = TypeVar("AppType", bound="Hypern")
@@ -50,20 +50,21 @@ class Hypern:
         self,
         host='0.0.0.0',
         port=5000,
-        workers=1,
-        max_blocking_threads=1,
+        num_processes=1,
+        workers_threads=1,
+        max_blocking_threads=16,
         max_connections=10000,
     ):
-        """
-        Starts the server with the specified configuration.
-        Raises:
-            ValueError: If an invalid port number is entered when prompted.
-
-        """
         server = Server()
         server.set_router(router=self.router)
-        socket = SocketHeld(host, port)
-        server.start(socket=socket, workers=workers, max_blocking_threads=max_blocking_threads, max_connections=max_connections)
+        server.start(
+            host=host,
+            port=port,
+            num_processes=num_processes,
+            workers_threads=workers_threads,
+            max_blocking_threads=max_blocking_threads,
+            max_connections=max_connections,
+        )
 
     def add_route(self, method: str, endpoint: str, handler: Callable[..., Any]):
         """

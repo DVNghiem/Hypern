@@ -1,41 +1,9 @@
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
 use pyo3::prelude::*;
-use pyo3::pycell::PyRef;
 use std::sync::Arc;
-use std::thread;
-use tokio::net::TcpListener;
-use tracing::error;
-
-use crate::core::global::{get_connection_semaphore, get_event_loop, set_global_runtime};
-use crate::core::interpreter::http_execute;
-use crate::http::method::HttpMethod;
-use crate::http::request::Request;
-use crate::http::response::RESPONSE_404;
-use crate::middleware::{MiddlewareChain, MiddlewareContext, MiddlewareResponse, MiddlewareResult};
+use crate::core::multiprocess::{spawn_workers, wait_for_workers};
+use crate::middleware::MiddlewareChain;
 use crate::routing::router::Router;
 use crate::socket::SocketHeld;
-
-/// Convert a MiddlewareResponse to a hyper Response
-fn middleware_response_to_hyper(
-    response: MiddlewareResponse,
-) -> hyper::Response<crate::body::HTTPResponseBody> {
-    let mut builder = hyper::Response::builder().status(response.status);
-
-    for (key, value) in &response.headers {
-        builder = builder.header(key.as_str(), value.as_str());
-    }
-
-    builder
-        .body(crate::body::full_http(response.body))
-        .unwrap_or_else(|_| {
-            hyper::Response::builder()
-                .status(500)
-                .body(crate::body::full_http(b"Internal Server Error".to_vec()))
-                .unwrap()
-        })
-}
 
 #[pyclass]
 pub struct Server {
@@ -63,165 +31,57 @@ impl Server {
         self.http2 = true;
     }
 
+    #[pyo3(signature = (host, port, num_processes=1, workers_threads=1, max_blocking_threads=16, max_connections=10000))]
     pub fn start(
         &mut self,
         py: Python,
-        socket: PyRef<SocketHeld>,
-        workers: usize,
+        host: String,
+        port: u16,
+        num_processes: usize,
+        workers_threads: usize,
         max_blocking_threads: usize,
         max_connections: usize,
     ) -> PyResult<()> {
-        let raw_socket = socket.get_socket();
 
-        // Register all routes in the interpreter pool
+        // Setup tracing 
+        tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,hypern=debug".into()),
+        )
+        .with_thread_ids(true)
+        .init();
+
+        // Collect handlers before fork
+        let raw_socket = SocketHeld::new(host, port)?;
+        let mut handlers: Vec<(u64, Py<PyAny>)> = Vec::new();
         for route in self.router.iter() {
-            crate::core::interpreter::register_handler(
-                route.handler_hash(),
-                route.function.clone_ref(py),
-            );
+            handlers.push((route.handler_hash(), route.function.clone_ref(py)));
         }
 
-        // Convert std TcpListener to Tokio TcpListener
-        raw_socket
-            .set_nonblocking(true)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyOSError, _>(e.to_string()))?;
-
-        let std_listener = raw_socket
-            .try_clone()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyOSError, _>(e.to_string()))?;
-
         let router = self.router.clone();
-        let rust_middleware = self.rust_middleware.clone();
-        let ev_loop = get_event_loop(py).bind(py);
-        // Use max_blocking_threads for py_threads to maximize Python concurrency
-        set_global_runtime(
-            workers,
+        let middleware = self.rust_middleware.clone();
+
+        // Spawn worker processes using fork
+        let pids = spawn_workers(
+            py,
+            raw_socket,
+            num_processes,
+            workers_threads,
             max_blocking_threads,
-            max_blocking_threads,  // py_threads = max_blocking_threads
-            60,
-            Arc::new(ev_loop.clone().unbind()),
+            max_connections,
+            router,
+            middleware,
+            handlers,
         );
 
-        thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(workers)
-                .max_blocking_threads(max_blocking_threads)
-                .enable_all()
-                .build()
-                .expect("Failed to build Tokio runtime");
+        println!("All {} workers started", pids.len());
 
-            rt.block_on(async move {
-                let listener = TcpListener::from_std(std::net::TcpListener::from(std_listener))
-                    .expect("Failed to convert listener");
-
-                while let Ok((stream, addr)) = listener.accept().await {
-                    let permit = match get_connection_semaphore(max_connections).try_acquire_owned()
-                    {
-                        Ok(p) => p,
-                        Err(_) => {
-                            // Drop connection if at capacity
-                            drop(stream);
-                            continue;
-                        }
-                    };
-
-                    let io = TokioIo::new(stream);
-                    let router_ref = router.clone();
-                    let middleware_ref = rust_middleware.clone();
-
-                    tokio::task::spawn(async move {
-                        let _permit = permit; // Hold permit until done
-                        if let Err(err) = http1::Builder::new()
-                            .serve_connection(
-                                io,
-                                service_fn(move |req| {
-                                    let router = router_ref.clone();
-                                    let middleware = middleware_ref.clone();
-                                    async move {
-                                        let fast_req = Request::from_hyper(req).await;
-
-                                        // Create middleware context from request
-                                        let method =
-                                            HttpMethod::from_str(fast_req.method().as_str())
-                                                .unwrap_or(HttpMethod::GET);
-
-                                        // Build headers map for middleware context
-                                        let headers_map = fast_req.headers_map();
-
-                                        let mw_ctx = MiddlewareContext::new(
-                                            fast_req.path(),
-                                            method,
-                                            headers_map,
-                                            fast_req.query_string(),
-                                            fast_req.body_ref(),
-                                        );
-
-                                        // Execute "before" middleware (pure Rust, no GIL)
-                                        match middleware.execute_before(&mw_ctx).await {
-                                            MiddlewareResult::Continue() => {
-                                                // Middleware passed, continue to route handler
-                                            }
-                                            MiddlewareResult::Response(response) => {
-                                                // Middleware short-circuited with a response
-                                                return Ok::<_, hyper::Error>(
-                                                    middleware_response_to_hyper(response),
-                                                );
-                                            }
-                                            MiddlewareResult::Error(err) => {
-                                                // Middleware returned an error
-                                                if let Some(response) =
-                                                    middleware.execute_error(&mw_ctx, &err).await
-                                                {
-                                                    return Ok(middleware_response_to_hyper(
-                                                        response,
-                                                    ));
-                                                }
-                                                return Ok(middleware_response_to_hyper(
-                                                    err.to_response(),
-                                                ));
-                                            }
-                                        }
-
-                                        // Match route to get pattern-based hash and params
-                                        if let Some((route, params)) = router.find_matching_route(
-                                            fast_req.path(),
-                                            fast_req.method().as_str(),
-                                        ) {
-                                            // Set path params from routing
-                                            fast_req.set_path_params(params.clone());
-                                            mw_ctx.set_params(params);
-
-                                            let route_hash = route.handler_hash();
-
-                                            // Execute Python handler (this is where GIL is acquired)
-                                            let res = http_execute(route_hash, fast_req).await;
-
-                                            // Execute "after" middleware (pure Rust, no GIL)
-                                            let _ = middleware.execute_after(&mw_ctx).await;
-
-                                            Ok::<_, hyper::Error>(res)
-                                        } else {
-                                            Ok(RESPONSE_404.clone())
-                                        }
-                                    }
-                                }),
-                            )
-                            .await
-                        {
-                            error!("Error serving connection from {:?}: {:?}", addr, err);
-                        }
-                    });
-                }
-            });
-        });
-        println!("Server is running (worker process)...");
-        
-        // Keep event loop alive in this worker process
-        let _ = ev_loop.call_method0("run_forever");
+        // Parent process waits for all workers
+        wait_for_workers(&pids);
 
         Ok(())
     }
-
 }
 
 impl Server {

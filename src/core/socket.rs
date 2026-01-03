@@ -6,15 +6,12 @@ use std::{
     time::Duration,
 };
 
-#[pyclass]
 #[derive(Debug)]
 pub struct SocketHeld {
     pub socket: Socket,
 }
 
-#[pymethods]
 impl SocketHeld {
-    #[new]
     pub fn new(ip: String, port: u16) -> PyResult<SocketHeld> {
         let ip: IpAddr = ip.parse()?;
         let socket = if ip.is_ipv4() {
@@ -79,28 +76,11 @@ impl SocketHeld {
         Ok(SocketHeld { socket })
     }
 
-    /// Create a SocketHeld from an existing file descriptor
-    /// This is used for multiprocess worker mode
-    #[staticmethod]
-    #[pyo3(name = "from_fd")]
-    pub fn create_from_fd(fd: i32, _ip: String, _port: u16) -> PyResult<SocketHeld> {
-        use std::os::unix::io::FromRawFd;
-        // Create socket from raw file descriptor
-        let socket = unsafe { Socket::from_raw_fd(fd) };
-        
-        // Set nonblocking for async I/O
-        socket.set_nonblocking(true)?;
-        
-        Ok(SocketHeld { socket })
-    }
-
     pub fn try_clone(&self) -> PyResult<SocketHeld> {
         let copied = self.socket.try_clone()?;
         Ok(SocketHeld { socket: copied })
     }
-}
 
-impl SocketHeld {
     pub fn get_socket(&self) -> Socket {
         self.socket.try_clone().unwrap()
     }

@@ -1,10 +1,10 @@
 use crate::core::blocking::BlockingRunner;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
-use std::sync::Arc;
-use tokio::task::JoinHandle;
-use tokio::runtime::Builder as RuntimeBuilder;
 use std::future::Future;
+use std::sync::Arc;
+use tokio::runtime::Builder as RuntimeBuilder;
+use tokio::task::JoinHandle;
 
 pub trait JoinError {
     #[allow(dead_code)]
@@ -72,7 +72,7 @@ impl RuntimeRef {
         pyloop: Arc<Py<PyAny>>,
     ) -> Self {
         Self {
-            inner: rt, 
+            inner: rt,
             innerb: br,
             innerp: pyloop,
         }
@@ -135,12 +135,7 @@ pub(crate) fn init_runtime_mt(
 }
 
 #[inline]
-pub fn future_into_py<F, C>(
-    rt: &RuntimeRef,
-    is_async: bool,
-    args_builder: F,
-    on_complete: C,
-)
+pub fn future_into_py<F, C>(rt: &RuntimeRef, is_async: bool, args_builder: F, on_complete: C)
 where
     F: FnOnce(Python) -> (Py<PyAny>, Py<PyTuple>) + Send + 'static,
     C: FnOnce() + Send + 'static,
@@ -149,28 +144,26 @@ where
         // For async handlers: call and step coroutine on blocking thread
         rt.spawn_blocking(move |py| {
             let (handler, args) = args_builder(py);
-            
+
             // Call handler to get coroutine and step it to completion
             // Using raw C API for maximum speed
             unsafe {
-                let coro_ptr = pyo3::ffi::PyObject_Call(
-                    handler.as_ptr(),
-                    args.as_ptr(),
-                    std::ptr::null_mut()
-                );
-                
+                let coro_ptr =
+                    pyo3::ffi::PyObject_Call(handler.as_ptr(), args.as_ptr(), std::ptr::null_mut());
+
                 if coro_ptr.is_null() {
                     pyo3::ffi::PyErr_Print();
                     on_complete();
                     return;
                 }
-                
+
                 // Step coroutine to completion
                 let none_ptr = pyo3::ffi::Py_None();
                 loop {
                     let mut result_ptr = std::ptr::null_mut::<pyo3::ffi::PyObject>();
-                    let send_result = pyo3::ffi::PyIter_Send(coro_ptr, none_ptr, &raw mut result_ptr);
-                    
+                    let send_result =
+                        pyo3::ffi::PyIter_Send(coro_ptr, none_ptr, &raw mut result_ptr);
+
                     match send_result {
                         pyo3::ffi::PySendResult::PYGEN_RETURN => {
                             if !result_ptr.is_null() {
@@ -186,7 +179,9 @@ where
                             continue;
                         }
                         pyo3::ffi::PySendResult::PYGEN_ERROR => {
-                            if pyo3::ffi::PyErr_ExceptionMatches(pyo3::ffi::PyExc_StopIteration) != 0 {
+                            if pyo3::ffi::PyErr_ExceptionMatches(pyo3::ffi::PyExc_StopIteration)
+                                != 0
+                            {
                                 pyo3::ffi::PyErr_Clear();
                             } else {
                                 pyo3::ffi::PyErr_Print();
@@ -204,11 +199,8 @@ where
         rt.spawn_blocking(move |py| {
             let (handler, args) = args_builder(py);
             unsafe {
-                let result = pyo3::ffi::PyObject_Call(
-                    handler.as_ptr(),
-                    args.as_ptr(),
-                    std::ptr::null_mut()
-                );
+                let result =
+                    pyo3::ffi::PyObject_Call(handler.as_ptr(), args.as_ptr(), std::ptr::null_mut());
                 if result.is_null() {
                     pyo3::ffi::PyErr_Print();
                 } else {
