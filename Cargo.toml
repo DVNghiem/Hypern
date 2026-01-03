@@ -26,7 +26,6 @@ percent-encoding = "2.3.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.148"
 form_urlencoded = "1.2.1"
-mime = "0.3.17"
 mimalloc = { version = "0.1.48", optional = true }
 libc = "0.2.178"
 once_cell = "1.20.0"
@@ -47,9 +46,6 @@ bumpalo = "3.14"
 # Performance: Concurrency
 dashmap = "6.1.0"
 parking_lot = "0.12.5"
-
-# Performance: Core affinity (optional)
-core_affinity = "0.8"
 
 # Tracing (optional)
 tracing = { version = "0.1.44"}

@@ -77,6 +77,9 @@ impl RuntimeRef {
             innerp: pyloop,
         }
     }
+    pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
+        self.inner.block_on(fut)
+    }
 }
 
 impl JoinError for tokio::task::JoinError {
