@@ -13,59 +13,59 @@ on:
   workflow_dispatch:
 
 jobs:
-  linux:
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      matrix:
-        platform:
-          - runner: ubuntu-22.04
-            target: x86_64
-          - runner: ubuntu-22.04
-            target: x86
-          - runner: ubuntu-22.04
-            target: aarch64
-          - runner: ubuntu-22.04
-            target: armv7
-          - runner: ubuntu-22.04
-            target: s390x
-          - runner: ubuntu-22.04
-            target: ppc64le
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
-          manylinux: auto
+  # linux:
+  #   runs-on: ${{ matrix.platform.runner }}
+  #   strategy:
+  #     matrix:
+  #       platform:
+  #         - runner: ubuntu-22.04
+  #           target: x86_64
+  #         - runner: ubuntu-22.04
+  #           target: x86
+  #         - runner: ubuntu-22.04
+  #           target: aarch64
+  #         - runner: ubuntu-22.04
+  #           target: armv7
+  #         - runner: ubuntu-22.04
+  #           target: s390x
+  #         - runner: ubuntu-22.04
+  #           target: ppc64le
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: 3.x
+  #     - name: Build wheels
+  #       uses: PyO3/maturin-action@v1
+  #       with:
+  #         target: ${{ matrix.platform.target }}
+  #         args: --release --out dist --find-interpreter
+  #         manylinux: auto
 
-  musllinux:
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      matrix:
-        platform:
-          - runner: ubuntu-22.04
-            target: x86_64
-          - runner: ubuntu-22.04
-            target: x86
-          - runner: ubuntu-22.04
-            target: aarch64
-          - runner: ubuntu-22.04
-            target: armv7
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
-          manylinux: musllinux_1_2
+  # musllinux:
+  #   runs-on: ${{ matrix.platform.runner }}
+  #   strategy:
+  #     matrix:
+  #       platform:
+  #         - runner: ubuntu-22.04
+  #           target: x86_64
+  #         - runner: ubuntu-22.04
+  #           target: x86
+  #         - runner: ubuntu-22.04
+  #           target: aarch64
+  #         - runner: ubuntu-22.04
+  #           target: armv7
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: 3.x
+  #     - name: Build wheels
+  #       uses: PyO3/maturin-action@v1
+  #       with:
+  #         target: ${{ matrix.platform.target }}
+  #         args: --release --out dist --find-interpreter
+  #         manylinux: musllinux_1_2
 
   windows:
     runs-on: ${{ matrix.platform.runner }}
@@ -88,22 +88,22 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter
 
-  macos:
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      matrix:
-        platform:
-          - runner: macos-15
-            target: x86_64
-          - runner: macos-14
-            target: aarch64
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+  # macos:
+  #   runs-on: ${{ matrix.platform.runner }}
+  #   strategy:
+  #     matrix:
+  #       platform:
+  #         - runner: macos-15
+  #           target: x86_64
+  #         - runner: macos-14
+  #           target: aarch64
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: 3.x
+  #     - name: Build wheels
+  #       uses: PyO3/maturin-action@v1
+  #       with:
+  #         target: ${{ matrix.platform.target }}
+  #         args: --release --out dist --find-interpreter

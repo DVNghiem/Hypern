@@ -94,6 +94,7 @@ pub fn terminate_workers(pids: &[libc::pid_t]) {
 /// Non-Unix stub for spawn_workers
 #[cfg(not(unix))]
 pub fn spawn_workers(
+    _py: Python<'_>,
     socket_held: SocketHeld,
     num_workers: usize,
     worker_threads: usize,
