@@ -161,7 +161,7 @@ where
                 let none_ptr = pyo3::ffi::Py_None();
                 loop {
                     // Use send method as fallback for PyIter_Send
-                    let send_method = pyo3::ffi::PyObject_GetAttrString(coro_ptr, "send\0".as_ptr() as *const i8);
+                    let send_method = pyo3::ffi::PyObject_GetAttrString(coro_ptr, b"send\0".as_ptr() as *const std::os::raw::c_char);
                     if send_method.is_null() {
                         pyo3::ffi::PyErr_Print();
                         pyo3::ffi::Py_DECREF(coro_ptr);
