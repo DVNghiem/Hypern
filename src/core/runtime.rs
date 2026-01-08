@@ -165,33 +165,30 @@ where
                 // Step coroutine to completion
                 let none_ptr = pyo3::ffi::Py_None();
                 loop {
-                    let mut result_ptr = std::ptr::null_mut::<pyo3::ffi::PyObject>();
-                    let send_result = pyo3::ffi::PyIter_Send(coro_ptr, none_ptr, &raw mut result_ptr);
-                    
-                    match send_result {
-                        pyo3::ffi::PySendResult::PYGEN_RETURN => {
-                            if !result_ptr.is_null() {
-                                pyo3::ffi::Py_DECREF(result_ptr);
-                            }
-                            pyo3::ffi::Py_DECREF(coro_ptr);
-                            break;
-                        }
-                        pyo3::ffi::PySendResult::PYGEN_NEXT => {
-                            if !result_ptr.is_null() {
-                                pyo3::ffi::Py_DECREF(result_ptr);
-                            }
-                            continue;
-                        }
-                        pyo3::ffi::PySendResult::PYGEN_ERROR => {
-                            if pyo3::ffi::PyErr_ExceptionMatches(pyo3::ffi::PyExc_StopIteration) != 0 {
-                                pyo3::ffi::PyErr_Clear();
-                            } else {
-                                pyo3::ffi::PyErr_Print();
-                            }
-                            pyo3::ffi::Py_DECREF(coro_ptr);
-                            break;
-                        }
+                    // Use send method as fallback for PyIter_Send
+                    let send_method = pyo3::ffi::PyObject_GetAttrString(coro_ptr, "send\0".as_ptr() as *const i8);
+                    if send_method.is_null() {
+                        pyo3::ffi::PyErr_Print();
+                        pyo3::ffi::Py_DECREF(coro_ptr);
+                        break;
                     }
+                    
+                    let result_ptr = pyo3::ffi::PyObject_CallFunctionObjArgs(send_method, none_ptr, std::ptr::null_mut::<pyo3::ffi::PyObject>());
+                    pyo3::ffi::Py_DECREF(send_method);
+                    
+                    if result_ptr.is_null() {
+                        // Check if it's StopIteration (normal completion)
+                        if pyo3::ffi::PyErr_ExceptionMatches(pyo3::ffi::PyExc_StopIteration) != 0 {
+                            pyo3::ffi::PyErr_Clear();
+                        } else {
+                            pyo3::ffi::PyErr_Print();
+                        }
+                        pyo3::ffi::Py_DECREF(coro_ptr);
+                        break;
+                    }
+                    
+                    // Got a result, continue looping
+                    pyo3::ffi::Py_DECREF(result_ptr);
                 }
             }
             on_complete();
