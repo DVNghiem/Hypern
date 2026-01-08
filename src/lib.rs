@@ -29,9 +29,8 @@ pub mod routing;
 pub mod utils;
 
 // Re-exports for backward compatibility
-
 pub use crate::core::server::Server;
-pub use crate::http::headers::{FastHeaders, HypernHeaders};
+pub use crate::http::headers::FastHeaders;
 pub use crate::http::request::Request;
 pub use crate::http::response::{Response, ResponseSlot};
 pub use crate::routing::cache::RouteCache;
@@ -43,39 +42,6 @@ pub use fast_path::json_cache::JsonResponseCache;
 pub use fast_path::static_files::StaticFileHandler;
 pub use memory::pool::{RequestPool, ResponsePool};
 
-// Re-export pure Rust middleware types
-pub use crate::middleware::{
-    BasicAuthMiddleware,
-    BoxedMiddleware,
-    CompressionMiddleware,
-    CorsConfig,
-    // Built-in middleware
-    CorsMiddleware,
-    LogAfterMiddleware,
-    LogConfig,
-    LogLevel,
-    LogMiddleware,
-    MethodMiddleware,
-    // Chain types
-    MiddlewareChain,
-    MiddlewareChainBuilder,
-    MiddlewareContext,
-    MiddlewareError,
-    MiddlewareResponse,
-    MiddlewareResult,
-    MiddlewareState,
-    PathMiddleware,
-    RateLimitAlgorithm,
-    RateLimitConfig,
-    RateLimitMiddleware,
-    RequestIdMiddleware,
-    RustMiddleware,
-    SecurityHeadersConfig,
-    SecurityHeadersMiddleware,
-    StateValue,
-    TimeoutMiddleware,
-};
-
 #[pymodule(gil_used = false)]
 fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     // Original classes (backwards compatible)
@@ -84,8 +50,6 @@ fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<Router>()?;
 
     module.add_class::<Response>()?;
-    module.add_class::<HypernHeaders>()?;
-    module.add_class::<socket::SocketHeld>()?;
 
     // New performance classes
     module.add_class::<Request>()?;
