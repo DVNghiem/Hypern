@@ -17,7 +17,6 @@ import uuid as uuid_module
 
 # Import from hypern
 from hypern.database import Database, db, finalize_db
-from hypern._hypern import ConnectionPool, PoolConfig
 
 
 # Override the autouse fixture to not use the test server
@@ -34,17 +33,17 @@ TEST_DB_URL = "postgresql://nghiem:nghiem@localhost:5432/test"
 @pytest.fixture(scope="module")
 def setup_database():
     """Initialize the database pool and create test tables."""
-    # Initialize the connection pool
-    config = PoolConfig(
-        url=TEST_DB_URL,
-        max_size=10,
-        min_idle=2,
-        connect_timeout_secs=30,
-    )
+    # Configure the database (lazy initialization)
     try:
-        ConnectionPool.initialize(config)
+        Database.configure(
+            url=TEST_DB_URL,
+            max_size=10,
+            min_idle=2,
+            connect_timeout_secs=30,
+            alias="default"
+        )
     except RuntimeError:
-        # Pool already initialized, that's OK
+        # Database already configured, that's OK
         pass
     
     # Create test tables
@@ -120,7 +119,7 @@ class TestConnectionPool:
     
     def test_pool_status(self, setup_database):
         """Test getting pool status."""
-        status = ConnectionPool.status()
+        status = Database.status()
         assert status is not None
         assert hasattr(status, 'size')
         assert hasattr(status, 'available')
@@ -128,7 +127,7 @@ class TestConnectionPool:
     
     def test_pool_is_initialized(self, setup_database):
         """Test that pool is initialized."""
-        assert ConnectionPool.is_initialized() is True
+        assert Database.is_configured() is True
 
 
 class TestDbSession:
@@ -665,7 +664,7 @@ class TestEdgeCases:
             malicious_email = "'; DROP TABLE test_users; --"
             
             # This should NOT drop the table
-            results = session.query(
+            session.query(
                 "SELECT * FROM test_users WHERE email = $1",
                 [malicious_email]
             )

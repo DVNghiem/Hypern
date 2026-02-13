@@ -18,8 +18,6 @@ import msgspec
 from hypern import (
     Hypern, 
     Router, 
-    Request, 
-    Response, 
     SSEEvent,
     NotFound, 
     BadRequest, 
@@ -28,8 +26,8 @@ from hypern import (
 )
 from hypern.validation import validate, validate_body, validate_query
 from hypern.middleware import (
-    CorsMiddleware, RateLimitMiddleware, SecurityHeadersMiddleware, TimeoutMiddleware, CompressionMiddleware,
-    RequestIdMiddleware, LogMiddleware, BasicAuthMiddleware, MiddlewareStack
+    CorsMiddleware, RateLimitMiddleware, SecurityHeadersMiddleware, CompressionMiddleware,
+    RequestIdMiddleware, BasicAuthMiddleware
 )
 
 
@@ -430,7 +428,7 @@ def create_test_app() -> Hypern:
                 })
             else:
                 res.status(400).json({"error": "No file uploaded"})
-        except Exception as e:
+        except Exception:
             res.status(400).json({"error": "No file uploaded"})
     
     @app.post("/upload/multiple")
@@ -451,7 +449,7 @@ def create_test_app() -> Hypern:
                 })
             else:
                 res.status(400).json({"error": "No files uploaded"})
-        except Exception as e:
+        except Exception:
             res.status(400).json({"error": "No files uploaded"})
     
     @app.post("/upload/with-fields")
@@ -871,7 +869,7 @@ def create_test_app() -> Hypern:
         res.status(204).send(None)
     
     # Rate limiting endpoint - strict limit for testing
-    rate_limit_strict = RateLimitMiddleware(max_requests=3, window_secs=10)
+    RateLimitMiddleware(max_requests=3, window_secs=10)
     @app.get("/middleware/ratelimit/strict")
     def ratelimit_strict_test(req, res, ctx):
         res.json({"requests": "limited"})
@@ -898,7 +896,7 @@ def create_test_app() -> Hypern:
         res.json({"requestid": "enabled"})
     
     # BasicAuth protected endpoint
-    basic_auth = BasicAuthMiddleware(
+    BasicAuthMiddleware(
         realm="Test Area",
         users={"admin": "secret", "testuser": "password123"}
     )
