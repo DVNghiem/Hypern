@@ -67,6 +67,16 @@ pub fn py_to_json_value(obj: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
         return Ok(JsonValue::String(s));
     }
 
+    // List/Tuple - use is_instance_of for type checking (check before bytes!)
+    if obj.is_instance_of::<PyList>() {
+        let list = obj.extract::<Bound<'_, PyList>>()?;
+        let mut arr = Vec::with_capacity(list.len());
+        for item in list.iter() {
+            arr.push(py_to_json_value(&item)?);
+        }
+        return Ok(JsonValue::Array(arr));
+    }
+
     // Bytes - convert to base64 or string
     if let Ok(bytes) = obj.extract::<Vec<u8>>() {
         // Try to decode as UTF-8 string first
@@ -75,16 +85,6 @@ pub fn py_to_json_value(obj: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
         }
         // Fallback: convert to hex or just use lossy
         return Ok(JsonValue::String(String::from_utf8_lossy(&bytes).to_string()));
-    }
-
-    // List/Tuple - use is_instance_of for type checking
-    if obj.is_instance_of::<PyList>() {
-        let list = obj.extract::<Bound<'_, PyList>>()?;
-        let mut arr = Vec::with_capacity(list.len());
-        for item in list.iter() {
-            arr.push(py_to_json_value(&item)?);
-        }
-        return Ok(JsonValue::Array(arr));
     }
 
     // Dict

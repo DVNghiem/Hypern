@@ -76,7 +76,7 @@ class NestedUserSchema(msgspec.Struct):
 # Test Data Storage (in-memory database)
 # ============================================================================
 
-class TestDatabase:
+class MockDatabase:
     """In-memory database for testing."""
     
     def __init__(self):
@@ -133,7 +133,7 @@ class TestDatabase:
 
 
 # Global test database instance
-test_db = TestDatabase()
+test_db = MockDatabase()
 
 
 def create_test_app() -> Hypern:
