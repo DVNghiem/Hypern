@@ -113,14 +113,14 @@ impl DIValue {
         if let Ok(s) = obj.extract::<String>() {
             return Ok(DIValue::String(s));
         }
+        if let Ok(b) = obj.extract::<bool>() {
+            return Ok(DIValue::Bool(b));
+        }
         if let Ok(i) = obj.extract::<i64>() {
             return Ok(DIValue::Int(i));
         }
         if let Ok(f) = obj.extract::<f64>() {
             return Ok(DIValue::Float(f));
-        }
-        if let Ok(b) = obj.extract::<bool>() {
-            return Ok(DIValue::Bool(b));
         }
         if let Ok(bytes) = obj.extract::<Vec<u8>>() {
             return Ok(DIValue::Bytes(bytes));
