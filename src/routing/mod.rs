@@ -1,5 +1,4 @@
 pub mod cache;
-pub mod radix;
 pub mod route;
 pub mod router;
 

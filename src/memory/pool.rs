@@ -49,7 +49,7 @@ impl<T> ObjectPool<T> {
 
 /// Request buffer pool for zero-allocation request parsing
 pub struct RequestPool {
-    buffers: ObjectPool<Vec<u8>>,
+    pub buffers: ObjectPool<Vec<u8>>,
 }
 
 impl RequestPool {
@@ -78,8 +78,8 @@ impl Default for RequestPool {
 
 /// Response buffer pool for zero-allocation response building
 pub struct ResponsePool {
-    buffers: ObjectPool<Vec<u8>>,
-    header_buffers: ObjectPool<Vec<(String, String)>>,
+    pub buffers: ObjectPool<Vec<u8>>,
+    pub header_buffers: ObjectPool<Vec<(String, String)>>,
 }
 
 impl ResponsePool {

@@ -1,13 +1,48 @@
 use std::collections::HashMap;
 
-use super::radix::RadixNode;
 use super::route::Route;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-/// Contains the thread safe hashmaps of different routes
+/// :param -> {param}
+/// *wildcard -> {*wildcard}
+fn convert_to_matchit_path(path: &str) -> String {
+    let mut result = String::with_capacity(path.len() + 4);
+    let mut chars = path.chars().peekable();
+    
+    while let Some(c) = chars.next() {
+        if c == ':' {
+            // Convert :param to {param}
+            result.push('{');
+            while let Some(&next) = chars.peek() {
+                if next == '/' || next == '-' || next == '.' {
+                    break;
+                }
+                result.push(chars.next().unwrap());
+            }
+            result.push('}');
+        } else if c == '*' {
+            // Convert *wildcard to {*wildcard}
+            result.push('{');
+            result.push('*');
+            while let Some(&next) = chars.peek() {
+                if next == '/' {
+                    break;
+                }
+                result.push(chars.next().unwrap());
+            }
+            result.push('}');
+        } else {
+            result.push(c);
+        }
+    }
+    
+    result
+}
+
+/// Contains routers for each HTTP method using matchit
 #[pyclass]
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Router {
     #[pyo3(get, set)]
     path: String,
@@ -15,7 +50,71 @@ pub struct Router {
     #[pyo3(get)]
     routes: Vec<Route>,
 
-    radix_tree: RadixNode,
+    // One matchit router per HTTP method for efficient lookups
+    #[pyo3(get)]
+    get_router: MatchitRouter,
+    #[pyo3(get)]
+    post_router: MatchitRouter,
+    #[pyo3(get)]
+    put_router: MatchitRouter,
+    #[pyo3(get)]
+    delete_router: MatchitRouter,
+    #[pyo3(get)]
+    patch_router: MatchitRouter,
+    #[pyo3(get)]
+    head_router: MatchitRouter,
+    #[pyo3(get)]
+    options_router: MatchitRouter,
+}
+
+/// Wrapper around matchit::Router to make it Clone and PyO3 compatible
+#[derive(Clone, Default)]
+#[pyclass]
+pub struct MatchitRouter {
+    inner: matchit::Router<Route>,
+}
+
+impl MatchitRouter {
+    fn new() -> Self {
+        Self {
+            inner: matchit::Router::new(),
+        }
+    }
+
+    fn insert(&mut self, path: &str, route: Route) -> Result<(), matchit::InsertError> {
+        let matchit_path = convert_to_matchit_path(path);
+        self.inner.insert(&matchit_path, route)
+    }
+
+    fn at(&self, path: &str) -> Option<(Route, HashMap<String, String>)> {
+        match self.inner.at(path) {
+            Ok(matched) => {
+                let params: HashMap<String, String> = matched
+                    .params
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                Some((matched.value.clone(), params))
+            }
+            Err(_) => None,
+        }
+    }
+}
+
+impl Default for Router {
+    fn default() -> Self {
+        Self {
+            path: String::new(),
+            routes: Vec::new(),
+            get_router: MatchitRouter::new(),
+            post_router: MatchitRouter::new(),
+            put_router: MatchitRouter::new(),
+            delete_router: MatchitRouter::new(),
+            patch_router: MatchitRouter::new(),
+            head_router: MatchitRouter::new(),
+            options_router: MatchitRouter::new(),
+        }
+    }
 }
 
 #[pymethods]
@@ -24,8 +123,7 @@ impl Router {
     pub fn new(path: &str) -> Self {
         Self {
             path: path.to_string(),
-            routes: Vec::new(),
-            radix_tree: RadixNode::new(),
+            ..Default::default()
         }
     }
 
@@ -37,9 +135,22 @@ impl Router {
         }
 
         let full_path = self.get_full_path(&route.path);
+        let method = route.method.to_uppercase();
 
-        // Add to radix tree
-        self.radix_tree.insert(&full_path, route.clone());
+        // Add to appropriate matchit router
+        let router = match method.as_str() {
+            "GET" => &mut self.get_router,
+            "POST" => &mut self.post_router,
+            "PUT" => &mut self.put_router,
+            "DELETE" => &mut self.delete_router,
+            "PATCH" => &mut self.patch_router,
+            "HEAD" => &mut self.head_router,
+            "OPTIONS" => &mut self.options_router,
+            _ => return Err(PyValueError::new_err(format!("Unknown HTTP method: {}", method))),
+        };
+
+        router.insert(&full_path, route.clone())
+            .map_err(|e| PyValueError::new_err(format!("Failed to add route: {}", e)))?;
 
         // Keep the routes vector for backwards compatibility and iteration
         self.routes.push(route);
@@ -130,10 +241,19 @@ impl Router {
         path: &str,
         method: &str,
     ) -> Option<(Route, HashMap<String, String>)> {
-        if let Some((route, params)) = self.radix_tree.find(path, method) {
-            return Some((route.clone(), params));
-        }
-        None
+        let method = method.to_uppercase();
+        let router = match method.as_str() {
+            "GET" => &self.get_router,
+            "POST" => &self.post_router,
+            "PUT" => &self.put_router,
+            "DELETE" => &self.delete_router,
+            "PATCH" => &self.patch_router,
+            "HEAD" => &self.head_router,
+            "OPTIONS" => &self.options_router,
+            _ => return None,
+        };
+
+        router.at(path)
     }
 }
 

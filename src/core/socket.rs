@@ -33,7 +33,9 @@ impl SocketHeld {
         let keepalive = socket2::TcpKeepalive::new().with_time(Duration::from_secs(60));
         socket.set_keepalive(true)?;
         socket.set_tcp_keepalive(&keepalive)?;
-        socket.set_linger(Some(Duration::from_secs(0)))?; // Fast close
+        // Use a small linger timeout to allow graceful close
+        // This gives time for FIN/ACK handshake instead of RST
+        socket.set_linger(Some(Duration::from_secs(1)))?;
 
         // Set Increase buffer sizes
         socket.set_recv_buffer_size(256 * 1024)?; // 256KB

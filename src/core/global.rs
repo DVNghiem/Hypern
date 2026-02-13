@@ -3,6 +3,7 @@ use std::sync::{Arc, OnceLock};
 use tokio::sync::Semaphore;
 
 use crate::{
+    memory::pool::{RequestPool, ResponsePool},
     runtime::{init_runtime_mt, RuntimeWrapper},
     utils::cpu::num_cpus,
 };
@@ -13,6 +14,10 @@ static EV_LOOP: OnceLock<Py<PyAny>> = OnceLock::new();
 static SHARED_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 static CONN_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
 static RUNTIME: OnceLock<Arc<RuntimeWrapper>> = OnceLock::new();
+
+// Global memory pools for request/response buffer reuse
+static REQUEST_POOL: OnceLock<Arc<RequestPool>> = OnceLock::new();
+static RESPONSE_POOL: OnceLock<Arc<ResponsePool>> = OnceLock::new();
 
 pub fn get_asyncio(py: Python<'_>) -> &Py<PyModule> {
     ASYNCIO.get_or_init(|| py.import("asyncio").unwrap().into())
@@ -68,4 +73,61 @@ pub(crate) fn get_global_runtime() -> Arc<RuntimeWrapper> {
         .get()
         .expect("Global runtime not initialized")
         .clone()
+}
+
+/// Get the global request buffer pool for zero-allocation request parsing.
+/// Pool is initialized with sensible defaults on first access.
+pub fn get_request_pool() -> Arc<RequestPool> {
+    REQUEST_POOL
+        .get_or_init(|| {
+            let pool = RequestPool::new(
+                2048,   // max_size: 2K pooled buffers
+                16384,  // buffer_capacity: 16KB each
+            );
+            // Warm up the pool with some pre-allocated buffers
+            pool.buffers.warm(256);
+            Arc::new(pool)
+        })
+        .clone()
+}
+
+/// Get the global response buffer pool for zero-allocation response building.
+/// Pool is initialized with sensible defaults on first access.
+pub fn get_response_pool() -> Arc<ResponsePool> {
+    RESPONSE_POOL
+        .get_or_init(|| {
+            let pool = ResponsePool::new(
+                2048,  // max_size: 2K pooled buffers
+                8192,  // buffer_capacity: 8KB each
+            );
+            // Warm up the pool
+            pool.buffers.warm(256);
+            pool.header_buffers.warm(256);
+            Arc::new(pool)
+        })
+        .clone()
+}
+
+/// Initialize memory pools with custom sizes.
+/// Call this during application startup for optimal performance.
+pub fn init_memory_pools(
+    request_pool_size: usize,
+    request_buffer_capacity: usize,
+    response_pool_size: usize,
+    response_buffer_capacity: usize,
+) {
+    // Request pool
+    let _ = REQUEST_POOL.get_or_init(|| {
+        let pool = RequestPool::new(request_pool_size, request_buffer_capacity);
+        pool.buffers.warm(request_pool_size / 4);
+        Arc::new(pool)
+    });
+
+    // Response pool
+    let _ = RESPONSE_POOL.get_or_init(|| {
+        let pool = ResponsePool::new(response_pool_size, response_buffer_capacity);
+        pool.buffers.warm(response_pool_size / 4);
+        pool.header_buffers.warm(response_pool_size / 4);
+        Arc::new(pool)
+    });
 }

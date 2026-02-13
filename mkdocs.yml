@@ -1,0 +1,36 @@
+site_name: Hypern Documentation
+site_description: A Fast Async Python backend with a Rust runtime
+site_author: Martin Dang
+site_url: https://hypern.dev
+
+theme:
+  name: material
+
+plugins:
+  - search:
+      lang: en
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Core Concepts:
+      - Routing: routing.md
+      - Request & Response: request-response.md
+      - Middleware: middleware.md
+  - Features:
+      - Validation: validation.md
+      - Dependency Injection: dependency-injection.md
+      - Background Tasks: tasks.md
+      - Streaming & SSE: sse.md
+      - File Uploads: file-uploads.md
+      - Error Handling: error-handling.md
+  - Best Practices: best-practices.md
+  - Advanced:
+      - Database: database.md
+      - Performance Optimization: performance-optimization-plan.md
+  - User Guide: user-guide.md
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true

@@ -1,3 +1,4 @@
+use axum::http::Method;
 use pyo3::prelude::*;
 
 /// HTTP Method enum for fast matching
@@ -74,18 +75,36 @@ impl HttpMethod {
     }
 }
 
-impl From<&hyper::Method> for HttpMethod {
-    fn from(method: &hyper::Method) -> Self {
+impl From<&Method> for HttpMethod {
+    fn from(method: &axum::http::Method) -> Self {
         match *method {
-            hyper::Method::GET => HttpMethod::GET,
-            hyper::Method::POST => HttpMethod::POST,
-            hyper::Method::PUT => HttpMethod::PUT,
-            hyper::Method::DELETE => HttpMethod::DELETE,
-            hyper::Method::PATCH => HttpMethod::PATCH,
-            hyper::Method::HEAD => HttpMethod::HEAD,
-            hyper::Method::OPTIONS => HttpMethod::OPTIONS,
-            hyper::Method::CONNECT => HttpMethod::CONNECT,
-            hyper::Method::TRACE => HttpMethod::TRACE,
+            axum::http::Method::GET => HttpMethod::GET,
+            axum::http::Method::POST => HttpMethod::POST,
+            axum::http::Method::PUT => HttpMethod::PUT,
+            axum::http::Method::DELETE => HttpMethod::DELETE,
+            axum::http::Method::PATCH => HttpMethod::PATCH,
+            axum::http::Method::HEAD => HttpMethod::HEAD,
+            axum::http::Method::OPTIONS => HttpMethod::OPTIONS,
+            axum::http::Method::CONNECT => HttpMethod::CONNECT,
+            axum::http::Method::TRACE => HttpMethod::TRACE,
+            _ => HttpMethod::GET, // Fallback
+        }
+    }
+}
+
+impl HttpMethod {
+    /// Create HttpMethod from Axum's http::Method
+    pub fn from_axum(method: &axum::http::Method) -> Self {
+        match *method {
+            axum::http::Method::GET => HttpMethod::GET,
+            axum::http::Method::POST => HttpMethod::POST,
+            axum::http::Method::PUT => HttpMethod::PUT,
+            axum::http::Method::DELETE => HttpMethod::DELETE,
+            axum::http::Method::PATCH => HttpMethod::PATCH,
+            axum::http::Method::HEAD => HttpMethod::HEAD,
+            axum::http::Method::OPTIONS => HttpMethod::OPTIONS,
+            axum::http::Method::CONNECT => HttpMethod::CONNECT,
+            axum::http::Method::TRACE => HttpMethod::TRACE,
             _ => HttpMethod::GET, // Fallback
         }
     }

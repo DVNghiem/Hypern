@@ -17,7 +17,6 @@ use pyo3::prelude::*;
 // Helper modules (internal)
 pub use crate::core::runtime;
 pub use crate::core::socket;
-pub use crate::http::body;
 
 // Core performance modules
 pub mod core;
@@ -27,15 +26,32 @@ pub mod memory;
 pub mod middleware;
 pub mod routing;
 pub mod utils;
+pub mod database;
 
 // Re-exports for backward compatibility
 pub use crate::core::server::Server;
-pub use crate::http::headers::FastHeaders;
+pub use crate::http::headers::HeaderMap;
 pub use crate::http::request::Request;
 pub use crate::http::response::{Response, ResponseSlot};
+pub use crate::http::multipart::{FormData, UploadedFile};
 pub use crate::routing::cache::RouteCache;
 pub use crate::routing::route::Route;
 pub use crate::routing::router::Router;
+
+pub use crate::core::context::{Context, DIContainer};
+
+pub use crate::core::tasks::{TaskExecutor, TaskResult, TaskStatus};
+
+pub use crate::http::streaming::{SSEEvent, SSEStream, SSEGenerator, StreamingResponse};
+
+pub use crate::middleware::{
+    PyCorsMiddleware, PyRateLimitMiddleware, PySecurityHeadersMiddleware,
+    PyTimeoutMiddleware, PyCompressionMiddleware, PyRequestIdMiddleware,
+    PyLogMiddleware, PyBasicAuthMiddleware,
+};
+
+// Database exports
+pub use crate::database::{ConnectionPool, PoolConfig, PoolStatus, DbSession, get_db, finalize_db, finalize_db_all, RowStream};
 
 // Re-exports for internal use
 pub use fast_path::json_cache::JsonResponseCache;
@@ -43,17 +59,55 @@ pub use fast_path::static_files::StaticFileHandler;
 pub use memory::pool::{RequestPool, ResponsePool};
 
 #[pymodule(gil_used = false)]
-fn hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
+fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     // Original classes (backwards compatible)
     module.add_class::<Server>()?;
     module.add_class::<Route>()?;
     module.add_class::<Router>()?;
-
     module.add_class::<Response>()?;
 
-    // New performance classes
+    // Request handling
     module.add_class::<Request>()?;
-    module.add_class::<FastHeaders>()?;
+    module.add_class::<HeaderMap>()?;
+
+    // File uploads
+    module.add_class::<FormData>()?;
+    module.add_class::<UploadedFile>()?;
+
+    // Dependency Injection
+    module.add_class::<Context>()?;
+    module.add_class::<DIContainer>()?;
+
+    // Background Tasks
+    module.add_class::<TaskExecutor>()?;
+    module.add_class::<TaskResult>()?;
+    module.add_class::<TaskStatus>()?;
+
+    // Streaming/SSE
+    module.add_class::<SSEEvent>()?;
+    module.add_class::<SSEStream>()?;
+    module.add_class::<SSEGenerator>()?;
+    module.add_class::<StreamingResponse>()?;
+
+    // Rust Middleware 
+    module.add_class::<PyCorsMiddleware>()?;
+    module.add_class::<PyRateLimitMiddleware>()?;
+    module.add_class::<PySecurityHeadersMiddleware>()?;
+    module.add_class::<PyTimeoutMiddleware>()?;
+    module.add_class::<PyCompressionMiddleware>()?;
+    module.add_class::<PyRequestIdMiddleware>()?;
+    module.add_class::<PyLogMiddleware>()?;
+    module.add_class::<PyBasicAuthMiddleware>()?;
+
+    // Database
+    module.add_class::<ConnectionPool>()?;
+    module.add_class::<PoolConfig>()?;
+    module.add_class::<PoolStatus>()?;
+    module.add_class::<DbSession>()?;
+    module.add_class::<RowStream>()?;
+    module.add_function(wrap_pyfunction!(get_db, module)?)?;
+    module.add_function(wrap_pyfunction!(finalize_db, module)?)?;
+    module.add_function(wrap_pyfunction!(finalize_db_all, module)?)?;
 
     Ok(())
 }

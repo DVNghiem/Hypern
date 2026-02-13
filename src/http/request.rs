@@ -1,11 +1,11 @@
 use ahash::AHashMap;
 use bytes::Bytes;
-use http_body_util::BodyExt;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 use std::collections::HashMap;
 use std::sync::Arc;
-
+use xxhash_rust::xxh3::xxh3_64;
+use crate::http::headers::HeaderMap;
 use crate::http::method::HttpMethod;
 
 /// Query parameters with lazy parsing
@@ -39,44 +39,6 @@ impl QueryParams {
 
     pub fn get(&mut self, key: &str) -> Option<&String> {
         self.parse().get(key)
-    }
-}
-
-/// Fast header map using AHashMap for O(1) lookups
-#[derive(Clone, Debug, Default)]
-pub struct HeaderMap {
-    headers: AHashMap<String, String>,
-}
-
-impl HeaderMap {
-    pub fn new() -> Self {
-        Self {
-            headers: AHashMap::with_capacity(16),
-        }
-    }
-
-    pub fn from_hyper(headers: &hyper::HeaderMap) -> Self {
-        let mut map = AHashMap::with_capacity(headers.len());
-        for (key, value) in headers.iter() {
-            if let Ok(v) = value.to_str() {
-                map.insert(key.as_str().to_lowercase(), v.to_string());
-            }
-        }
-        Self { headers: map }
-    }
-
-    #[inline]
-    pub fn get(&self, key: &str) -> Option<&String> {
-        self.headers.get(&key.to_lowercase())
-    }
-
-    #[inline]
-    pub fn insert(&mut self, key: String, value: String) {
-        self.headers.insert(key.to_lowercase(), value);
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
-        self.headers.iter()
     }
 }
 
@@ -117,8 +79,6 @@ impl Request {
         query_string: &str,
         body: Option<Bytes>,
     ) -> Self {
-        use xxhash_rust::xxh3::xxh3_64;
-
         let path_arc = Arc::from(path);
         let route_hash = xxh3_64(path.as_bytes()) ^ (method as u64);
 
@@ -132,33 +92,6 @@ impl Request {
             body: parking_lot::RwLock::new(body),
             route_hash,
         }
-    }
-
-    pub async fn from_hyper(req: hyper::Request<hyper::body::Incoming>) -> Self {
-        use percent_encoding::percent_decode_str;
-
-        let (parts, body) = req.into_parts();
-
-        let (path, query_string) = parts.uri.path_and_query().map_or_else(
-            || ("/".to_string(), String::new()),
-            |pq| {
-                let path_bytes: Vec<u8> = percent_decode_str(pq.path()).collect();
-                (
-                    String::from_utf8_lossy(&path_bytes).to_string(),
-                    pq.query().unwrap_or("").to_string(),
-                )
-            },
-        );
-
-        let method = HttpMethod::from(&parts.method);
-        let headers = HeaderMap::from_hyper(&parts.headers);
-
-        let body_bytes = match body.collect().await {
-            Ok(collected) => Some(collected.to_bytes()),
-            Err(_) => None,
-        };
-
-        Self::new(&path, method, headers, &query_string, body_bytes)
     }
 
     #[inline]
@@ -241,6 +174,165 @@ impl Request {
         self.headers.get(name).cloned()
     }
 
+    pub fn accepts(&self, types: Vec<String>) -> Option<String> {
+        let accept = self.headers.get("accept")?;
+
+        for t in types {
+            let check = match t.to_lowercase().as_str() {
+                "html" => "text/html",
+                "json" => "application/json",
+                "xml" => "application/xml",
+                "text" => "text/plain",
+                _ => &t,
+            };
+
+            if accept.contains(check) || accept.contains("*/*") {
+                return Some(t);
+            }
+        }
+        None
+    }
+
+    pub fn accepts_json(&self) -> bool {
+        self.accepts(vec!["json".to_string()]).is_some()
+    }
+
+    pub fn accepts_html(&self) -> bool {
+        self.accepts(vec!["html".to_string()]).is_some()
+    }
+
+    #[getter]
+    pub fn ip(&self) -> Option<String> {
+        // Check X-Forwarded-For first (for proxies)
+        if let Some(forwarded) = self.headers.get("x-forwarded-for") {
+            return Some(forwarded.split(',').next()?.trim().to_string());
+        }
+        // Check X-Real-IP
+        if let Some(real_ip) = self.headers.get("x-real-ip") {
+            return Some(real_ip.clone());
+        }
+        None
+    }
+
+    pub fn ips(&self) -> Vec<String> {
+        if let Some(forwarded) = self.headers.get("x-forwarded-for") {
+            return forwarded.split(',').map(|s| s.trim().to_string()).collect();
+        }
+        Vec::new()
+    }
+
+    #[getter]
+    pub fn xhr(&self) -> bool {
+        self.headers
+            .get("x-requested-with")
+            .map(|v| v.to_lowercase() == "xmlhttprequest")
+            .unwrap_or(false)
+    }
+
+    #[getter]
+    pub fn secure(&self) -> bool {
+        // Check X-Forwarded-Proto header (for reverse proxies)
+        if let Some(proto) = self.headers.get("x-forwarded-proto") {
+            return proto.to_lowercase() == "https";
+        }
+        false
+    }
+
+    #[getter]
+    pub fn hostname(&self) -> Option<String> {
+        self.headers.get("host").map(|h| {
+            // Remove port if present
+            h.split(':').next().unwrap_or(h).to_string()
+        })
+    }
+
+    pub fn subdomains(&self) -> Vec<String> {
+        if let Some(hostname) = self.hostname() {
+            let parts: Vec<&str> = hostname.split('.').collect();
+            if parts.len() > 2 {
+                return parts[..parts.len() - 2]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+            }
+        }
+        Vec::new()
+    }
+
+    /// Get the full URL
+    #[getter]
+    pub fn url(&self) -> String {
+        if self.query_string.is_empty() {
+            self.path.to_string()
+        } else {
+            format!("{}?{}", self.path, self.query_string)
+        }
+    }
+
+    #[getter]
+    pub fn original_url(&self) -> String {
+        self.url()
+    }
+
+    #[getter]
+    pub fn protocol(&self) -> String {
+        if self.secure() {
+            "https".to_string()
+        } else {
+            "http".to_string()
+        }
+    }
+
+    pub fn fresh(&self, etag: Option<&str>, last_modified: Option<&str>) -> bool {
+        // Check If-None-Match (ETag)
+        if let Some(if_none_match) = self.headers.get("if-none-match") {
+            if let Some(etag) = etag {
+                if if_none_match == etag || if_none_match == "*" {
+                    return true;
+                }
+            }
+        }
+
+        if let Some(if_modified) = self.headers.get("if-modified-since") {
+            if let Some(lm) = last_modified {
+                if if_modified == lm {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    pub fn stale(&self, etag: Option<&str>, last_modified: Option<&str>) -> bool {
+        !self.fresh(etag, last_modified)
+    }
+
+    pub fn cookie(&self, name: &str) -> Option<String> {
+        let cookies = self.headers.get("cookie")?;
+        for cookie in cookies.split(';') {
+            let parts: Vec<&str> = cookie.trim().splitn(2, '=').collect();
+            if parts.len() == 2 && parts[0] == name {
+                return Some(parts[1].to_string());
+            }
+        }
+        None
+    }
+
+    /// Get all cookies as a map
+    pub fn cookies(&self) -> HashMap<String, String> {
+        let mut result = HashMap::new();
+        if let Some(cookies) = self.headers.get("cookie") {
+            for cookie in cookies.split(';') {
+                let parts: Vec<&str> = cookie.trim().splitn(2, '=').collect();
+                if parts.len() == 2 {
+                    result.insert(parts[0].to_string(), parts[1].to_string());
+                }
+            }
+        }
+        result
+    }
+
     #[getter(headers)]
     fn py_headers(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
         let dict = PyDict::new(py);
@@ -262,21 +354,8 @@ impl Request {
         let body = self.body.read();
         match body.as_ref() {
             Some(bytes) => {
-                let mut data = bytes.to_vec();
-                let json_str = Python::detach(py, move || {
-                    match simd_json::serde::from_slice::<serde_json::Value>(&mut data) {
-                        Ok(value) => serde_json::to_string(&value).map_err(|e| e.to_string()),
-                        Err(e) => Err(format!("JSON parse error: {}", e)),
-                    }
-                });
-
-                match json_str {
-                    Ok(s) => {
-                        let json_mod = py.import("json")?;
-                        json_mod.call_method1("loads", (s,))
-                    }
-                    Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e)),
-                }
+                let result = crate::utils::parse_json_to_py(py, bytes)?;
+                Ok(result.into_bound(py))
             }
             None => Ok(py.None().into_bound(py)),
         }
@@ -302,5 +381,84 @@ impl Request {
 
     pub fn is_multipart(&self) -> bool {
         self.is_content_type("multipart/")
+    }
+
+    pub fn form(&self) -> PyResult<crate::http::multipart::FormData> {
+        let body = self.body.read();
+        let body_bytes = body
+            .as_ref()
+            .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("No body data available"))?;
+
+        let content_type = self.content_type().unwrap_or_default();
+
+        if content_type.contains("multipart/form-data") {
+            // Parse multipart form data
+            if let Some(boundary) = crate::http::multipart::extract_boundary(&content_type) {
+                Ok(crate::http::multipart::parse_multipart(
+                    body_bytes, &boundary,
+                ))
+            } else {
+                Err(pyo3::exceptions::PyValueError::new_err(
+                    "Missing boundary in multipart content-type",
+                ))
+            }
+        } else if content_type.contains("application/x-www-form-urlencoded") {
+            // Parse URL-encoded form data
+            let mut form_data = crate::http::multipart::FormData::new();
+            let body_str = String::from_utf8_lossy(body_bytes);
+
+            for pair in form_urlencoded::parse(body_str.as_bytes()) {
+                form_data.add_field(pair.0.to_string(), pair.1.to_string());
+            }
+
+            Ok(form_data)
+        } else {
+            Err(pyo3::exceptions::PyValueError::new_err(
+                "Request content-type is not form data",
+            ))
+        }
+    }
+
+    pub fn file(&self, name: &str) -> PyResult<Option<crate::http::multipart::UploadedFile>> {
+        let form = self.form()?;
+        Ok(form.file(name))
+    }
+
+    pub fn files(&self) -> PyResult<Vec<crate::http::multipart::UploadedFile>> {
+        let form = self.form()?;
+        Ok(form.all_files())
+    }
+}
+
+impl Request {
+
+    pub async fn from_axum(req: axum::http::Request<axum::body::Body>) -> Self {
+        use axum::body::to_bytes;
+        use percent_encoding::percent_decode_str;
+
+        let (parts, body) = req.into_parts();
+
+        let (path, query_string) = parts.uri.path_and_query().map_or_else(
+            || ("/".to_string(), String::new()),
+            |pq| {
+                let path_bytes: Vec<u8> = percent_decode_str(pq.path()).collect();
+                (
+                    String::from_utf8_lossy(&path_bytes).to_string(),
+                    pq.query().unwrap_or("").to_string(),
+                )
+            },
+        );
+
+        let method = HttpMethod::from_axum(&parts.method);
+        let headers = HeaderMap::from_axum(&parts.headers);
+
+        // Collect body bytes using Axum's helper
+        let body_bytes = match to_bytes(body, 10 * 1024 * 1024).await {
+            // 10MB limit
+            Ok(bytes) => Some(bytes),
+            Err(_) => None,
+        };
+
+        Self::new(&path, method, headers, &query_string, body_bytes)
     }
 }

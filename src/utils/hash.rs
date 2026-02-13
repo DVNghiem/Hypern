@@ -1,5 +1,3 @@
-//! Fast hashing utilities using ahash and xxhash.
-
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
 use xxhash_rust::xxh3::xxh3_64;

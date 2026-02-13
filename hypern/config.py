@@ -1,16 +1,11 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import os
 
-# -*- coding: utf-8 -*-
-import threading
 import typing
 import warnings
-from contextvars import ContextVar
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
-
 """
 
 refer: https://github.com/encode/starlette/blob/master/starlette/config.py
@@ -153,94 +148,3 @@ class Config:
             return cast(value)
         except (TypeError, ValueError):
             raise ValueError(f"Config '{key}' has value '{value}'. Not a valid {cast.__name__}.")
-
-
-class ContextStore:
-    def __init__(self, cleanup_interval: int = 300, max_age: int = 3600):
-        """
-        Initialize ContextStore with automatic session cleanup.
-
-        :param cleanup_interval: Interval between cleanup checks (in seconds)
-        :param max_age: Maximum age of a session before it's considered expired (in seconds)
-        """
-        self._session_times: Dict[str, datetime] = {}
-        self.session_var = ContextVar("session_id", default=None)
-
-        self._max_age = max_age
-        self._cleanup_interval = cleanup_interval
-        self._cleanup_thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
-
-        # Start the cleanup thread
-        self._start_cleanup_thread()
-
-    def _start_cleanup_thread(self):
-        """Start a background thread for periodic session cleanup."""
-
-        def cleanup_worker():
-            while not self._stop_event.is_set():
-                self._perform_cleanup()
-                self._stop_event.wait(self._cleanup_interval)
-
-        self._cleanup_thread = threading.Thread(
-            target=cleanup_worker,
-            daemon=True,  # Allows the thread to be automatically terminated when the main program exits
-        )
-        self._cleanup_thread.start()
-
-    def _perform_cleanup(self):
-        """Perform cleanup of expired sessions."""
-        current_time = datetime.now()
-        expired_sessions = [
-            session_id for session_id, timestamp in list(self._session_times.items()) if (current_time - timestamp).total_seconds() > self._max_age
-        ]
-
-        for session_id in expired_sessions:
-            self.remove_session(session_id)
-
-    def remove_session(self, session_id: str):
-        """Remove a specific session."""
-        self._session_times.pop(session_id, None)
-
-    def set_context(self, session_id: str):
-        """
-        Context manager for setting and resetting session context.
-
-        :param session_id: Unique identifier for the session
-        :return: Context manager for session
-        """
-        self.session_var.set(session_id)
-        self._session_times[session_id] = datetime.now()
-
-    def get_context(self) -> str:
-        """
-        Get the current session context.
-
-        :return: Current session ID
-        :raises RuntimeError: If no session context is available
-        """
-        return self.session_var.get()
-
-    def reset_context(self):
-        """Reset the session context."""
-        token = self.get_context()
-        if token is not None:
-            self.session_var.reset(token)
-
-    def stop_cleanup(self):
-        """
-        Stop the cleanup thread.
-        Useful for graceful shutdown of the application.
-        """
-        self._stop_event.set()
-        if self._cleanup_thread:
-            self._cleanup_thread.join()
-
-    def __del__(self):
-        """
-        Ensure cleanup thread is stopped when the object is deleted.
-        """
-        self.stop_cleanup()
-
-
-context_store = ContextStore()

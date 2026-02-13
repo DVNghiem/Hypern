@@ -178,12 +178,12 @@ impl MiddlewareError {
 #[pyclass]
 #[derive(Clone)]
 pub struct MiddlewareContext {
-    // Request data (read-only after creation)
-    pub path: Arc<str>,
+    // Request data - now mutable to allow middleware modifications
+    pub path: Arc<RwLock<String>>,
     pub method: HttpMethod,
-    pub headers: Arc<HashMap<String, String>>,
-    pub query_string: Arc<str>,
-    pub query_params: Arc<HashMap<String, String>>,
+    pub headers: Arc<RwLock<HashMap<String, String>>>,
+    pub query_string: Arc<RwLock<String>>,
+    pub query_params: Arc<RwLock<HashMap<String, String>>>,
     pub path_params: Arc<RwLock<HashMap<String, String>>>,
     pub body: Arc<RwLock<Option<Bytes>>>,
 
@@ -262,7 +262,7 @@ impl StateValue {
 impl MiddlewareContext {
     #[getter]
     pub fn path(&self) -> String {
-        self.path.to_string()
+        self.path.read().clone()
     }
 
     #[getter]
@@ -272,7 +272,7 @@ impl MiddlewareContext {
 
     #[getter]
     pub fn query_string(&self) -> String {
-        self.query_string.to_string()
+        self.query_string.read().clone()
     }
 
     #[getter]
@@ -283,13 +283,37 @@ impl MiddlewareContext {
     /// Get a header value (case-insensitive)
     #[pyo3(name = "get_header")]
     pub fn get_header_py(&self, name: &str) -> Option<String> {
-        self.headers.get(&name.to_lowercase()).cloned()
+        self.headers.read().get(&name.to_lowercase()).cloned()
+    }
+
+    /// Set a header value
+    #[pyo3(name = "set_header")]
+    pub fn set_header_py(&self, name: String, value: String) {
+        self.headers.write().insert(name.to_lowercase(), value);
+    }
+
+    /// Remove a header
+    #[pyo3(name = "remove_header")]
+    pub fn remove_header_py(&self, name: &str) -> Option<String> {
+        self.headers.write().remove(&name.to_lowercase())
     }
 
     /// Get a query parameter
     #[pyo3(name = "get_query")]
     pub fn get_query_py(&self, name: &str) -> Option<String> {
-        self.query_params.get(name).cloned()
+        self.query_params.read().get(name).cloned()
+    }
+
+    /// Set a query parameter
+    #[pyo3(name = "set_query")]
+    pub fn set_query_py(&self, name: String, value: String) {
+        self.query_params.write().insert(name, value);
+    }
+
+    /// Remove a query parameter
+    #[pyo3(name = "remove_query")]
+    pub fn remove_query_py(&self, name: &str) -> Option<String> {
+        self.query_params.write().remove(name)
     }
 
     /// Get a path parameter
@@ -301,6 +325,36 @@ impl MiddlewareContext {
     #[pyo3(name = "set_param")]
     pub fn set_param_py(&self, name: String, value: String) {
         self.path_params.write().insert(name, value);
+    }
+
+    /// Set the request body
+    #[pyo3(name = "set_body")]
+    pub fn set_body_py(&self, body: Vec<u8>) {
+        *self.body.write() = Some(Bytes::from(body));
+    }
+
+    /// Set the request body from string
+    #[pyo3(name = "set_body_str")]
+    pub fn set_body_str_py(&self, body: String) {
+        *self.body.write() = Some(Bytes::from(body.into_bytes()));
+    }
+
+    /// Clear the request body
+    #[pyo3(name = "clear_body")]
+    pub fn clear_body_py(&self) {
+        *self.body.write() = None;
+    }
+
+    /// Set the request path
+    #[pyo3(name = "set_path")]
+    pub fn set_path_py(&self, path: String) {
+        *self.path.write() = path;
+    }
+
+    /// Set the query string
+    #[pyo3(name = "set_query_string")]
+    pub fn set_query_string_py(&self, query_string: String) {
+        *self.query_string.write() = query_string;
     }
 
     /// Add a response header (will be added to the final response)
@@ -384,11 +438,11 @@ impl MiddlewareContext {
         };
 
         Self {
-            path: Arc::from(path),
+            path: Arc::new(RwLock::new(path.to_string())),
             method,
-            headers: Arc::new(headers),
-            query_string: Arc::from(query_string),
-            query_params: Arc::new(query_params),
+            headers: Arc::new(RwLock::new(headers)),
+            query_string: Arc::new(RwLock::new(query_string.to_string())),
+            query_params: Arc::new(RwLock::new(query_params)),
             path_params: Arc::new(RwLock::new(HashMap::new())),
             body: Arc::new(RwLock::new(body)),
             state: Arc::new(RwLock::new(MiddlewareState::default())),
@@ -399,13 +453,35 @@ impl MiddlewareContext {
     }
 
     /// Get a header value (case-insensitive)
-    pub fn get_header(&self, name: &str) -> Option<&String> {
-        self.headers.get(&name.to_lowercase())
+    pub fn get_header(&self, name: &str) -> Option<String> {
+        self.headers.read().get(&name.to_lowercase()).cloned()
+    }
+
+    /// Set a header value
+    pub fn set_header(&self, name: impl Into<String>, value: impl Into<String>) {
+        self.headers
+            .write()
+            .insert(name.into().to_lowercase(), value.into());
+    }
+
+    /// Remove a header
+    pub fn remove_header(&self, name: &str) -> Option<String> {
+        self.headers.write().remove(&name.to_lowercase())
     }
 
     /// Get a query parameter
-    pub fn get_query(&self, name: &str) -> Option<&String> {
-        self.query_params.get(name)
+    pub fn get_query(&self, name: &str) -> Option<String> {
+        self.query_params.read().get(name).cloned()
+    }
+
+    /// Set a query parameter
+    pub fn set_query(&self, name: impl Into<String>, value: impl Into<String>) {
+        self.query_params.write().insert(name.into(), value.into());
+    }
+
+    /// Remove a query parameter
+    pub fn remove_query(&self, name: &str) -> Option<String> {
+        self.query_params.write().remove(name)
     }
 
     /// Set a path parameter
@@ -413,11 +489,51 @@ impl MiddlewareContext {
         self.path_params.write().insert(name.into(), value.into());
     }
 
+    /// Set the request body
+    pub fn set_body(&self, body: impl Into<Vec<u8>>) {
+        *self.body.write() = Some(Bytes::from(body.into()));
+    }
+
+    /// Set the request body from string
+    pub fn set_body_str(&self, body: impl Into<String>) {
+        *self.body.write() = Some(Bytes::from(body.into().into_bytes()));
+    }
+
+    /// Clear the request body
+    pub fn clear_body(&self) {
+        *self.body.write() = None;
+    }
+
+    /// Get the request path
+    pub fn get_path(&self) -> String {
+        self.path.read().clone()
+    }
+
+    /// Set the request path
+    pub fn set_path(&self, path: impl Into<String>) {
+        *self.path.write() = path.into();
+    }
+
+    /// Get the query string
+    pub fn get_query_string(&self) -> String {
+        self.query_string.read().clone()
+    }
+
+    /// Set the query string
+    pub fn set_query_string(&self, query_string: impl Into<String>) {
+        *self.query_string.write() = query_string.into();
+    }
+
     /// Add a response header (will be added to the final response)
     pub fn add_response_header(&self, name: impl Into<String>, value: impl Into<String>) {
         self.response_headers
             .write()
             .push((name.into(), value.into()));
+    }
+    
+    /// Get all response headers to be added
+    pub fn get_response_headers(&self) -> Vec<(String, String)> {
+        self.response_headers.read().clone()
     }
 
     /// Set a state value
@@ -546,7 +662,8 @@ impl MiddlewareChain {
     pub async fn execute_before(&self, ctx: &MiddlewareContext) -> MiddlewareResult {
         for middleware in &self.before {
             // Check if middleware applies to this request
-            if !middleware.applies_to(&ctx.path) || !middleware.applies_to_method(ctx.method) {
+            let path = ctx.get_path();
+            if !middleware.applies_to(&path) || !middleware.applies_to_method(ctx.method) {
                 continue;
             }
 
@@ -561,7 +678,8 @@ impl MiddlewareChain {
     /// Execute all "after" middleware in order
     pub async fn execute_after(&self, ctx: &MiddlewareContext) -> MiddlewareResult {
         for middleware in &self.after {
-            if !middleware.applies_to(&ctx.path) || !middleware.applies_to_method(ctx.method) {
+            let path = ctx.get_path();
+            if !middleware.applies_to(&path) || !middleware.applies_to_method(ctx.method) {
                 continue;
             }
 
@@ -593,8 +711,9 @@ impl MiddlewareChain {
             StateValue::Int(error.status as i64),
         );
 
+        let path = ctx.get_path();
         for handler in &self.error_handlers {
-            if !handler.applies_to(&ctx.path) {
+            if !handler.applies_to(&path) {
                 continue;
             }
 

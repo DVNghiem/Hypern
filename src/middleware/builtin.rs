@@ -143,7 +143,7 @@ impl RustMiddleware for CorsMiddleware {
         ctx: &'a MiddlewareContext,
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
         Box::pin(async move {
-            let origin = ctx.get_header("origin").cloned().unwrap_or_default();
+            let origin = ctx.get_header("origin").unwrap_or_default();
 
             // If no origin header, this is not a CORS request
             if origin.is_empty() {
@@ -420,11 +420,12 @@ impl RustMiddleware for RateLimitMiddleware {
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
         Box::pin(async move {
             // Skip certain paths
+            let path = ctx.get_path();
             if self
                 .config
                 .skip_paths
                 .iter()
-                .any(|p| ctx.path.starts_with(p))
+                .any(|p| path.starts_with(p))
             {
                 return MiddlewareResult::Continue();
             }
@@ -554,18 +555,18 @@ impl RustMiddleware for LogMiddleware {
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
         Box::pin(async move {
             // Skip certain paths
+            let path = ctx.get_path();
             if self
                 .config
                 .skip_paths
                 .iter()
-                .any(|p| ctx.path.starts_with(p))
+                .any(|p| path.starts_with(p))
             {
                 return MiddlewareResult::Continue();
             }
 
             // Log the request (this runs before handler)
             let method = ctx.method.as_str();
-            let path = &ctx.path;
             let request_id = &ctx.request_id;
 
             // Use tracing for structured logging
@@ -577,7 +578,8 @@ impl RustMiddleware for LogMiddleware {
             );
 
             if self.config.log_headers {
-                for (key, value) in ctx.headers.iter() {
+                let headers = ctx.headers.read();
+                for (key, value) in headers.iter() {
                     tracing::debug!(
                         request_id = %request_id,
                         header_name = %key,
@@ -619,11 +621,12 @@ impl RustMiddleware for LogAfterMiddleware {
         ctx: &'a MiddlewareContext,
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
         Box::pin(async move {
+            let path = ctx.get_path();
             if self
                 .config
                 .skip_paths
                 .iter()
-                .any(|p| ctx.path.starts_with(p))
+                .any(|p| path.starts_with(p))
             {
                 return MiddlewareResult::Continue();
             }
@@ -687,7 +690,6 @@ impl RustMiddleware for RequestIdMiddleware {
         Box::pin(async move {
             let request_id = if self.trust_incoming {
                 ctx.get_header(&self.header_name.to_lowercase())
-                    .cloned()
                     .unwrap_or_else(|| ctx.request_id.to_string())
             } else {
                 ctx.request_id.to_string()
@@ -918,7 +920,6 @@ impl RustMiddleware for CompressionMiddleware {
             // Check Accept-Encoding header
             let accept_encoding = ctx
                 .get_header("accept-encoding")
-                .cloned()
                 .unwrap_or_default();
 
             let supports_gzip = accept_encoding.contains("gzip");
@@ -1022,7 +1023,7 @@ impl RustMiddleware for BasicAuthMiddleware {
                 }
             };
 
-            let (username, password) = match self.decode_basic_auth(auth_header) {
+            let (username, password) = match self.decode_basic_auth(&auth_header) {
                 Some(creds) => creds,
                 None => {
                     return MiddlewareResult::Response(MiddlewareResponse::unauthorized(

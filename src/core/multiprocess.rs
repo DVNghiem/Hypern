@@ -6,7 +6,7 @@ use crate::middleware::MiddlewareChain;
 use crate::routing::router::Router;
 use crate::socket::SocketHeld;
 
-/// Spawn worker processes using fork()
+/// Spawn worker processes using fork() - Now uses Axum
 #[cfg(unix)]
 pub fn spawn_workers(
     py: Python<'_>,
@@ -40,10 +40,10 @@ pub fn spawn_workers(
                     panic!("Failed to fork worker {}", worker_id);
                 }
                 0 => {
-                    // Child process
+                    // Child process - use Axum worker
                     use crate::core::worker::run_worker;
 
-                    // Run the worker (this blocks forever)
+                    // Run the Axum worker (this blocks forever)
                     let _ = run_worker(
                         py,
                         socket_held.try_clone().expect("Failed to open socket"),
@@ -61,7 +61,7 @@ pub fn spawn_workers(
                 child_pid => {
                     // Parent process
                     child_pids.push(child_pid);
-                    info!("Spawned worker {} with PID {}", worker_id + 1, child_pid);
+                    info!("Spawned Axum worker {} with PID {}", worker_id + 1, child_pid);
                 }
             }
         }
@@ -70,13 +70,51 @@ pub fn spawn_workers(
     child_pids
 }
 
-/// Wait for all worker processes
 #[cfg(unix)]
 pub fn wait_for_workers(pids: &[libc::pid_t]) {
+    use std::time::{Duration, Instant};
+    
+    let start = Instant::now();
+    let timeout = Duration::from_secs(5); // 5 second timeout
+    
     for &pid in pids {
-        unsafe {
-            let mut status: libc::c_int = 0;
-            libc::waitpid(pid, &mut status, 0);
+        let remaining = timeout.saturating_sub(start.elapsed());
+        
+        if remaining.is_zero() {
+            tracing::warn!("Timeout waiting for worker {}, force killing", pid);
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+                let mut status: libc::c_int = 0;
+                libc::waitpid(pid, &mut status, 0);
+            }
+        } else {
+            // Try to wait with remaining time
+            let mut waited = false;
+            let check_start = Instant::now();
+            
+            while check_start.elapsed() < remaining {
+                unsafe {
+                    let mut status: libc::c_int = 0;
+                    let result = libc::waitpid(pid, &mut status, libc::WNOHANG);
+                    if result == pid {
+                        waited = true;
+                        break;
+                    } else if result == -1 {
+                        waited = true;
+                        break;
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            
+            if !waited {
+                tracing::warn!("Worker {} did not exit gracefully, force killing", pid);
+                unsafe {
+                    libc::kill(pid, libc::SIGKILL);
+                    let mut status: libc::c_int = 0;
+                    libc::waitpid(pid, &mut status, 0);
+                }
+            }
         }
     }
 }
@@ -91,9 +129,11 @@ pub fn terminate_workers(pids: &[libc::pid_t]) {
     }
 }
 
-/// Non-Unix stub for spawn_workers
+/// Non-Unix implementation for spawn_workers using threads
+/// On Windows and other non-Unix platforms, we use threads instead of fork()
 #[cfg(not(unix))]
 pub fn spawn_workers(
+    py: Python<'_>,
     socket_held: SocketHeld,
     num_workers: usize,
     worker_threads: usize,
@@ -102,18 +142,140 @@ pub fn spawn_workers(
     router: Arc<Router>,
     middleware: Arc<MiddlewareChain>,
     handlers: Vec<(u64, Py<PyAny>)>,
-) -> Vec<i32> {
-    panic!("Multiprocess mode is only supported on Unix systems");
+) -> Vec<std::thread::JoinHandle<()>> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+
+    info!(
+        "Starting {} thread-based workers (non-Unix mode)",
+        num_workers
+    );
+
+    // Shared counter for load balancing
+    static WORKER_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    let mut handles = Vec::with_capacity(num_workers);
+
+    for worker_id in 0..num_workers {
+        // Clone all necessary data for the thread
+        let socket = socket_held.try_clone().expect("Failed to clone socket");
+        let router = router.clone();
+        let middleware = middleware.clone();
+        
+        // Clone handlers with GIL
+        let handlers_clone: Vec<(u64, Py<PyAny>)> = Python::attach(|inner_py| {
+            handlers
+                .iter()
+                .map(|(h, p)| (*h, p.clone_ref(inner_py)))
+                .collect()
+        });
+
+        let handle = thread::Builder::new()
+            .name(format!("hypern-worker-{}", worker_id))
+            .spawn(move || {
+                // Register handlers for this thread
+                for (hash, handler) in handlers_clone {
+                    crate::core::interpreter::register_handler(hash, handler);
+                }
+
+                // Build and run the Tokio runtime for this worker
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(worker_threads)
+                    .max_blocking_threads(max_blocking_threads)
+                    .enable_all()
+                    .thread_name(format!("hypern-{}-tokio", worker_id))
+                    .build()
+                    .expect("Failed to create Tokio runtime");
+
+                rt.block_on(async {
+                    use axum::Router as AxumRouter;
+                    use axum::routing::any;
+                    use std::net::TcpListener;
+                    use tokio::net::TcpListener as TokioListener;
+
+                    // Convert socket to TcpListener
+                    let std_listener: TcpListener = socket.into();
+                    std_listener
+                        .set_nonblocking(true)
+                        .expect("Failed to set non-blocking");
+
+                    let listener = TokioListener::from_std(std_listener)
+                        .expect("Failed to create Tokio listener");
+
+                    info!("Thread worker {} listening", worker_id);
+
+                    // Build Axum router with handler
+                    let router_arc = router.clone();
+                    let middleware_arc = middleware.clone();
+
+                    let app = AxumRouter::new()
+                        .route(
+                            "/{*path}",
+                            any(move |req: axum::extract::Request| {
+                                let router = router_arc.clone();
+                                let middleware = middleware_arc.clone();
+                                async move {
+                                    crate::core::worker::handle_request(
+                                        req,
+                                        router,
+                                        middleware,
+                                    )
+                                    .await
+                                }
+                            }),
+                        )
+                        .route(
+                            "/",
+                            any(move |req: axum::extract::Request| {
+                                let router = router.clone();
+                                let middleware = middleware.clone();
+                                async move {
+                                    crate::core::worker::handle_request(
+                                        req,
+                                        router,
+                                        middleware,
+                                    )
+                                    .await
+                                }
+                            }),
+                        );
+
+                    // Serve with connection limits
+                    let server = axum::serve(listener, app)
+                        .with_graceful_shutdown(async {
+                            // Wait for shutdown signal
+                            tokio::signal::ctrl_c()
+                                .await
+                                .expect("Failed to install Ctrl+C handler");
+                            info!("Worker {} received shutdown signal", worker_id);
+                        });
+
+                    if let Err(e) = server.await {
+                        tracing::error!("Worker {} server error: {}", worker_id, e);
+                    }
+                });
+            })
+            .expect("Failed to spawn worker thread");
+
+        handles.push(handle);
+        info!("Spawned thread worker {} (thread-based)", worker_id + 1);
+    }
+
+    handles
 }
 
-/// Non-Unix stub for wait_for_workers  
+/// Wait for all worker threads to complete
 #[cfg(not(unix))]
-pub fn wait_for_workers(pids: &[i32]) {
-    panic!("Multiprocess mode is only supported on Unix systems");
+pub fn wait_for_workers(handles: Vec<std::thread::JoinHandle<()>>) {
+    for handle in handles {
+        let _ = handle.join();
+    }
 }
 
-/// Non-Unix stub for terminate_workers
+/// On non-Unix platforms, we use a different type for worker handles
 #[cfg(not(unix))]
-pub fn terminate_workers(pids: &[i32]) {
-    panic!("Multiprocess mode is only supported on Unix systems");
+pub fn terminate_workers(_handles: &[std::thread::JoinHandle<()>]) {
+    // Threads don't support external termination in the same way as processes
+    // The graceful shutdown will be handled by the Ctrl+C handler
+    info!("Requesting graceful shutdown of thread workers");
 }

@@ -1,0 +1,489 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
+
+
+class Request:
+    pass
+
+class Response:
+    def status(self, status: int) -> Response: ...
+    def header(self, key: str, value: str) -> Response: ...
+    def body(self, body: bytes) -> Response: ...
+    def body_str(self, body: str) -> Response: ...
+    def finish(self) -> None: ...
+    # ExpressJS-like methods
+    def send(self, data: str | bytes) -> Response: ...
+    def json(self, data: Any) -> Response: ...
+    def html(self, content: str) -> Response: ...
+    def text(self, content: str) -> Response: ...
+    def xml(self, content: str) -> Response: ...
+    def redirect(self, url: str, status: int = 302) -> Response: ...
+    def cookie(self, name: str, value: str, **options: Any) -> Response: ...
+    def clear_cookie(self, name: str) -> Response: ...
+    def cache_control(self, **directives: Any) -> Response: ...
+    def cors(self, **options: Any) -> Response: ...
+    def attachment(self, filename: Optional[str] = None) -> Response: ...
+    def content_type(self, mime_type: str) -> Response: ...
+    def vary(self, header: str) -> Response: ...
+    def etag(self, value: str) -> Response: ...
+    def location(self, url: str) -> Response: ...
+    def links(self, links: Dict[str, str]) -> Response: ...
+    # SSE/Streaming methods
+    def sse(self, events: List["SSEEvent"]) -> Response: ...
+    def sse_event(self, data: str, event: Optional[str] = None, id: Optional[str] = None) -> Response: ...
+    def sse_headers(self) -> Response: ...
+    
+@dataclass
+class Server:
+    router: Router
+    websocket_router: Any
+    startup_handler: Any
+    shutdown_handler: Any
+
+    def add_route(self, route: Route) -> None: ...
+    def set_router(self, router: Router) -> None: ...
+    def use_middleware(self, middleware: Any) -> None: ...
+    def start(self, host: str, port: int, num_processes: int, workers_threads: int, max_blocking_threads: int, max_connections: int) -> None: ...
+    def enable_http2(self) -> None: ...
+
+class Route:
+    path: str
+    function: Callable[[Request, Response], Any]
+    method: str
+    doc: str | None = None
+
+    def matches(self, path: str, method: str) -> str: ...
+    def clone_route(self) -> Route: ...
+    def update_path(self, new_path: str) -> None: ...
+    def update_method(self, new_method: str) -> None: ...
+    def is_valid(self) -> bool: ...
+    def get_path_parans(self) -> List[str]: ...
+    def has_parameters(self) -> bool: ...
+    def normalized_path(self) -> str: ...
+    def same_handler(self, other: Route) -> bool: ...
+
+class Router:
+    routes: List[Route]
+
+    def add_route(self, route: Route) -> None: ...
+    def remove_route(self, path: str, method: str) -> bool: ...
+    def get_route(self, path: str, method) -> Route | None: ...
+    def get_routes_by_path(self, path: str) -> List[Route]: ...
+    def get_routes_by_method(self, method: str) -> List[Route]: ...
+    def extend_route(self, routes: List[Route]) -> None: ...
+
+@dataclass
+class SocketHeld:
+    socket: Any
+
+@dataclass
+class HeaderMap:
+
+    def get(self, key: str) -> str | None: ...
+    def get_all(self, key: str) -> List[str]: ...
+    def keys(self) -> List[str]: ...
+    def values(self) -> List[str]: ...
+    def items(self) -> Dict[str, str]: ...
+
+class Context:
+    """Request-scoped dependency injection context."""
+    user_id: Optional[str]
+    is_authenticated: bool
+    request_id: str
+    
+    def __init__(self) -> None: ...
+    def set(self, key: str, value: Any) -> None: ...
+    def get(self, key: str) -> Any: ...
+    def has(self, key: str) -> bool: ...
+    def remove(self, key: str) -> bool: ...
+    def keys(self) -> List[str]: ...
+    def set_auth(self, user_id: str, roles: Optional[List[str]] = None) -> None: ...
+    def clear_auth(self) -> None: ...
+    def has_role(self, role: str) -> bool: ...
+    def elapsed_ms(self) -> float: ...
+
+class DIContainer:
+    
+    def __init__(self) -> None: ...
+    def singleton(self, name: str, value: Any) -> None: ...
+    def factory(self, name: str, factory: Callable[[], Any]) -> None: ...
+    def get_singleton(self, name: str) -> Any: ...
+    def create_context(self) -> Context: ...
+    def has(self, name: str) -> bool: ...
+    def remove(self, name: str) -> bool: ...
+
+class TaskStatus(Enum):
+    Pending = ...
+    Running = ...
+    Completed = ...
+    Failed = ...
+    Cancelled = ...
+
+class TaskResult:
+    """Result of a background task."""
+    task_id: str
+    status: TaskStatus
+    result: Optional[str]
+    error: Optional[str]
+    started_at: Optional[float]
+    completed_at: Optional[float]
+    
+    def is_success(self) -> bool: ...
+    def is_failed(self) -> bool: ...
+    def is_pending(self) -> bool: ...
+
+class TaskExecutor:
+    """Background task executor with worker pool."""
+    
+    def __init__(self, num_workers: int = 4, queue_size: int = 1000) -> None: ...
+    def submit(
+        self, 
+        handler: Callable[..., Any], 
+        args: tuple = (),
+        delay_seconds: Optional[float] = None
+    ) -> str: ...
+    def get_result(self, task_id: str) -> Optional[TaskResult]: ...
+    def cancel(self, task_id: str) -> bool: ...
+    def pending_count(self) -> int: ...
+    def completed_count(self) -> int: ...
+    def shutdown(self, wait: bool = True) -> None: ...
+
+class SSEEvent:
+    """Server-Sent Event."""
+    id: Optional[str]
+    event: Optional[str]
+    data: str
+    retry: Optional[int]
+    
+    def __init__(
+        self, 
+        data: str, 
+        id: Optional[str] = None, 
+        event: Optional[str] = None,
+        retry: Optional[int] = None
+    ) -> None: ...
+    def format(self) -> str: ...
+    def to_bytes(self) -> bytes: ...
+
+class SSEStream:
+    """SSE stream for sending events to clients."""
+    
+    def __init__(self, buffer_size: int = 100) -> None: ...
+    def send(self, event: SSEEvent) -> bool: ...
+    def send_data(self, data: str) -> bool: ...
+    def send_event(self, event_name: str, data: str) -> bool: ...
+    def keepalive(self) -> bool: ...
+    def close(self) -> None: ...
+    def is_closed(self) -> bool: ...
+    def event_count(self) -> int: ...
+
+class StreamingResponse:
+    """Streaming response for large data transfers."""
+    content_type: str
+    
+    def __init__(self, buffer_size: int = 100, content_type: str = "application/octet-stream") -> None: ...
+    def write(self, data: bytes) -> bool: ...
+    def write_str(self, data: str) -> bool: ...
+    def write_line(self, data: str) -> bool: ...
+    def flush(self) -> None: ...
+    def close(self) -> None: ...
+    def is_closed(self) -> bool: ...
+
+
+class CorsMiddleware:
+    """
+    CORS middleware - handles Cross-Origin Resource Sharing.
+    
+    Implemented in Rust for high performance.
+    """
+    def __init__(
+        self,
+        allowed_origins: Optional[List[str]] = None,
+        allowed_methods: Optional[List[str]] = None,
+        allowed_headers: Optional[List[str]] = None,
+        expose_headers: Optional[List[str]] = None,
+        allow_credentials: bool = False,
+        max_age: int = 86400
+    ) -> None: ...
+    
+    @staticmethod
+    def permissive() -> CorsMiddleware: ...
+
+
+class RateLimitMiddleware:
+    """
+    Rate limiting middleware with multiple algorithms.
+    
+    Implemented in Rust for high performance.
+    """
+    def __init__(
+        self,
+        max_requests: int = 100,
+        window_secs: int = 60,
+        algorithm: str = "sliding",
+        key_header: Optional[str] = None,
+        skip_paths: Optional[List[str]] = None
+    ) -> None: ...
+
+
+class SecurityHeadersMiddleware:
+    """
+    Security headers middleware.
+    
+    Adds security headers like HSTS, CSP, X-Frame-Options, etc.
+    """
+    def __init__(
+        self,
+        hsts: bool = True,
+        hsts_max_age: int = 31536000,
+        frame_options: str = "DENY",
+        content_type_options: bool = True,
+        xss_protection: bool = True,
+        csp: Optional[str] = None
+    ) -> None: ...
+    
+    @staticmethod
+    def strict() -> SecurityHeadersMiddleware: ...
+
+
+class TimeoutMiddleware:
+    """
+    Request timeout middleware.
+    
+    Enforces request timeout at the Rust/Tokio level.
+    """
+    def __init__(self, timeout_secs: int = 30) -> None: ...
+
+
+class CompressionMiddleware:
+    """
+    Response compression middleware.
+    
+    Compresses response bodies using gzip based on Accept-Encoding.
+    """
+    def __init__(self, min_size: int = 1024) -> None: ...
+
+
+class RequestIdMiddleware:
+    """
+    Request ID middleware.
+    
+    Adds a unique request ID to each request for tracing.
+    """
+    def __init__(self, header_name: str = "X-Request-ID") -> None: ...
+
+
+class LogMiddleware:
+    """
+    Request logging middleware.
+    
+    Logs incoming requests using Rust's tracing infrastructure.
+    """
+    def __init__(
+        self,
+        level: str = "info",
+        log_headers: bool = False,
+        skip_paths: Optional[List[str]] = None
+    ) -> None: ...
+    
+    @staticmethod
+    def default_logger() -> LogMiddleware: ...
+
+
+class BasicAuthMiddleware:
+    """
+    HTTP Basic Authentication middleware.
+    
+    Implements HTTP Basic Authentication with username/password pairs.
+    """
+    def __init__(
+        self,
+        realm: str = "Restricted",
+        users: Optional[Dict[str, str]] = None
+    ) -> None: ...
+
+
+class PoolConfig:
+    """Configuration for the database connection pool."""
+    url: str
+    max_size: int
+    min_idle: Optional[int]
+    connect_timeout_secs: int
+    idle_timeout_secs: Optional[int]
+    max_lifetime_secs: Optional[int]
+    test_before_acquire: bool
+    keepalive_secs: Optional[int]
+    
+    def __init__(
+        self,
+        url: str,
+        max_size: int = 16,
+        min_idle: Optional[int] = None,
+        connect_timeout_secs: int = 30,
+        idle_timeout_secs: Optional[int] = None,
+        max_lifetime_secs: Optional[int] = None,
+        test_before_acquire: bool = False,
+        keepalive_secs: Optional[int] = None,
+    ) -> None: ...
+
+
+class PoolStatus:
+    """Status information about the connection pool."""
+    size: int
+    available: int
+    max_size: int
+
+
+class ConnectionPool:
+    """Static connection pool manager."""
+    
+    def __init__(self) -> None: ...
+    
+    @staticmethod
+    def initialize(config: PoolConfig) -> None:
+        """Initialize the connection pool with the given configuration."""
+        ...
+    
+    @staticmethod
+    def status() -> Optional[PoolStatus]:
+        """Get the current pool status."""
+        ...
+    
+    @staticmethod
+    def is_initialized() -> bool:
+        """Check if the connection pool is initialized."""
+        ...
+    
+    @staticmethod
+    def close() -> None:
+        """Close all connections and reset the pool."""
+        ...
+
+    @staticmethod
+    def status_for_alias(alias: str) -> Optional[PoolStatus]:
+        """Get the current pool status for a specific alias."""
+        ...
+
+    @staticmethod
+    def close_all() -> None:
+        """Close all connections and reset all pools for all aliases."""
+        ...
+
+    @staticmethod
+    def close_alias(alias: str) -> None:
+        """Close all connections and reset the pool for a specific alias."""
+        ...
+
+    @staticmethod
+    def initialize_with_alias(config: PoolConfig, alias: str) -> None:
+        """Initialize the connection pool for a specific alias with the given configuration."""
+        ...
+
+
+class DbSession:
+    """
+    Request-scoped database session.
+    
+    Provides methods for executing SQL queries within a request context.
+    """
+    request_id: str
+    
+    def begin(self) -> None:
+        """Begin a database transaction."""
+        ...
+    
+    def commit(self) -> None:
+        """Commit the current transaction."""
+        ...
+    
+    def rollback(self) -> None:
+        """Rollback the current transaction."""
+        ...
+    
+    def query(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
+        """Execute a SELECT query and return results as list of dicts."""
+        ...
+    
+    def query_one(self, sql: str, params: Optional[List[Any]] = None) -> Dict[str, Any]:
+        """Execute a SELECT query and return a single result as dict."""
+        ...
+    
+    def execute(self, sql: str, params: Optional[List[Any]] = None) -> int:
+        """Execute INSERT, UPDATE, DELETE and return affected row count."""
+        ...
+    
+    def execute_many(self, sql: str, params_list: List[List[Any]]) -> int:
+        """Execute a batch of INSERT/UPDATE/DELETE statements."""
+        ...
+    
+    def set_auto_commit(self, auto_commit: bool) -> None:
+        """Set auto-commit behavior."""
+        ...
+    
+    def set_error(self) -> None:
+        """Mark that an error occurred (triggers rollback on finalize)."""
+        ...
+    
+    def state(self) -> str:
+        """Get current state as string."""
+        ...
+
+
+class RowStream:
+    """
+    Streaming row iterator that yields chunks of rows lazily.
+    
+    This allows Python to iterate over large result sets without loading everything into memory.
+    Use in a for loop to iterate over chunks.
+    
+    Example:
+        stream = transaction.stream_data("SELECT * FROM large_table", [], chunk_size=1000)
+        for chunk in stream:
+            for row in chunk:
+                process(row)
+    """
+    
+    def __iter__(self) -> "RowStream":
+        """Return the iterator."""
+        ...
+    
+    def __next__(self) -> List[Dict[str, Any]]:
+        """Get the next chunk of rows."""
+        ...
+    
+    def is_exhausted(self) -> bool:
+        """Check if the stream is exhausted."""
+        ...
+    
+    def chunk_count(self) -> int:
+        """Get the total number of chunks (available after streaming completes)."""
+        ...
+
+
+def get_db(request_id: str) -> DbSession:
+    """
+    Get or create a database session for the given request ID.
+    
+    Deprecated: Use db() from hypern.database instead.
+    """
+    ...
+
+
+def finalize_db(request_id: str) -> None:
+    """
+    Finalize the database session for a request.
+    
+    Commits or rolls back any pending transaction and releases the connection.
+    """
+    ...
+
+def finalize_db_all(request_id: str) -> None:
+    """
+    Finalize all database sessions for a request across all aliases.
+    
+    Commits or rolls back any pending transactions and releases all connections.
+    """
+    ...

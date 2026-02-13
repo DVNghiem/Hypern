@@ -1,6 +1,7 @@
 use crate::core::global::{get_asyncio, get_global_runtime};
 use crate::http::request::Request;
 use crate::http::response::{Response, ResponseSlot};
+use crate::memory::arena::reset_arena;
 use crate::runtime::future_into_py;
 use dashmap::DashMap;
 use pyo3::prelude::*;
@@ -43,7 +44,7 @@ fn get_handler(py: Python, route_hash: u64) -> Option<Py<PyAny>> {
 pub async fn http_execute(
     route_hash: u64,
     request: Request,
-) -> hyper::Response<crate::body::HTTPResponseBody> {
+) -> axum::response::Response {
     let response_slot = ResponseSlot::new();
     let (tx, rx) = tokio::sync::oneshot::channel();
 
@@ -54,7 +55,7 @@ pub async fn http_execute(
             warn!("No handler found for hash: {}", route_hash);
             response_slot.set_status(404);
             response_slot.set_body(b"Not Found".to_vec());
-            return response_slot.into_hyper_response();
+            return response_slot.into_response();
         }
     };
 
@@ -82,6 +83,9 @@ pub async fn http_execute(
             (handler, args)
         },
         move || {
+            // Reset the thread-local arena after each request
+            // This releases all temporary allocations efficiently
+            reset_arena();
             let _ = tx.send(());
         },
     );
@@ -89,5 +93,5 @@ pub async fn http_execute(
     // Wait for completion via oneshot
     let _ = rx.await;
 
-    response_slot.into_hyper_response()
+    response_slot.into_response()
 }
