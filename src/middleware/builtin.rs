@@ -421,12 +421,7 @@ impl RustMiddleware for RateLimitMiddleware {
         Box::pin(async move {
             // Skip certain paths
             let path = ctx.get_path();
-            if self
-                .config
-                .skip_paths
-                .iter()
-                .any(|p| path.starts_with(p))
-            {
+            if self.config.skip_paths.iter().any(|p| path.starts_with(p)) {
                 return MiddlewareResult::Continue();
             }
 
@@ -556,12 +551,7 @@ impl RustMiddleware for LogMiddleware {
         Box::pin(async move {
             // Skip certain paths
             let path = ctx.get_path();
-            if self
-                .config
-                .skip_paths
-                .iter()
-                .any(|p| path.starts_with(p))
-            {
+            if self.config.skip_paths.iter().any(|p| path.starts_with(p)) {
                 return MiddlewareResult::Continue();
             }
 
@@ -622,12 +612,7 @@ impl RustMiddleware for LogAfterMiddleware {
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
         Box::pin(async move {
             let path = ctx.get_path();
-            if self
-                .config
-                .skip_paths
-                .iter()
-                .any(|p| path.starts_with(p))
-            {
+            if self.config.skip_paths.iter().any(|p| path.starts_with(p)) {
                 return MiddlewareResult::Continue();
             }
 
@@ -918,9 +903,7 @@ impl RustMiddleware for CompressionMiddleware {
     ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
         Box::pin(async move {
             // Check Accept-Encoding header
-            let accept_encoding = ctx
-                .get_header("accept-encoding")
-                .unwrap_or_default();
+            let accept_encoding = ctx.get_header("accept-encoding").unwrap_or_default();
 
             let supports_gzip = accept_encoding.contains("gzip");
             let supports_deflate = accept_encoding.contains("deflate");

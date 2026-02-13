@@ -61,7 +61,11 @@ pub fn spawn_workers(
                 child_pid => {
                     // Parent process
                     child_pids.push(child_pid);
-                    info!("Spawned Axum worker {} with PID {}", worker_id + 1, child_pid);
+                    info!(
+                        "Spawned Axum worker {} with PID {}",
+                        worker_id + 1,
+                        child_pid
+                    );
                 }
             }
         }
@@ -73,13 +77,13 @@ pub fn spawn_workers(
 #[cfg(unix)]
 pub fn wait_for_workers(pids: &[libc::pid_t]) {
     use std::time::{Duration, Instant};
-    
+
     let start = Instant::now();
     let timeout = Duration::from_secs(5); // 5 second timeout
-    
+
     for &pid in pids {
         let remaining = timeout.saturating_sub(start.elapsed());
-        
+
         if remaining.is_zero() {
             tracing::warn!("Timeout waiting for worker {}, force killing", pid);
             unsafe {
@@ -91,7 +95,7 @@ pub fn wait_for_workers(pids: &[libc::pid_t]) {
             // Try to wait with remaining time
             let mut waited = false;
             let check_start = Instant::now();
-            
+
             while check_start.elapsed() < remaining {
                 unsafe {
                     let mut status: libc::c_int = 0;
@@ -106,7 +110,7 @@ pub fn wait_for_workers(pids: &[libc::pid_t]) {
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
-            
+
             if !waited {
                 tracing::warn!("Worker {} did not exit gracefully, force killing", pid);
                 unsafe {
@@ -161,7 +165,7 @@ pub fn spawn_workers(
         let socket = socket_held.try_clone().expect("Failed to clone socket");
         let router = router.clone();
         let middleware = middleware.clone();
-        
+
         // Clone handlers with GIL
         let handlers_clone: Vec<(u64, Py<PyAny>)> = Python::attach(|inner_py| {
             handlers
@@ -188,8 +192,8 @@ pub fn spawn_workers(
                     .expect("Failed to create Tokio runtime");
 
                 rt.block_on(async {
-                    use axum::Router as AxumRouter;
                     use axum::routing::any;
+                    use axum::Router as AxumRouter;
                     use std::net::TcpListener;
                     use tokio::net::TcpListener as TokioListener;
 
@@ -215,12 +219,8 @@ pub fn spawn_workers(
                                 let router = router_arc.clone();
                                 let middleware = middleware_arc.clone();
                                 async move {
-                                    crate::core::worker::handle_request(
-                                        req,
-                                        router,
-                                        middleware,
-                                    )
-                                    .await
+                                    crate::core::worker::handle_request(req, router, middleware)
+                                        .await
                                 }
                             }),
                         )
@@ -230,25 +230,20 @@ pub fn spawn_workers(
                                 let router = router.clone();
                                 let middleware = middleware.clone();
                                 async move {
-                                    crate::core::worker::handle_request(
-                                        req,
-                                        router,
-                                        middleware,
-                                    )
-                                    .await
+                                    crate::core::worker::handle_request(req, router, middleware)
+                                        .await
                                 }
                             }),
                         );
 
                     // Serve with connection limits
-                    let server = axum::serve(listener, app)
-                        .with_graceful_shutdown(async {
-                            // Wait for shutdown signal
-                            tokio::signal::ctrl_c()
-                                .await
-                                .expect("Failed to install Ctrl+C handler");
-                            info!("Worker {} received shutdown signal", worker_id);
-                        });
+                    let server = axum::serve(listener, app).with_graceful_shutdown(async {
+                        // Wait for shutdown signal
+                        tokio::signal::ctrl_c()
+                            .await
+                            .expect("Failed to install Ctrl+C handler");
+                        info!("Worker {} received shutdown signal", worker_id);
+                    });
 
                     if let Err(e) = server.await {
                         tracing::error!("Worker {} server error: {}", worker_id, e);

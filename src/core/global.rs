@@ -81,8 +81,8 @@ pub fn get_request_pool() -> Arc<RequestPool> {
     REQUEST_POOL
         .get_or_init(|| {
             let pool = RequestPool::new(
-                2048,   // max_size: 2K pooled buffers
-                16384,  // buffer_capacity: 16KB each
+                2048,  // max_size: 2K pooled buffers
+                16384, // buffer_capacity: 16KB each
             );
             // Warm up the pool with some pre-allocated buffers
             pool.buffers.warm(256);
@@ -97,8 +97,8 @@ pub fn get_response_pool() -> Arc<ResponsePool> {
     RESPONSE_POOL
         .get_or_init(|| {
             let pool = ResponsePool::new(
-                2048,  // max_size: 2K pooled buffers
-                8192,  // buffer_capacity: 8KB each
+                2048, // max_size: 2K pooled buffers
+                8192, // buffer_capacity: 8KB each
             );
             // Warm up the pool
             pool.buffers.warm(256);

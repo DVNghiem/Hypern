@@ -58,7 +58,9 @@ impl DatabaseTransaction {
         let transaction = self.transaction.clone();
         let operations = self.operations.clone();
         let result = futures::executor::block_on(async move {
-            operations.stream_data(py, transaction, query, params, chunk_size).await
+            operations
+                .stream_data(py, transaction, query, params, chunk_size)
+                .await
         })?;
         Ok(result)
     }
@@ -73,7 +75,9 @@ impl DatabaseTransaction {
         let transaction = self.transaction.clone();
         let operations = self.operations.clone();
         let result = futures::executor::block_on(async move {
-            operations.bulk_change(py, transaction, query, params, batch_size).await
+            operations
+                .bulk_change(py, transaction, query, params, batch_size)
+                .await
         })?;
         Ok(result)
     }

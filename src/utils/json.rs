@@ -5,9 +5,7 @@ use serde_json::Value as JsonValue;
 pub fn json_value_to_py(py: Python<'_>, value: &JsonValue) -> PyResult<Py<PyAny>> {
     match value {
         JsonValue::Null => Ok(py.None()),
-        JsonValue::Bool(b) => {
-            Ok(PyBool::new(py, *b).to_owned().into_any().unbind())
-        }
+        JsonValue::Bool(b) => Ok(PyBool::new(py, *b).to_owned().into_any().unbind()),
         JsonValue::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Ok(i.into_pyobject(py)?.into_any().unbind())
@@ -84,7 +82,9 @@ pub fn py_to_json_value(obj: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
             return Ok(JsonValue::String(s));
         }
         // Fallback: convert to hex or just use lossy
-        return Ok(JsonValue::String(String::from_utf8_lossy(&bytes).to_string()));
+        return Ok(JsonValue::String(
+            String::from_utf8_lossy(&bytes).to_string(),
+        ));
     }
 
     // Dict
@@ -147,20 +147,23 @@ pub fn parse_json_to_py(py: Python<'_>, bytes: &[u8]) -> PyResult<Py<PyAny>> {
 /// Uses simd_json for serialization where possible.
 pub fn serialize_py_to_json(obj: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
     let value = py_to_json_value(obj)?;
-    serde_json::to_vec(&value)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("JSON serialization error: {}", e)))
+    serde_json::to_vec(&value).map_err(|e| {
+        pyo3::exceptions::PyValueError::new_err(format!("JSON serialization error: {}", e))
+    })
 }
 
 /// Serialize Python object to JSON string.
 pub fn serialize_py_to_json_string(obj: &Bound<'_, PyAny>) -> PyResult<String> {
     let value = py_to_json_value(obj)?;
-    serde_json::to_string(&value)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("JSON serialization error: {}", e)))
+    serde_json::to_string(&value).map_err(|e| {
+        pyo3::exceptions::PyValueError::new_err(format!("JSON serialization error: {}", e))
+    })
 }
 
 /// Serialize Python object to pretty-printed JSON string.
 pub fn serialize_py_to_json_pretty(obj: &Bound<'_, PyAny>) -> PyResult<String> {
     let value = py_to_json_value(obj)?;
-    serde_json::to_string_pretty(&value)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("JSON serialization error: {}", e)))
+    serde_json::to_string_pretty(&value).map_err(|e| {
+        pyo3::exceptions::PyValueError::new_err(format!("JSON serialization error: {}", e))
+    })
 }

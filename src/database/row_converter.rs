@@ -1,13 +1,12 @@
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Datelike, Timelike};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use pyo3::prelude::*;
 use pyo3::types::{
-    PyBool, PyDate, PyDateAccess, PyDateTime, PyDict, PyList, 
-    PyTime, PyTimeAccess, PyBytes,
+    PyBool, PyBytes, PyDate, PyDateAccess, PyDateTime, PyDict, PyList, PyTime, PyTimeAccess,
 };
 use rust_decimal::Decimal;
 use serde_json::Value as JsonValue;
-use tokio_postgres::Row;
 use tokio_postgres::types::{ToSql, Type};
+use tokio_postgres::Row;
 
 /// Wrapper for dynamic PostgreSQL parameters that implements ToSql
 #[derive(Debug)]
@@ -46,14 +45,12 @@ impl ToSql for DynParam {
                     _ => v.to_sql(ty, out),
                 }
             }
-            DynParam::I32(v) => {
-                match *ty {
-                    Type::INT2 => (*v as i16).to_sql(ty, out),
-                    Type::INT4 => v.to_sql(ty, out),
-                    Type::INT8 => (*v as i64).to_sql(ty, out),
-                    _ => v.to_sql(ty, out),
-                }
-            }
+            DynParam::I32(v) => match *ty {
+                Type::INT2 => (*v as i16).to_sql(ty, out),
+                Type::INT4 => v.to_sql(ty, out),
+                Type::INT8 => (*v as i64).to_sql(ty, out),
+                _ => v.to_sql(ty, out),
+            },
             DynParam::I64(v) => {
                 // Coerce to target integer type
                 match *ty {
@@ -131,54 +128,42 @@ impl RowConverter {
     /// Convert a PostgreSQL row to a Python dictionary
     pub fn row_to_py_dict(py: Python<'_>, row: &Row) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
-        
+
         for (i, column) in row.columns().iter().enumerate() {
             let name = column.name();
             let ty = column.type_();
-            
+
             let value: Py<PyAny> = match *ty {
-                Type::BOOL => {
-                    match row.try_get::<_, Option<bool>>(i) {
-                        Ok(Some(v)) => PyBool::new(py, v).to_owned().into_any().unbind(),
-                        Ok(None) => py.None(),
-                        Err(_) => py.None(),
-                    }
-                }
-                Type::INT2 => {
-                    match row.try_get::<_, Option<i16>>(i) {
-                        Ok(Some(v)) => v.into_pyobject(py)?.into_any().unbind(),
-                        Ok(None) => py.None(),
-                        Err(_) => py.None(),
-                    }
-                }
-                Type::INT4 => {
-                    match row.try_get::<_, Option<i32>>(i) {
-                        Ok(Some(v)) => v.into_pyobject(py)?.into_any().unbind(),
-                        Ok(None) => py.None(),
-                        Err(_) => py.None(),
-                    }
-                }
-                Type::INT8 => {
-                    match row.try_get::<_, Option<i64>>(i) {
-                        Ok(Some(v)) => v.into_pyobject(py)?.into_any().unbind(),
-                        Ok(None) => py.None(),
-                        Err(_) => py.None(),
-                    }
-                }
-                Type::FLOAT4 => {
-                    match row.try_get::<_, Option<f32>>(i) {
-                        Ok(Some(v)) => v.into_pyobject(py)?.into_any().unbind(),
-                        Ok(None) => py.None(),
-                        Err(_) => py.None(),
-                    }
-                }
-                Type::FLOAT8 => {
-                    match row.try_get::<_, Option<f64>>(i) {
-                        Ok(Some(v)) => v.into_pyobject(py)?.into_any().unbind(),
-                        Ok(None) => py.None(),
-                        Err(_) => py.None(),
-                    }
-                }
+                Type::BOOL => match row.try_get::<_, Option<bool>>(i) {
+                    Ok(Some(v)) => PyBool::new(py, v).to_owned().into_any().unbind(),
+                    Ok(None) => py.None(),
+                    Err(_) => py.None(),
+                },
+                Type::INT2 => match row.try_get::<_, Option<i16>>(i) {
+                    Ok(Some(v)) => v.into_pyobject(py)?.into_any().unbind(),
+                    Ok(None) => py.None(),
+                    Err(_) => py.None(),
+                },
+                Type::INT4 => match row.try_get::<_, Option<i32>>(i) {
+                    Ok(Some(v)) => v.into_pyobject(py)?.into_any().unbind(),
+                    Ok(None) => py.None(),
+                    Err(_) => py.None(),
+                },
+                Type::INT8 => match row.try_get::<_, Option<i64>>(i) {
+                    Ok(Some(v)) => v.into_pyobject(py)?.into_any().unbind(),
+                    Ok(None) => py.None(),
+                    Err(_) => py.None(),
+                },
+                Type::FLOAT4 => match row.try_get::<_, Option<f32>>(i) {
+                    Ok(Some(v)) => v.into_pyobject(py)?.into_any().unbind(),
+                    Ok(None) => py.None(),
+                    Err(_) => py.None(),
+                },
+                Type::FLOAT8 => match row.try_get::<_, Option<f64>>(i) {
+                    Ok(Some(v)) => v.into_pyobject(py)?.into_any().unbind(),
+                    Ok(None) => py.None(),
+                    Err(_) => py.None(),
+                },
                 Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME => {
                     match row.try_get::<_, Option<String>>(i) {
                         Ok(Some(v)) => v.into_pyobject(py)?.into_any().unbind(),
@@ -186,72 +171,64 @@ impl RowConverter {
                         Err(_) => py.None(),
                     }
                 }
-                Type::BYTEA => {
-                    match row.try_get::<_, Option<Vec<u8>>>(i) {
-                        Ok(Some(v)) => PyBytes::new(py, &v).into_any().unbind(),
-                        Ok(None) => py.None(),
-                        Err(_) => py.None(),
-                    }
-                }
-                Type::DATE => {
-                    match row.try_get::<_, Option<NaiveDate>>(i) {
-                        Ok(Some(v)) => {
-                            PyDate::new(py, v.year(), v.month() as u8, v.day() as u8)?
-                                .into_any().unbind()
-                        }
-                        Ok(None) => py.None(),
-                        Err(_) => py.None(),
-                    }
-                }
-                Type::TIME => {
-                    match row.try_get::<_, Option<NaiveTime>>(i) {
-                        Ok(Some(v)) => {
-                            PyTime::new(
-                                py,
-                                v.hour() as u8,
-                                v.minute() as u8,
-                                v.second() as u8,
-                                v.nanosecond() / 1000,
-                                None,
-                            )?.into_any().unbind()
-                        }
-                        Ok(None) => py.None(),
-                        Err(_) => py.None(),
-                    }
-                }
+                Type::BYTEA => match row.try_get::<_, Option<Vec<u8>>>(i) {
+                    Ok(Some(v)) => PyBytes::new(py, &v).into_any().unbind(),
+                    Ok(None) => py.None(),
+                    Err(_) => py.None(),
+                },
+                Type::DATE => match row.try_get::<_, Option<NaiveDate>>(i) {
+                    Ok(Some(v)) => PyDate::new(py, v.year(), v.month() as u8, v.day() as u8)?
+                        .into_any()
+                        .unbind(),
+                    Ok(None) => py.None(),
+                    Err(_) => py.None(),
+                },
+                Type::TIME => match row.try_get::<_, Option<NaiveTime>>(i) {
+                    Ok(Some(v)) => PyTime::new(
+                        py,
+                        v.hour() as u8,
+                        v.minute() as u8,
+                        v.second() as u8,
+                        v.nanosecond() / 1000,
+                        None,
+                    )?
+                    .into_any()
+                    .unbind(),
+                    Ok(None) => py.None(),
+                    Err(_) => py.None(),
+                },
                 Type::TIMESTAMP | Type::TIMESTAMPTZ => {
                     match row.try_get::<_, Option<NaiveDateTime>>(i) {
-                        Ok(Some(v)) => {
-                            PyDateTime::new(
-                                py,
-                                v.year(),
-                                v.month() as u8,
-                                v.day() as u8,
-                                v.hour() as u8,
-                                v.minute() as u8,
-                                v.second() as u8,
-                                v.nanosecond() / 1000,
-                                None,
-                            )?.into_any().unbind()
-                        }
+                        Ok(Some(v)) => PyDateTime::new(
+                            py,
+                            v.year(),
+                            v.month() as u8,
+                            v.day() as u8,
+                            v.hour() as u8,
+                            v.minute() as u8,
+                            v.second() as u8,
+                            v.nanosecond() / 1000,
+                            None,
+                        )?
+                        .into_any()
+                        .unbind(),
                         Ok(None) => py.None(),
                         Err(_) => py.None(),
                     }
                 }
-                Type::JSON | Type::JSONB => {
-                    match row.try_get::<_, Option<JsonValue>>(i) {
-                        Ok(Some(v)) => Self::json_to_py(py, &v)?,
-                        Ok(None) => py.None(),
-                        Err(_) => py.None(),
-                    }
-                }
+                Type::JSON | Type::JSONB => match row.try_get::<_, Option<JsonValue>>(i) {
+                    Ok(Some(v)) => Self::json_to_py(py, &v)?,
+                    Ok(None) => py.None(),
+                    Err(_) => py.None(),
+                },
                 Type::NUMERIC => {
                     // Handle NUMERIC/DECIMAL - convert to string first, then to Python Decimal
                     match row.try_get::<_, Option<Decimal>>(i) {
                         Ok(Some(v)) => {
                             // Convert to Python Decimal for precision
                             let decimal_module = py.import("decimal")?;
-                            let py_decimal = decimal_module.call_method1("Decimal", (v.to_string(),))?;
+                            let py_decimal =
+                                decimal_module.call_method1("Decimal", (v.to_string(),))?;
                             py_decimal.into_any().unbind()
                         }
                         Ok(None) => py.None(),
@@ -274,10 +251,10 @@ impl RowConverter {
                     }
                 }
             };
-            
+
             dict.set_item(name, value)?;
         }
-        
+
         Ok(dict.into_any().unbind())
     }
 
@@ -314,12 +291,9 @@ impl RowConverter {
     }
 
     /// Convert Python parameters to DynParam list
-    pub fn convert_params_from_py(
-        py: Python<'_>,
-        params: &[Py<PyAny>],
-    ) -> PyResult<Vec<DynParam>> {
+    pub fn convert_params_from_py(py: Python<'_>, params: &[Py<PyAny>]) -> PyResult<Vec<DynParam>> {
         let mut result: Vec<DynParam> = Vec::with_capacity(params.len());
-        
+
         for param in params {
             let param = param.bind(py);
             let dyn_param = if param.is_none() {
@@ -339,22 +313,22 @@ impl RowConverter {
                         dt.get_year(),
                         dt.get_month() as u32,
                         dt.get_day() as u32,
-                    ).unwrap(),
+                    )
+                    .unwrap(),
                     NaiveTime::from_hms_nano_opt(
                         dt.get_hour() as u32,
                         dt.get_minute() as u32,
                         dt.get_second() as u32,
                         dt.get_microsecond() * 1000,
-                    ).unwrap(),
+                    )
+                    .unwrap(),
                 );
                 DynParam::Timestamp(naive)
             } else if param.is_instance_of::<PyDate>() {
                 let d = param.cast::<PyDate>()?;
-                let naive = NaiveDate::from_ymd_opt(
-                    d.get_year(),
-                    d.get_month() as u32,
-                    d.get_day() as u32,
-                ).unwrap();
+                let naive =
+                    NaiveDate::from_ymd_opt(d.get_year(), d.get_month() as u32, d.get_day() as u32)
+                        .unwrap();
                 DynParam::Date(naive)
             } else if param.is_instance_of::<PyTime>() {
                 let t = param.cast::<PyTime>()?;
@@ -363,14 +337,15 @@ impl RowConverter {
                     t.get_minute() as u32,
                     t.get_second() as u32,
                     t.get_microsecond() * 1000,
-                ).unwrap();
+                )
+                .unwrap();
                 DynParam::Time(naive)
             } else if param.is_instance_of::<PyDict>() || param.is_instance_of::<PyList>() {
                 // Convert dict/list to JSON properly using Python's json module
                 let json_module = py.import("json")?;
                 let json_str: String = json_module.call_method1("dumps", (param,))?.extract()?;
-                let json_value: JsonValue = serde_json::from_str(&json_str)
-                    .unwrap_or(JsonValue::Null);
+                let json_value: JsonValue =
+                    serde_json::from_str(&json_str).unwrap_or(JsonValue::Null);
                 DynParam::Json(json_value)
             } else if let Ok(bytes) = param.extract::<Vec<u8>>() {
                 DynParam::Bytes(bytes)
@@ -379,10 +354,10 @@ impl RowConverter {
                 let s = param.str()?.to_string();
                 DynParam::Text(s)
             };
-            
+
             result.push(dyn_param);
         }
-        
+
         Ok(result)
     }
 }

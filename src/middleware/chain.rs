@@ -530,7 +530,7 @@ impl MiddlewareContext {
             .write()
             .push((name.into(), value.into()));
     }
-    
+
     /// Get all response headers to be added
     pub fn get_response_headers(&self) -> Vec<(String, String)> {
         self.response_headers.read().clone()

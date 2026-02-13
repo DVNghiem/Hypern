@@ -34,27 +34,21 @@ impl RowStream {
     fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
-    
+
     fn __next__(&self, py: Python<'_>) -> Option<Vec<Py<PyAny>>> {
         let chunks = self.chunks.clone();
         let current_index = self.current_index.clone();
         let exhausted = self.exhausted.clone();
-        
-        let chunks_guard = futures::executor::block_on(async {
-            chunks.lock().await
-        });
-        let mut index = futures::executor::block_on(async {
-            current_index.lock().await
-        });
-        let mut is_exhausted = futures::executor::block_on(async {
-            exhausted.lock().await
-        });
-        
+
+        let chunks_guard = futures::executor::block_on(async { chunks.lock().await });
+        let mut index = futures::executor::block_on(async { current_index.lock().await });
+        let mut is_exhausted = futures::executor::block_on(async { exhausted.lock().await });
+
         if *index >= chunks_guard.len() {
             *is_exhausted = true;
             return None;
         }
-        
+
         let chunk: Vec<Py<PyAny>> = chunks_guard[*index]
             .iter()
             .map(|item| item.clone_ref(py))
@@ -62,17 +56,13 @@ impl RowStream {
         *index += 1;
         Some(chunk)
     }
-    
+
     fn is_exhausted(&self) -> bool {
-        futures::executor::block_on(async {
-            *self.exhausted.lock().await
-        })
+        futures::executor::block_on(async { *self.exhausted.lock().await })
     }
-    
+
     fn chunk_count(&self) -> usize {
-        futures::executor::block_on(async {
-            self.chunks.lock().await.len()
-        })
+        futures::executor::block_on(async { self.chunks.lock().await.len() })
     }
 }
 
@@ -89,14 +79,12 @@ impl RowStream {
 pub struct ParameterBinder;
 
 impl ParameterBinder {
-
     fn bind_parameters<'q>(
         &self,
         py: Python<'_>,
         query: &'q str,
         params: Vec<Py<PyAny>>,
     ) -> Result<sqlx::query::Query<'q, sqlx::Postgres, PgArguments>, PyErr> {
-
         let mut query_builder = sqlx::query(query);
 
         for param in params {
@@ -162,10 +150,9 @@ impl ParameterBinder {
                 return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
                     "Unsupported parameter type: {:?}",
                     p.get_type()
-                )))
+                )));
             };
         }
-        
 
         Ok(query_builder)
     }
@@ -235,15 +222,13 @@ impl ParameterBinder {
                             })?;
 
                             dict.set_item(column_name, json_str)?;
-                        }
-                        else if let Ok(str_array) = row.try_get::<Vec<String>, _>(i) {
+                        } else if let Ok(str_array) = row.try_get::<Vec<String>, _>(i) {
                             let py_list = PyList::new(py, &str_array)?;
                             dict.set_item(column_name, py_list)?;
                         } else if let Ok(int_array) = row.try_get::<Vec<i32>, _>(i) {
                             let py_list = PyList::new(py, &int_array)?;
                             dict.set_item(column_name, py_list)?;
-                        }
-                        else {
+                        } else {
                             dict.set_item(column_name, py.None())?;
                         }
                     }
@@ -262,7 +247,6 @@ impl ParameterBinder {
 pub struct DatabaseOperations;
 
 impl DatabaseOperations {
-
     pub async fn execute(
         &self,
         py: Python<'_>,
@@ -289,7 +273,6 @@ impl DatabaseOperations {
         query: &str,
         params: Vec<Py<PyAny>>,
     ) -> Result<Vec<Py<PyAny>>, PyErr> {
-
         let query_builder = ParameterBinder.bind_parameters(py, query, params)?;
         let mut guard = transaction.lock().await;
         let transaction = guard.as_mut().unwrap();
@@ -361,7 +344,8 @@ impl DatabaseOperations {
         // Process in batches
         for chunk in params.chunks(batch_size) {
             for param_set in chunk {
-                let cloned_params: Vec<Py<PyAny>> = param_set.iter().map(|p| p.clone_ref(py)).collect();
+                let cloned_params: Vec<Py<PyAny>> =
+                    param_set.iter().map(|p| p.clone_ref(py)).collect();
                 let query_builder = ParameterBinder.bind_parameters(py, query, cloned_params)?;
                 let result = query_builder.execute(&mut **tx).await.map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())

@@ -1,7 +1,6 @@
 use ahash::AHashMap;
 use pyo3::prelude::*;
 
-
 #[pyclass]
 pub struct HeaderMap {
     headers: AHashMap<String, String>,
@@ -9,7 +8,6 @@ pub struct HeaderMap {
 
 #[pymethods]
 impl HeaderMap {
-
     #[new]
     pub fn new() -> Self {
         Self {
@@ -47,7 +45,6 @@ impl HeaderMap {
 }
 
 impl HeaderMap {
-
     pub fn from_axum(headers: &axum::http::HeaderMap) -> Self {
         let mut map = AHashMap::with_capacity(headers.len());
         for (key, value) in headers.iter() {
@@ -58,7 +55,7 @@ impl HeaderMap {
         Self { headers: map }
     }
 
-     pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
         self.headers.iter()
     }
 }

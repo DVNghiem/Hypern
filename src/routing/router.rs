@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 fn convert_to_matchit_path(path: &str) -> String {
     let mut result = String::with_capacity(path.len() + 4);
     let mut chars = path.chars().peekable();
-    
+
     while let Some(c) = chars.next() {
         if c == ':' {
             // Convert :param to {param}
@@ -36,7 +36,7 @@ fn convert_to_matchit_path(path: &str) -> String {
             result.push(c);
         }
     }
-    
+
     result
 }
 
@@ -146,10 +146,16 @@ impl Router {
             "PATCH" => &mut self.patch_router,
             "HEAD" => &mut self.head_router,
             "OPTIONS" => &mut self.options_router,
-            _ => return Err(PyValueError::new_err(format!("Unknown HTTP method: {}", method))),
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown HTTP method: {}",
+                    method
+                )))
+            }
         };
 
-        router.insert(&full_path, route.clone())
+        router
+            .insert(&full_path, route.clone())
             .map_err(|e| PyValueError::new_err(format!("Failed to add route: {}", e)))?;
 
         // Keep the routes vector for backwards compatibility and iteration

@@ -41,10 +41,7 @@ fn get_handler(py: Python, route_hash: u64) -> Option<Py<PyAny>> {
     registry.get(&route_hash).map(|entry| entry.0.clone_ref(py))
 }
 
-pub async fn http_execute(
-    route_hash: u64,
-    request: Request,
-) -> axum::response::Response {
+pub async fn http_execute(route_hash: u64, request: Request) -> axum::response::Response {
     let response_slot = ResponseSlot::new();
     let (tx, rx) = tokio::sync::oneshot::channel();
 

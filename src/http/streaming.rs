@@ -49,32 +49,32 @@ impl SSEEvent {
     /// Format as SSE wire format
     pub fn format(&self) -> String {
         let mut output = String::with_capacity(self.data.len() + 50);
-        
+
         if let Some(ref id) = self.id {
             output.push_str("id: ");
             output.push_str(id);
             output.push('\n');
         }
-        
+
         if let Some(ref event) = self.event {
             output.push_str("event: ");
             output.push_str(event);
             output.push('\n');
         }
-        
+
         if let Some(retry) = self.retry {
             output.push_str("retry: ");
             output.push_str(&retry.to_string());
             output.push('\n');
         }
-        
+
         // Data can be multiline - each line needs "data: " prefix
         for line in self.data.lines() {
             output.push_str("data: ");
             output.push_str(line);
             output.push('\n');
         }
-        
+
         output.push('\n'); // End of event
         output
     }
@@ -141,7 +141,7 @@ impl SSEStream {
     pub fn py_new(buffer_size: usize) -> Self {
         let (sender, _receiver) = mpsc::channel(buffer_size);
         let closed = Arc::new(AtomicBool::new(false));
-        
+
         Self {
             sender,
             closed,
@@ -149,7 +149,7 @@ impl SSEStream {
             body_handle: None,
         }
     }
-    
+
     /// Send an SSE event
     pub fn send(&self, event: &SSEEvent) -> PyResult<bool> {
         if self.closed.load(Ordering::SeqCst) {
@@ -218,16 +218,16 @@ impl SSEBody {
     pub fn new(buffer_size: usize) -> (SSEStream, Self) {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let closed = Arc::new(AtomicBool::new(false));
-        
+
         let stream = SSEStream {
             sender,
             closed: closed.clone(),
             event_count: AtomicU64::new(0),
             body_handle: None,
         };
-        
+
         let body = Self { receiver, closed };
-        
+
         (stream, body)
     }
 }
@@ -274,14 +274,14 @@ impl StreamingResponse {
     pub fn py_new(content_type: &str, buffer_size: usize) -> Self {
         let (sender, _receiver) = mpsc::channel(buffer_size);
         let closed = Arc::new(AtomicBool::new(false));
-        
+
         Self {
             sender,
             closed,
             content_type: content_type.to_string(),
         }
     }
-    
+
     /// Write bytes to the stream
     pub fn write(&self, data: Vec<u8>) -> PyResult<bool> {
         if self.closed.load(Ordering::SeqCst) {
@@ -339,15 +339,15 @@ impl StreamingBody {
     pub fn new(buffer_size: usize, content_type: impl Into<String>) -> (StreamingResponse, Self) {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let closed = Arc::new(AtomicBool::new(false));
-        
+
         let response = StreamingResponse {
             sender,
             closed: closed.clone(),
             content_type: content_type.into(),
         };
-        
+
         let body = Self { receiver, closed };
-        
+
         (response, body)
     }
 }
@@ -380,7 +380,7 @@ pub fn sse_headers() -> Vec<(String, String)> {
 
 /// Generator-based SSE stream that consumes Python iterators/generators
 /// for memory-efficient event streaming.
-/// 
+///
 /// This approach allows streaming millions of events without loading them
 /// all into memory at once.
 #[pyclass]
@@ -420,20 +420,23 @@ impl Default for SSEGenerator {
 
 /// Converts a Python iterator/generator into SSE-formatted bytes.
 /// Uses arena allocation for efficient string building.
-/// 
+///
 /// # Arguments
 /// * `py` - Python GIL token
 /// * `iterator` - Python iterator yielding SSEEvent objects
-/// 
+///
 /// # Returns
 /// A Vec of formatted SSE bytes for each event in the iterator
-pub fn collect_sse_from_generator(py: Python<'_>, iterator: &Bound<'_, PyAny>) -> PyResult<Vec<Bytes>> {
+pub fn collect_sse_from_generator(
+    py: Python<'_>,
+    iterator: &Bound<'_, PyAny>,
+) -> PyResult<Vec<Bytes>> {
     let py_iter = iterator.try_iter()?;
     let mut events: Vec<Bytes> = Vec::new();
-    
+
     for item in py_iter {
         let item = item?;
-        
+
         // Try to extract as SSEEvent first
         if let Ok(event) = item.extract::<SSEEvent>() {
             // Use arena for efficient string formatting
@@ -445,20 +448,24 @@ pub fn collect_sse_from_generator(py: Python<'_>, iterator: &Bound<'_, PyAny>) -
         }
         // Try as dict with data/event/id/retry keys
         else if let Ok(dict) = item.cast::<pyo3::types::PyDict>() {
-            let data = dict.get_item("data")?
+            let data = dict
+                .get_item("data")?
                 .map(|v| v.extract::<String>())
                 .transpose()?
                 .unwrap_or_default();
-            let event_type = dict.get_item("event")?
+            let event_type = dict
+                .get_item("event")?
                 .map(|v| v.extract::<String>())
                 .transpose()?;
-            let id = dict.get_item("id")?
+            let id = dict
+                .get_item("id")?
                 .map(|v| v.extract::<String>())
                 .transpose()?;
-            let retry = dict.get_item("retry")?
+            let retry = dict
+                .get_item("retry")?
                 .map(|v| v.extract::<u64>())
                 .transpose()?;
-            
+
             let event = SSEEvent {
                 id,
                 event: event_type,
@@ -475,19 +482,22 @@ pub fn collect_sse_from_generator(py: Python<'_>, iterator: &Bound<'_, PyAny>) -
         // Try extracting data attribute (duck typing)
         else if let Ok(data) = item.getattr("data") {
             let data_str = data.extract::<String>()?;
-            let event_type = item.getattr("event")
+            let event_type = item
+                .getattr("event")
                 .ok()
                 .and_then(|v| v.extract::<Option<String>>().ok())
                 .flatten();
-            let id = item.getattr("id")
+            let id = item
+                .getattr("id")
                 .ok()
                 .and_then(|v| v.extract::<Option<String>>().ok())
                 .flatten();
-            let retry = item.getattr("retry")
+            let retry = item
+                .getattr("retry")
                 .ok()
                 .and_then(|v| v.extract::<Option<u64>>().ok())
                 .flatten();
-            
+
             let event = SSEEvent {
                 id,
                 event: event_type,
@@ -495,17 +505,16 @@ pub fn collect_sse_from_generator(py: Python<'_>, iterator: &Bound<'_, PyAny>) -
                 retry,
             };
             events.push(Bytes::from(event.format()));
-        }
-        else {
+        } else {
             // Last resort: convert to string
             let s = item.str()?.to_string();
             let event = SSEEvent::data(s);
             events.push(Bytes::from(event.format()));
         }
-        
+
         // Allow Python to handle signals/cancellation periodically
         py.check_signals()?;
     }
-    
+
     Ok(events)
 }

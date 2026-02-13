@@ -148,13 +148,17 @@ impl ResponseSlot {
             .or_insert(HeaderValue::from_static("Hypern"));
 
         // Set Content-Length explicitly for better client compatibility
-        header_map.insert(axum::http::header::CONTENT_LENGTH, HeaderValue::from(body.len()));
+        header_map.insert(
+            axum::http::header::CONTENT_LENGTH,
+            HeaderValue::from(body.len()),
+        );
 
         // Clone body data from the lock guard before creating the HTTP body
         let http_body = body.clone().into();
 
         let mut res = axum::response::Response::new(http_body);
-        *res.status_mut() = axum::http::StatusCode::from_u16(status).unwrap_or(axum::http::StatusCode::OK);
+        *res.status_mut() =
+            axum::http::StatusCode::from_u16(status).unwrap_or(axum::http::StatusCode::OK);
         *res.headers_mut() = header_map;
         res
     }
@@ -182,7 +186,7 @@ pub struct Response {
 #[pymethods]
 impl Response {
     // ========== Status Methods ==========
-    
+
     /// Set the HTTP status code (chainable)
     #[pyo3(signature = (status=200))]
     pub fn status<'py>(pyself: PyRef<'py, Self>, status: u16) -> PyRef<'py, Self> {
@@ -222,7 +226,10 @@ impl Response {
     }
 
     /// Set multiple headers at once
-    pub fn headers<'py>(pyself: PyRef<'py, Self>, headers: &Bound<'_, PyDict>) -> PyResult<PyRef<'py, Self>> {
+    pub fn headers<'py>(
+        pyself: PyRef<'py, Self>,
+        headers: &Bound<'_, PyDict>,
+    ) -> PyResult<PyRef<'py, Self>> {
         for (key, value) in headers.iter() {
             let k: String = key.extract()?;
             let v: String = value.extract()?;
@@ -230,33 +237,42 @@ impl Response {
         }
         Ok(pyself)
     }
-    
+
     /// Append a value to an existing header (or create it)
     pub fn append<'py>(pyself: PyRef<'py, Self>, key: &str, value: &str) -> PyRef<'py, Self> {
         if let Some(existing) = pyself.slot.get_header(key) {
             pyself.slot.remove_header(key);
-            pyself.slot.add_header(key.to_string(), format!("{}, {}", existing, value));
+            pyself
+                .slot
+                .add_header(key.to_string(), format!("{}, {}", existing, value));
         } else {
             pyself.slot.add_header(key.to_string(), value.to_string());
         }
         pyself
     }
-    
+
     /// Set the Vary header to instruct caches
     pub fn vary<'py>(pyself: PyRef<'py, Self>, field: &str) -> PyRef<'py, Self> {
         if let Some(existing) = pyself.slot.get_header("Vary") {
             if !existing.to_lowercase().contains(&field.to_lowercase()) {
                 pyself.slot.remove_header("Vary");
-                pyself.slot.add_header("Vary".to_string(), format!("{}, {}", existing, field));
+                pyself
+                    .slot
+                    .add_header("Vary".to_string(), format!("{}, {}", existing, field));
             }
         } else {
-            pyself.slot.add_header("Vary".to_string(), field.to_string());
+            pyself
+                .slot
+                .add_header("Vary".to_string(), field.to_string());
         }
         pyself
     }
-    
+
     /// Set Link header for pagination or related resources
-    pub fn links<'py>(pyself: PyRef<'py, Self>, links_data: &Bound<'_, PyDict>) -> PyResult<PyRef<'py, Self>> {
+    pub fn links<'py>(
+        pyself: PyRef<'py, Self>,
+        links_data: &Bound<'_, PyDict>,
+    ) -> PyResult<PyRef<'py, Self>> {
         let mut parts = Vec::new();
         for (rel, url) in links_data.iter() {
             let rel_str: String = rel.extract()?;
@@ -266,13 +282,15 @@ impl Response {
         pyself.slot.add_header("Link".to_string(), parts.join(", "));
         Ok(pyself)
     }
-    
+
     /// Set the Location header
     pub fn location<'py>(pyself: PyRef<'py, Self>, url: &str) -> PyRef<'py, Self> {
-        pyself.slot.add_header("Location".to_string(), url.to_string());
+        pyself
+            .slot
+            .add_header("Location".to_string(), url.to_string());
         pyself
     }
-    
+
     /// Set ETag header for caching
     pub fn etag<'py>(pyself: PyRef<'py, Self>, etag: &str) -> PyRef<'py, Self> {
         // Ensure ETag is quoted
@@ -284,29 +302,37 @@ impl Response {
         pyself.slot.add_header("ETag".to_string(), etag_val);
         pyself
     }
-    
+
     /// Set Last-Modified header
     pub fn last_modified<'py>(pyself: PyRef<'py, Self>, date: &str) -> PyRef<'py, Self> {
-        pyself.slot.add_header("Last-Modified".to_string(), date.to_string());
+        pyself
+            .slot
+            .add_header("Last-Modified".to_string(), date.to_string());
         pyself
     }
-    
+
     /// Set Expires header
     pub fn expires<'py>(pyself: PyRef<'py, Self>, date: &str) -> PyRef<'py, Self> {
-        pyself.slot.add_header("Expires".to_string(), date.to_string());
+        pyself
+            .slot
+            .add_header("Expires".to_string(), date.to_string());
         pyself
     }
 
     /// Set Content-Type header (chainable)
     pub fn content_type<'py>(pyself: PyRef<'py, Self>, content_type: &str) -> PyRef<'py, Self> {
-        pyself.slot.add_header("Content-Type".to_string(), content_type.to_string());
+        pyself
+            .slot
+            .add_header("Content-Type".to_string(), content_type.to_string());
         pyself
     }
 
     /// Alias for content_type() - Express.js compatibility
     #[pyo3(name = "type")]
     pub fn type_<'py>(pyself: PyRef<'py, Self>, content_type: &str) -> PyRef<'py, Self> {
-        pyself.slot.add_header("Content-Type".to_string(), content_type.to_string());
+        pyself
+            .slot
+            .add_header("Content-Type".to_string(), content_type.to_string());
         pyself
     }
 
@@ -339,17 +365,25 @@ impl Response {
     // ========== Express.js-style Response Methods ==========
 
     /// Send a response (auto-detects content type)
-    pub fn send<'py>(pyself: PyRef<'py, Self>, body: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
+    pub fn send<'py>(
+        pyself: PyRef<'py, Self>,
+        body: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
         if let Ok(s) = body.extract::<String>() {
             // String - send as text/html
             if pyself.slot.get_header("Content-Type").is_none() {
-                pyself.slot.add_header("Content-Type".to_string(), content_types::HTML.to_string());
+                pyself
+                    .slot
+                    .add_header("Content-Type".to_string(), content_types::HTML.to_string());
             }
             pyself.slot.set_body_str(s);
         } else if let Ok(bytes) = body.extract::<Vec<u8>>() {
             // Bytes - send as-is
             if pyself.slot.get_header("Content-Type").is_none() {
-                pyself.slot.add_header("Content-Type".to_string(), content_types::OCTET_STREAM.to_string());
+                pyself.slot.add_header(
+                    "Content-Type".to_string(),
+                    content_types::OCTET_STREAM.to_string(),
+                );
             }
             pyself.slot.set_body(bytes);
         } else if body.is_none() {
@@ -358,7 +392,9 @@ impl Response {
         } else {
             // Try to serialize as JSON
             let json_bytes = crate::utils::serialize_py_to_json(body)?;
-            pyself.slot.add_header("Content-Type".to_string(), content_types::JSON.to_string());
+            pyself
+                .slot
+                .add_header("Content-Type".to_string(), content_types::JSON.to_string());
             pyself.slot.set_body(json_bytes);
         }
         pyself.slot.mark_ready();
@@ -366,9 +402,14 @@ impl Response {
     }
 
     /// Send JSON response
-    pub fn json<'py>(pyself: PyRef<'py, Self>, data: &Bound<'_, PyAny>) -> PyResult<PyRef<'py, Self>> {
+    pub fn json<'py>(
+        pyself: PyRef<'py, Self>,
+        data: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
         let json_bytes = crate::utils::serialize_py_to_json(data)?;
-        pyself.slot.add_header("Content-Type".to_string(), content_types::JSON.to_string());
+        pyself
+            .slot
+            .add_header("Content-Type".to_string(), content_types::JSON.to_string());
         pyself.slot.set_body(json_bytes);
         pyself.slot.mark_ready();
         Ok(pyself)
@@ -376,7 +417,9 @@ impl Response {
 
     /// Send HTML response
     pub fn html<'py>(pyself: PyRef<'py, Self>, html: &str) -> PyRef<'py, Self> {
-        pyself.slot.add_header("Content-Type".to_string(), content_types::HTML.to_string());
+        pyself
+            .slot
+            .add_header("Content-Type".to_string(), content_types::HTML.to_string());
         pyself.slot.set_body_str(html.to_string());
         pyself.slot.mark_ready();
         pyself
@@ -384,7 +427,9 @@ impl Response {
 
     /// Send plain text response
     pub fn text<'py>(pyself: PyRef<'py, Self>, text: &str) -> PyRef<'py, Self> {
-        pyself.slot.add_header("Content-Type".to_string(), content_types::TEXT.to_string());
+        pyself
+            .slot
+            .add_header("Content-Type".to_string(), content_types::TEXT.to_string());
         pyself.slot.set_body_str(text.to_string());
         pyself.slot.mark_ready();
         pyself
@@ -392,94 +437,139 @@ impl Response {
 
     /// Send XML response
     pub fn xml<'py>(pyself: PyRef<'py, Self>, xml: &str) -> PyRef<'py, Self> {
-        pyself.slot.add_header("Content-Type".to_string(), content_types::XML.to_string());
+        pyself
+            .slot
+            .add_header("Content-Type".to_string(), content_types::XML.to_string());
         pyself.slot.set_body_str(xml.to_string());
         pyself.slot.mark_ready();
         pyself
     }
-    
+
     /// Send SSE response with all events
     /// This batches all SSE events and sends them as a complete response.
     /// For true streaming SSE, use the async SSE handler pattern.
-    pub fn sse<'py>(pyself: PyRef<'py, Self>, events: &Bound<'_, pyo3::types::PyList>) -> PyResult<PyRef<'py, Self>> {
+    pub fn sse<'py>(
+        pyself: PyRef<'py, Self>,
+        events: &Bound<'_, pyo3::types::PyList>,
+    ) -> PyResult<PyRef<'py, Self>> {
         let mut body = String::new();
         for item in events.iter() {
             let event: PyRef<crate::http::streaming::SSEEvent> = item.extract()?;
             body.push_str(&event.format());
         }
-        
-        pyself.slot.add_header("Content-Type".to_string(), "text/event-stream".to_string());
-        pyself.slot.add_header("Cache-Control".to_string(), "no-cache".to_string());
-        pyself.slot.add_header("Connection".to_string(), "keep-alive".to_string());
-        pyself.slot.add_header("X-Accel-Buffering".to_string(), "no".to_string());
+
+        pyself
+            .slot
+            .add_header("Content-Type".to_string(), "text/event-stream".to_string());
+        pyself
+            .slot
+            .add_header("Cache-Control".to_string(), "no-cache".to_string());
+        pyself
+            .slot
+            .add_header("Connection".to_string(), "keep-alive".to_string());
+        pyself
+            .slot
+            .add_header("X-Accel-Buffering".to_string(), "no".to_string());
         pyself.slot.set_body_str(body);
         pyself.slot.mark_ready();
         Ok(pyself)
     }
 
     /// Send SSE response from a Python generator/iterator.
-    /// 
+    ///
     /// This method consumes events from a Python generator one at a time,
     /// providing memory-efficient streaming without buffering all events.
-    /// 
+    ///
     /// Usage:
     /// ```python
     /// def event_generator():
     ///     for i in range(1000):
     ///         yield SSEEvent(f"Event {i}", event="counter")
-    /// 
+    ///
     /// res.sse_stream(event_generator())
     /// ```
-    /// 
+    ///
     /// The generator can yield:
     /// - SSEEvent objects
     /// - Dictionaries with 'data', 'event', 'id', 'retry' keys
     /// - Strings (will be wrapped as simple data events)
     /// - Any object with a 'data' attribute
-    pub fn sse_stream<'py>(pyself: PyRef<'py, Self>, generator: &Bound<'_, pyo3::PyAny>) -> PyResult<PyRef<'py, Self>> {
+    pub fn sse_stream<'py>(
+        pyself: PyRef<'py, Self>,
+        generator: &Bound<'_, pyo3::PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
         // Collect events from the generator using our efficient streaming function
         let events = crate::http::streaming::collect_sse_from_generator(pyself.py(), generator)?;
-        
+
         // Build the response body from all events
         let total_size: usize = events.iter().map(|b| b.len()).sum();
         let mut body = Vec::with_capacity(total_size);
         for event_bytes in events {
             body.extend_from_slice(&event_bytes);
         }
-        
-        pyself.slot.add_header("Content-Type".to_string(), "text/event-stream".to_string());
-        pyself.slot.add_header("Cache-Control".to_string(), "no-cache".to_string());
-        pyself.slot.add_header("Connection".to_string(), "keep-alive".to_string());
-        pyself.slot.add_header("X-Accel-Buffering".to_string(), "no".to_string());
+
+        pyself
+            .slot
+            .add_header("Content-Type".to_string(), "text/event-stream".to_string());
+        pyself
+            .slot
+            .add_header("Cache-Control".to_string(), "no-cache".to_string());
+        pyself
+            .slot
+            .add_header("Connection".to_string(), "keep-alive".to_string());
+        pyself
+            .slot
+            .add_header("X-Accel-Buffering".to_string(), "no".to_string());
         pyself.slot.set_body(body);
         pyself.slot.mark_ready();
         Ok(pyself)
     }
-    
+
     /// Send a single SSE event as a response
-    pub fn sse_event<'py>(pyself: PyRef<'py, Self>, data: &str, event: Option<&str>, id: Option<&str>) -> PyRef<'py, Self> {
+    pub fn sse_event<'py>(
+        pyself: PyRef<'py, Self>,
+        data: &str,
+        event: Option<&str>,
+        id: Option<&str>,
+    ) -> PyRef<'py, Self> {
         let sse_event = crate::http::streaming::SSEEvent {
             id: id.map(|s| s.to_string()),
             event: event.map(|s| s.to_string()),
             data: data.to_string(),
             retry: None,
         };
-        
-        pyself.slot.add_header("Content-Type".to_string(), "text/event-stream".to_string());
-        pyself.slot.add_header("Cache-Control".to_string(), "no-cache".to_string());
-        pyself.slot.add_header("Connection".to_string(), "keep-alive".to_string());
-        pyself.slot.add_header("X-Accel-Buffering".to_string(), "no".to_string());
+
+        pyself
+            .slot
+            .add_header("Content-Type".to_string(), "text/event-stream".to_string());
+        pyself
+            .slot
+            .add_header("Cache-Control".to_string(), "no-cache".to_string());
+        pyself
+            .slot
+            .add_header("Connection".to_string(), "keep-alive".to_string());
+        pyself
+            .slot
+            .add_header("X-Accel-Buffering".to_string(), "no".to_string());
         pyself.slot.set_body_str(sse_event.format());
         pyself.slot.mark_ready();
         pyself
     }
-    
+
     /// Set SSE headers without body (for use with long-polling or manual event building)
     pub fn sse_headers<'py>(pyself: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        pyself.slot.add_header("Content-Type".to_string(), "text/event-stream".to_string());
-        pyself.slot.add_header("Cache-Control".to_string(), "no-cache".to_string());
-        pyself.slot.add_header("Connection".to_string(), "keep-alive".to_string());
-        pyself.slot.add_header("X-Accel-Buffering".to_string(), "no".to_string());
+        pyself
+            .slot
+            .add_header("Content-Type".to_string(), "text/event-stream".to_string());
+        pyself
+            .slot
+            .add_header("Cache-Control".to_string(), "no-cache".to_string());
+        pyself
+            .slot
+            .add_header("Connection".to_string(), "keep-alive".to_string());
+        pyself
+            .slot
+            .add_header("X-Accel-Buffering".to_string(), "no".to_string());
         pyself
     }
 
@@ -494,7 +584,10 @@ impl Response {
 
     /// End the response (finalize)
     #[pyo3(signature = (data=None))]
-    pub fn end<'py>(pyself: PyRef<'py, Self>, data: Option<&Bound<'_, PyAny>>) -> PyResult<PyRef<'py, Self>> {
+    pub fn end<'py>(
+        pyself: PyRef<'py, Self>,
+        data: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyRef<'py, Self>> {
         if let Some(d) = data {
             if let Ok(s) = d.extract::<String>() {
                 pyself.slot.set_body_str(s);
@@ -517,7 +610,9 @@ impl Response {
     #[pyo3(signature = (url, status=302))]
     pub fn redirect<'py>(pyself: PyRef<'py, Self>, url: &str, status: u16) -> PyRef<'py, Self> {
         pyself.slot.set_status(status);
-        pyself.slot.add_header("Location".to_string(), url.to_string());
+        pyself
+            .slot
+            .add_header("Location".to_string(), url.to_string());
         pyself.slot.mark_ready();
         pyself
     }
@@ -538,7 +633,7 @@ impl Response {
         same_site: Option<&str>,
     ) -> PyRef<'py, Self> {
         let mut cookie = format!("{}={}", name, value);
-        
+
         if let Some(age) = max_age {
             cookie.push_str(&format!("; Max-Age={}", age));
         }
@@ -557,7 +652,7 @@ impl Response {
         if let Some(ss) = same_site {
             cookie.push_str(&format!("; SameSite={}", ss));
         }
-        
+
         pyself.slot.add_header("Set-Cookie".to_string(), cookie);
         pyself
     }
@@ -593,7 +688,7 @@ impl Response {
         no_store: bool,
     ) -> PyRef<'py, Self> {
         let mut directives = Vec::new();
-        
+
         if no_store {
             directives.push("no-store".to_string());
         } else if no_cache {
@@ -606,16 +701,25 @@ impl Response {
             }
             directives.push(format!("max-age={}", max_age));
         }
-        
-        pyself.slot.add_header("Cache-Control".to_string(), directives.join(", "));
+
+        pyself
+            .slot
+            .add_header("Cache-Control".to_string(), directives.join(", "));
         pyself
     }
 
     /// Set no-cache headers
     pub fn no_cache<'py>(pyself: PyRef<'py, Self>) -> PyRef<'py, Self> {
-        pyself.slot.add_header("Cache-Control".to_string(), "no-cache, no-store, must-revalidate".to_string());
-        pyself.slot.add_header("Pragma".to_string(), "no-cache".to_string());
-        pyself.slot.add_header("Expires".to_string(), "0".to_string());
+        pyself.slot.add_header(
+            "Cache-Control".to_string(),
+            "no-cache, no-store, must-revalidate".to_string(),
+        );
+        pyself
+            .slot
+            .add_header("Pragma".to_string(), "no-cache".to_string());
+        pyself
+            .slot
+            .add_header("Expires".to_string(), "0".to_string());
         pyself
     }
 
@@ -631,19 +735,31 @@ impl Response {
         credentials: bool,
         max_age: Option<u32>,
     ) -> PyRef<'py, Self> {
-        pyself.slot.add_header("Access-Control-Allow-Origin".to_string(), origin.to_string());
-        
+        pyself.slot.add_header(
+            "Access-Control-Allow-Origin".to_string(),
+            origin.to_string(),
+        );
+
         if let Some(m) = methods {
-            pyself.slot.add_header("Access-Control-Allow-Methods".to_string(), m.join(", "));
+            pyself
+                .slot
+                .add_header("Access-Control-Allow-Methods".to_string(), m.join(", "));
         }
         if let Some(h) = headers {
-            pyself.slot.add_header("Access-Control-Allow-Headers".to_string(), h.join(", "));
+            pyself
+                .slot
+                .add_header("Access-Control-Allow-Headers".to_string(), h.join(", "));
         }
         if credentials {
-            pyself.slot.add_header("Access-Control-Allow-Credentials".to_string(), "true".to_string());
+            pyself.slot.add_header(
+                "Access-Control-Allow-Credentials".to_string(),
+                "true".to_string(),
+            );
         }
         if let Some(age) = max_age {
-            pyself.slot.add_header("Access-Control-Max-Age".to_string(), age.to_string());
+            pyself
+                .slot
+                .add_header("Access-Control-Max-Age".to_string(), age.to_string());
         }
         pyself
     }
@@ -657,7 +773,9 @@ impl Response {
             Some(f) => format!("attachment; filename=\"{}\"", f),
             None => "attachment".to_string(),
         };
-        pyself.slot.add_header("Content-Disposition".to_string(), value);
+        pyself
+            .slot
+            .add_header("Content-Disposition".to_string(), value);
         pyself
     }
 
@@ -671,19 +789,20 @@ impl Response {
     ) -> PyResult<PyRef<'py, Self>> {
         use std::fs;
         use std::path::Path;
-        
+
         let file_path = Path::new(path);
-        
+
         // Check file exists
         if !file_path.exists() {
-            return Err(pyo3::exceptions::PyFileNotFoundError::new_err(
-                format!("File not found: {}", path)
-            ));
+            return Err(pyo3::exceptions::PyFileNotFoundError::new_err(format!(
+                "File not found: {}",
+                path
+            )));
         }
-        
+
         // Read file contents
         let contents = fs::read(file_path)?;
-        
+
         // Determine content type
         let mime_type = content_type.unwrap_or_else(|| {
             // Guess content type from extension
@@ -708,9 +827,11 @@ impl Response {
                 _ => "application/octet-stream",
             }
         });
-        
-        pyself.slot.add_header("Content-Type".to_string(), mime_type.to_string());
-        
+
+        pyself
+            .slot
+            .add_header("Content-Type".to_string(), mime_type.to_string());
+
         // Set filename for download
         let download_name = filename.map(String::from).unwrap_or_else(|| {
             file_path
@@ -719,18 +840,18 @@ impl Response {
                 .unwrap_or("download")
                 .to_string()
         });
-        
+
         pyself.slot.add_header(
             "Content-Disposition".to_string(),
             format!("attachment; filename=\"{}\"", download_name),
         );
-        
+
         pyself.slot.set_body(contents);
         pyself.slot.mark_ready();
-        
+
         Ok(pyself)
     }
-    
+
     /// Download a file (alias for send_file)
     #[pyo3(signature = (path, filename=None))]
     pub fn download<'py>(
@@ -765,7 +886,6 @@ impl Response {
         self.slot.clone()
     }
 }
-
 
 /// Get status message for HTTP status code
 fn status_message(status: u16) -> &'static str {

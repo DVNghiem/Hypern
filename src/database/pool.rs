@@ -1,10 +1,10 @@
+use deadpool_postgres::{Config, ManagerConfig, Pool, RecyclingMethod, Runtime};
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
-use deadpool_postgres::{Config, Pool, Runtime, ManagerConfig, RecyclingMethod};
 use tokio_postgres::NoTls;
-use pyo3::prelude::*;
-use pyo3::exceptions::PyRuntimeError;
 
 static GLOBAL_POOLS: OnceLock<RwLock<HashMap<String, Pool>>> = OnceLock::new();
 
@@ -92,19 +92,23 @@ pub struct ConnectionPoolManager;
 impl ConnectionPoolManager {
     fn parse_url(url: &str) -> Result<Config, String> {
         // URL format: postgresql://user:password@host:port/database
-        let url = url.strip_prefix("postgresql://")
+        let url = url
+            .strip_prefix("postgresql://")
             .or_else(|| url.strip_prefix("postgres://"))
             .ok_or_else(|| "Invalid PostgreSQL URL format".to_string())?;
 
         // Split user:password@host:port/database
-        let (auth, rest) = url.split_once('@')
+        let (auth, rest) = url
+            .split_once('@')
             .ok_or_else(|| "Missing @ in URL".to_string())?;
-        
-        let (user, password) = auth.split_once(':')
+
+        let (user, password) = auth
+            .split_once(':')
             .map(|(u, p)| (u.to_string(), Some(p.to_string())))
             .unwrap_or_else(|| (auth.to_string(), None));
 
-        let (host_port, dbname) = rest.split_once('/')
+        let (host_port, dbname) = rest
+            .split_once('/')
             .ok_or_else(|| "Missing database name in URL".to_string())?;
 
         // Handle query parameters
@@ -132,14 +136,17 @@ impl ConnectionPoolManager {
     pub fn initialize_sync_with_alias(config: &PoolConfig, alias: &str) -> Result<(), String> {
         let pools = get_pools();
         let pools_read = pools.read().unwrap();
-        
+
         if pools_read.contains_key(alias) {
-            return Err(format!("Connection pool for alias '{}' already initialized", alias));
+            return Err(format!(
+                "Connection pool for alias '{}' already initialized",
+                alias
+            ));
         }
         drop(pools_read);
 
         let mut cfg = Self::parse_url(&config.url)?;
-        
+
         // Set recycling method based on test_before_acquire
         cfg.manager = Some(ManagerConfig {
             recycling_method: if config.test_before_acquire {
@@ -148,7 +155,7 @@ impl ConnectionPoolManager {
                 RecyclingMethod::Fast
             },
         });
-        
+
         cfg.pool = Some(deadpool_postgres::PoolConfig {
             max_size: config.max_size,
             timeouts: deadpool_postgres::Timeouts {
@@ -158,7 +165,7 @@ impl ConnectionPoolManager {
             },
             ..Default::default()
         });
-        
+
         // Apply keepalive if configured
         if let Some(keepalive_secs) = config.keepalive_secs {
             cfg.keepalives = Some(true);
@@ -166,9 +173,9 @@ impl ConnectionPoolManager {
         }
 
         // Create the pool within the db runtime context
-        let pool = get_db_runtime().block_on(async {
-            cfg.create_pool(Some(Runtime::Tokio1), NoTls)
-        }).map_err(|e| format!("Failed to create pool: {}", e))?;
+        let pool = get_db_runtime()
+            .block_on(async { cfg.create_pool(Some(Runtime::Tokio1), NoTls) })
+            .map_err(|e| format!("Failed to create pool: {}", e))?;
 
         let mut pools_write = pools.write().unwrap();
         pools_write.insert(alias.to_string(), pool);
@@ -187,7 +194,7 @@ impl ConnectionPoolManager {
         pools_read.get(alias).cloned()
     }
 
-    // Legacy method for backward compatibility  
+    // Legacy method for backward compatibility
     pub fn get_pool() -> Option<Pool> {
         Self::get_pool_by_alias("default")
     }
@@ -270,8 +277,7 @@ impl ConnectionPool {
     // Legacy method for backward compatibility
     #[staticmethod]
     fn initialize(config: &PoolConfig) -> PyResult<()> {
-        ConnectionPoolManager::initialize_sync(config)
-            .map_err(|e| PyRuntimeError::new_err(e))
+        ConnectionPoolManager::initialize_sync(config).map_err(|e| PyRuntimeError::new_err(e))
     }
 
     #[staticmethod]

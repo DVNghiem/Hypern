@@ -19,23 +19,19 @@ pub use builtin::{
 };
 
 /// Convert a MiddlewareResponse to a hyper Response
-pub fn middleware_response_to_hyper(
-    response: MiddlewareResponse,
-) -> axum::response::Response {
+pub fn middleware_response_to_hyper(response: MiddlewareResponse) -> axum::response::Response {
     let mut builder = axum::response::Response::builder().status(response.status);
 
     for (key, value) in &response.headers {
         builder = builder.header(key.as_str(), value.as_str());
     }
 
-    builder
-        .body(Body::from(response.body))
-        .unwrap_or_else(|_| {
-            axum::response::Response::builder()
-                .status(500)
-                .body(Body::from("Internal Server Error"))
-                .unwrap()
-        })
+    builder.body(Body::from(response.body)).unwrap_or_else(|_| {
+        axum::response::Response::builder()
+            .status(500)
+            .body(Body::from("Internal Server Error"))
+            .unwrap()
+    })
 }
 
 use crate::http::method::HttpMethod;
@@ -68,29 +64,29 @@ impl PyCorsMiddleware {
         max_age: u32,
     ) -> Self {
         let mut config = CorsConfig::default();
-        
+
         if let Some(origins) = allowed_origins {
             config.allowed_origins = origins;
         }
-        
+
         if let Some(methods) = allowed_methods {
             config.allowed_methods = methods
                 .iter()
                 .filter_map(|m| HttpMethod::from_str(m))
                 .collect();
         }
-        
+
         if let Some(headers) = allowed_headers {
             config.allowed_headers = headers;
         }
-        
+
         if let Some(expose) = expose_headers {
             config.expose_headers = expose;
         }
-        
+
         config.allow_credentials = allow_credentials;
         config.max_age = max_age;
-        
+
         Self {
             inner: Arc::new(CorsMiddleware::new(config)),
         }
@@ -109,7 +105,6 @@ impl PyCorsMiddleware {
     }
 }
 
-
 #[pyclass(name = "RateLimitMiddleware")]
 #[derive(Clone)]
 pub struct PyRateLimitMiddleware {
@@ -119,7 +114,7 @@ pub struct PyRateLimitMiddleware {
 #[pymethods]
 impl PyRateLimitMiddleware {
     /// Create a new rate limiting middleware
-    /// 
+    ///
     /// Args:
     ///     max_requests: Maximum requests allowed in the window
     ///     window_secs: Window duration in seconds
@@ -156,11 +151,11 @@ impl PyRateLimitMiddleware {
         };
 
         let mut config = RateLimitConfig::new(max_requests, window_secs).with_algorithm(algo);
-        
+
         if let Some(header) = key_header {
             config = config.with_key_header(header);
         }
-        
+
         if let Some(paths) = skip_paths {
             config.skip_paths = paths;
         }
@@ -176,7 +171,7 @@ impl PyRateLimitMiddleware {
 }
 
 /// Python-accessible security headers middleware
-/// 
+///
 /// Adds security headers to all responses:
 /// - X-Content-Type-Options: nosniff
 /// - X-Frame-Options: DENY (configurable)
@@ -192,7 +187,7 @@ pub struct PySecurityHeadersMiddleware {
 #[pymethods]
 impl PySecurityHeadersMiddleware {
     /// Create security headers middleware
-    /// 
+    ///
     /// Args:
     ///     hsts: Enable HSTS (default: true)
     ///     hsts_max_age: HSTS max-age in seconds (default: 31536000 = 1 year)
@@ -262,7 +257,7 @@ impl PySecurityHeadersMiddleware {
 }
 
 /// Python-accessible timeout middleware
-/// 
+///
 /// Enforces request timeout at the Rust/Tokio level for maximum efficiency.
 #[pyclass(name = "TimeoutMiddleware")]
 #[derive(Clone)]
@@ -273,7 +268,7 @@ pub struct PyTimeoutMiddleware {
 #[pymethods]
 impl PyTimeoutMiddleware {
     /// Create a timeout middleware
-    /// 
+    ///
     /// Args:
     ///     timeout_secs: Request timeout in seconds (default: 30)
     #[new]
@@ -292,7 +287,7 @@ impl PyTimeoutMiddleware {
 }
 
 /// Python-accessible compression middleware
-/// 
+///
 /// Compresses response bodies using gzip for smaller transfer sizes.
 #[pyclass(name = "CompressionMiddleware")]
 #[derive(Clone)]
@@ -303,7 +298,7 @@ pub struct PyCompressionMiddleware {
 #[pymethods]
 impl PyCompressionMiddleware {
     /// Create compression middleware
-    /// 
+    ///
     /// Args:
     ///     min_size: Minimum response size to compress (default: 1024 bytes)
     #[new]
@@ -320,7 +315,7 @@ impl PyCompressionMiddleware {
 }
 
 /// Python-accessible request ID middleware
-/// 
+///
 /// Adds a unique request ID to each request for tracing.
 #[pyclass(name = "RequestIdMiddleware")]
 #[derive(Clone)]
@@ -331,7 +326,7 @@ pub struct PyRequestIdMiddleware {
 #[pymethods]
 impl PyRequestIdMiddleware {
     /// Create request ID middleware
-    /// 
+    ///
     /// Args:
     ///     header_name: Header name for the request ID (default: "X-Request-ID")
     #[new]
@@ -348,7 +343,7 @@ impl PyRequestIdMiddleware {
 }
 
 /// Python-accessible logging middleware
-/// 
+///
 /// Logs incoming requests with method, path, and timing information.
 #[pyclass(name = "LogMiddleware")]
 #[derive(Clone)]
@@ -359,7 +354,7 @@ pub struct PyLogMiddleware {
 #[pymethods]
 impl PyLogMiddleware {
     /// Create logging middleware
-    /// 
+    ///
     /// Args:
     ///     level: Log level - "debug", "info", "warn", "error" (default: "info")
     ///     log_headers: Whether to log request headers (default: false)
@@ -370,11 +365,7 @@ impl PyLogMiddleware {
         log_headers = false,
         skip_paths = None
     ))]
-    pub fn new(
-        level: &str,
-        log_headers: bool,
-        skip_paths: Option<Vec<String>>,
-    ) -> Self {
+    pub fn new(level: &str, log_headers: bool, skip_paths: Option<Vec<String>>) -> Self {
         let log_level = match level.to_lowercase().as_str() {
             "debug" => LogLevel::Debug,
             "warn" | "warning" => LogLevel::Warn,
@@ -382,13 +373,12 @@ impl PyLogMiddleware {
             _ => LogLevel::Info,
         };
 
-        let mut config = LogConfig::new()
-            .with_level(log_level);
-        
+        let mut config = LogConfig::new().with_level(log_level);
+
         if log_headers {
             config = config.with_headers();
         }
-        
+
         if let Some(paths) = skip_paths {
             for path in paths {
                 config = config.skip_path(path);
@@ -414,7 +404,7 @@ impl PyLogMiddleware {
 }
 
 /// Python-accessible basic authentication middleware
-/// 
+///
 /// Implements HTTP Basic Authentication.
 #[pyclass(name = "BasicAuthMiddleware")]
 #[derive(Clone)]
@@ -425,18 +415,15 @@ pub struct PyBasicAuthMiddleware {
 #[pymethods]
 impl PyBasicAuthMiddleware {
     /// Create basic auth middleware
-    /// 
+    ///
     /// Args:
     ///     realm: Authentication realm shown in browser dialog (default: "Restricted")
     ///     users: Dictionary of username -> password pairs
     #[new]
     #[pyo3(signature = (realm = "Restricted", users = None))]
-    pub fn new(
-        realm: &str,
-        users: Option<std::collections::HashMap<String, String>>,
-    ) -> Self {
+    pub fn new(realm: &str, users: Option<std::collections::HashMap<String, String>>) -> Self {
         let mut middleware = BasicAuthMiddleware::new(realm);
-        
+
         if let Some(user_map) = users {
             for (username, password) in user_map {
                 middleware = middleware.add_user(username, password);

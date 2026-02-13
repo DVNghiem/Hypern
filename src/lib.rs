@@ -20,20 +20,20 @@ pub use crate::core::socket;
 
 // Core performance modules
 pub mod core;
+pub mod database;
 pub mod fast_path;
 pub mod http;
 pub mod memory;
 pub mod middleware;
 pub mod routing;
 pub mod utils;
-pub mod database;
 
 // Re-exports for backward compatibility
 pub use crate::core::server::Server;
 pub use crate::http::headers::HeaderMap;
+pub use crate::http::multipart::{FormData, UploadedFile};
 pub use crate::http::request::Request;
 pub use crate::http::response::{Response, ResponseSlot};
-pub use crate::http::multipart::{FormData, UploadedFile};
 pub use crate::routing::cache::RouteCache;
 pub use crate::routing::route::Route;
 pub use crate::routing::router::Router;
@@ -42,16 +42,18 @@ pub use crate::core::context::{Context, DIContainer};
 
 pub use crate::core::tasks::{TaskExecutor, TaskResult, TaskStatus};
 
-pub use crate::http::streaming::{SSEEvent, SSEStream, SSEGenerator, StreamingResponse};
+pub use crate::http::streaming::{SSEEvent, SSEGenerator, SSEStream, StreamingResponse};
 
 pub use crate::middleware::{
-    PyCorsMiddleware, PyRateLimitMiddleware, PySecurityHeadersMiddleware,
-    PyTimeoutMiddleware, PyCompressionMiddleware, PyRequestIdMiddleware,
-    PyLogMiddleware, PyBasicAuthMiddleware,
+    PyBasicAuthMiddleware, PyCompressionMiddleware, PyCorsMiddleware, PyLogMiddleware,
+    PyRateLimitMiddleware, PyRequestIdMiddleware, PySecurityHeadersMiddleware, PyTimeoutMiddleware,
 };
 
 // Database exports
-pub use crate::database::{ConnectionPool, PoolConfig, PoolStatus, DbSession, get_db, finalize_db, finalize_db_all, RowStream};
+pub use crate::database::{
+    finalize_db, finalize_db_all, get_db, ConnectionPool, DbSession, PoolConfig, PoolStatus,
+    RowStream,
+};
 
 // Re-exports for internal use
 pub use fast_path::json_cache::JsonResponseCache;
@@ -89,7 +91,7 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<SSEGenerator>()?;
     module.add_class::<StreamingResponse>()?;
 
-    // Rust Middleware 
+    // Rust Middleware
     module.add_class::<PyCorsMiddleware>()?;
     module.add_class::<PyRateLimitMiddleware>()?;
     module.add_class::<PySecurityHeadersMiddleware>()?;

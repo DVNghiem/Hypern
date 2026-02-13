@@ -1,10 +1,4 @@
-use axum::{
-    Router,
-    body::Body,
-    extract::State,
-    http::Request,
-    response::IntoResponse,
-};
+use axum::{body::Body, extract::State, http::Request, response::IntoResponse, Router};
 use pyo3::prelude::*;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -15,7 +9,6 @@ use tower_http::{
 };
 use tracing::info;
 
-use crate::{core::global::{get_event_loop, set_global_runtime}, http::response::response_404};
 use crate::core::interpreter::http_execute;
 use crate::http::method::HttpMethod;
 use crate::http::request::Request as HypernRequest;
@@ -24,6 +17,10 @@ use crate::middleware::{
 };
 use crate::routing::router::Router as HypernRouter;
 use crate::socket::SocketHeld;
+use crate::{
+    core::global::{get_event_loop, set_global_runtime},
+    http::response::response_404,
+};
 
 /// Shared application state for Axum handlers
 #[derive(Clone)]
@@ -34,22 +31,16 @@ pub struct AppState {
 
 /// Convert HypernRouter routes to Axum Router
 fn build_axum_router(state: AppState) -> axum::Router {
-    Router::new()
-        .fallback(handle_request)
-        .with_state(state)
+    Router::new().fallback(handle_request).with_state(state)
 }
 
 /// Main request handler that dispatches to Python handlers
-async fn handle_request(
-    State(state): State<AppState>,
-    req: Request<Body>,
-) -> impl IntoResponse {
+async fn handle_request(State(state): State<AppState>, req: Request<Body>) -> impl IntoResponse {
     // Convert Axum request to Hypern request
     let fast_req = HypernRequest::from_axum(req).await;
-    
+
     // Create middleware context from request
-    let method = HttpMethod::from_str(fast_req.method().as_str())
-        .unwrap_or(HttpMethod::GET);
+    let method = HttpMethod::from_str(fast_req.method().as_str()).unwrap_or(HttpMethod::GET);
 
     let headers_map = fast_req.headers_map();
     let mw_ctx = MiddlewareContext::new(
@@ -78,10 +69,10 @@ async fn handle_request(
     }
 
     // Match route to get pattern-based hash and params
-    let response = if let Some((route, params)) = state.router.find_matching_route(
-        fast_req.path(),
-        fast_req.method().as_str(),
-    ) {
+    let response = if let Some((route, params)) = state
+        .router
+        .find_matching_route(fast_req.path(), fast_req.method().as_str())
+    {
         // Set path params from routing
         fast_req.set_path_params(params.clone());
         mw_ctx.set_params(params);
@@ -111,7 +102,7 @@ async fn handle_request(
     } else {
         response_404()
     };
-    
+
     response
 }
 
@@ -145,39 +136,45 @@ pub fn run_worker(
     // Setup graceful shutdown coordination
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let shutdown_tx = Arc::new(std::sync::Mutex::new(Some(shutdown_tx)));
-    
+
     // Setup signal handler for Python event loop to stop on SIGTERM/SIGINT
     let loop_for_signal = ev_loop.clone().unbind();
     let shutdown_tx_clone = shutdown_tx.clone();
     std::thread::spawn(move || {
         use std::sync::atomic::{AtomicBool, Ordering};
         static SHUTDOWN: AtomicBool = AtomicBool::new(false);
-        
+
         #[cfg(unix)]
         unsafe {
             extern "C" fn handle_signal(sig: libc::c_int) {
                 tracing::info!("Worker received signal {}", sig);
                 SHUTDOWN.store(true, Ordering::SeqCst);
             }
-            
-            libc::signal(libc::SIGINT, handle_signal as extern "C" fn(libc::c_int) as libc::sighandler_t);
-            libc::signal(libc::SIGTERM, handle_signal as extern "C" fn(libc::c_int) as libc::sighandler_t);
+
+            libc::signal(
+                libc::SIGINT,
+                handle_signal as extern "C" fn(libc::c_int) as libc::sighandler_t,
+            );
+            libc::signal(
+                libc::SIGTERM,
+                handle_signal as extern "C" fn(libc::c_int) as libc::sighandler_t,
+            );
         }
-        
+
         // Wait for signal
         while !SHUTDOWN.load(Ordering::SeqCst) {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        
+
         tracing::info!("Worker {} initiating shutdown", worker_id);
-        
+
         // Signal the async runtime to shutdown
         if let Ok(mut tx) = shutdown_tx_clone.lock() {
             if let Some(sender) = tx.take() {
                 let _ = sender.send(());
             }
         }
-        
+
         std::thread::sleep(std::time::Duration::from_millis(100));
         Python::attach(|py| {
             let loop_ref = loop_for_signal.bind(py);
@@ -193,26 +190,21 @@ pub fn run_worker(
         .expect("Failed to build Tokio runtime");
 
     rt.spawn(async move {
-        let listener =
-            TcpListener::from_std(std::net::TcpListener::from(socket_held.get_socket()))
-                .expect("Failed to convert listener");
+        let listener = TcpListener::from_std(std::net::TcpListener::from(socket_held.get_socket()))
+            .expect("Failed to convert listener");
 
         // Build Axum application with state
-        let state = AppState {
-            router,
-            middleware,
-        };
+        let state = AppState { router, middleware };
 
         // Build the Axum router with middleware stack
-        let app = build_axum_router(state)
-            .layer(
-                ServiceBuilder::new()
-                    // Request ID propagation
-                    .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
-                    .layer(PropagateRequestIdLayer::x_request_id())
-                    // Tracing
-                    .layer(TraceLayer::new_for_http())
-            );
+        let app = build_axum_router(state).layer(
+            ServiceBuilder::new()
+                // Request ID propagation
+                .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+                .layer(PropagateRequestIdLayer::x_request_id())
+                // Tracing
+                .layer(TraceLayer::new_for_http()),
+        );
 
         info!("Axum worker {} started", worker_id);
 
@@ -223,7 +215,7 @@ pub fn run_worker(
             })
             .await
             .expect("Server error");
-        
+
         info!("Worker {} Axum server stopped", worker_id);
     });
 
@@ -235,4 +227,3 @@ pub fn run_worker(
     info!("Worker {} stopped", worker_id);
     Ok(())
 }
-

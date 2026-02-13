@@ -1,3 +1,5 @@
+use crate::http::headers::HeaderMap;
+use crate::http::method::HttpMethod;
 use ahash::AHashMap;
 use bytes::Bytes;
 use pyo3::prelude::*;
@@ -5,8 +7,6 @@ use pyo3::types::{PyBytes, PyDict};
 use std::collections::HashMap;
 use std::sync::Arc;
 use xxhash_rust::xxh3::xxh3_64;
-use crate::http::headers::HeaderMap;
-use crate::http::method::HttpMethod;
 
 /// Query parameters with lazy parsing
 #[derive(Clone, Debug, Default)]
@@ -431,7 +431,6 @@ impl Request {
 }
 
 impl Request {
-
     pub async fn from_axum(req: axum::http::Request<axum::body::Body>) -> Self {
         use axum::body::to_bytes;
         use percent_encoding::percent_decode_str;

@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crossbeam_channel::{bounded, Sender, Receiver};
+use crossbeam_channel::{bounded, Receiver, Sender};
 use dashmap::DashMap;
 use pyo3::prelude::*;
 use tracing::info;
@@ -128,9 +128,9 @@ impl TaskExecutor {
         delay_ms: Option<u64>,
     ) -> PyResult<String> {
         let task_id = self.generate_id();
-        
+
         let args = args.unwrap_or_else(|| py.None());
-        
+
         let task = BackgroundTask {
             id: task_id.clone(),
             handler,
@@ -153,9 +153,9 @@ impl TaskExecutor {
         );
 
         // Send to queue
-        self.sender
-            .send(task)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to submit task: {}", e)))?;
+        self.sender.send(task).map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to submit task: {}", e))
+        })?;
 
         Ok(task_id)
     }
@@ -270,10 +270,11 @@ fn task_worker(
                 let execution_result = Python::attach(|py| {
                     let handler = task.handler.bind(py);
                     let args = task.args.bind(py);
-                    
+
                     // Check if it's a coroutine function
                     let asyncio = py.import("asyncio").ok();
-                    let is_coro = asyncio.as_ref()
+                    let is_coro = asyncio
+                        .as_ref()
                         .and_then(|m| m.call_method1("iscoroutinefunction", (handler,)).ok())
                         .map(|r| r.is_truthy().unwrap_or(false))
                         .unwrap_or(false);
@@ -282,12 +283,10 @@ fn task_worker(
                         // Run async function
                         if let Some(ref asyncio_mod) = asyncio {
                             match handler.call1((args,)) {
-                                Ok(coro) => {
-                                    asyncio_mod
-                                        .call_method1("run", (coro,))
-                                        .map(|r| r.to_string())
-                                        .map_err(|e| e.to_string())
-                                }
+                                Ok(coro) => asyncio_mod
+                                    .call_method1("run", (coro,))
+                                    .map(|r| r.to_string())
+                                    .map_err(|e| e.to_string()),
                                 Err(e) => Err(e.to_string()),
                             }
                         } else {
@@ -350,11 +349,7 @@ impl AsyncTaskRunner {
     }
 
     /// Spawn a task with a delay
-    pub fn spawn_delayed<F>(
-        &self,
-        delay: Duration,
-        future: F,
-    ) -> tokio::task::JoinHandle<F::Output>
+    pub fn spawn_delayed<F>(&self, delay: Duration, future: F) -> tokio::task::JoinHandle<F::Output>
     where
         F: std::future::Future + Send + 'static,
         F::Output: Send + 'static,

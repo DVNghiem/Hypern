@@ -151,7 +151,9 @@ where
             };
 
             if coro_ptr.is_null() {
-                unsafe { pyo3::ffi::PyErr_Print(); }
+                unsafe {
+                    pyo3::ffi::PyErr_Print();
+                }
                 on_complete();
                 return;
             }
@@ -161,19 +163,26 @@ where
             loop {
                 // Acquire GIL for each send operation
                 let result_ptr = unsafe {
-                    let send_method = pyo3::ffi::PyObject_GetAttrString(coro_ptr, b"send\0".as_ptr() as *const std::os::raw::c_char);
+                    let send_method = pyo3::ffi::PyObject_GetAttrString(
+                        coro_ptr,
+                        b"send\0".as_ptr() as *const std::os::raw::c_char,
+                    );
                     if send_method.is_null() {
                         pyo3::ffi::PyErr_Print();
                         pyo3::ffi::Py_DECREF(coro_ptr);
                         on_complete();
                         return;
                     }
-                    
-                    let result = pyo3::ffi::PyObject_CallFunctionObjArgs(send_method, none_ptr, std::ptr::null_mut::<pyo3::ffi::PyObject>());
+
+                    let result = pyo3::ffi::PyObject_CallFunctionObjArgs(
+                        send_method,
+                        none_ptr,
+                        std::ptr::null_mut::<pyo3::ffi::PyObject>(),
+                    );
                     pyo3::ffi::Py_DECREF(send_method);
                     result
                 };
-                
+
                 if result_ptr.is_null() {
                     // Check if it's StopIteration (normal completion)
                     unsafe {
@@ -186,9 +195,11 @@ where
                     }
                     break;
                 }
-                
-                unsafe { pyo3::ffi::Py_DECREF(result_ptr); }
-                
+
+                unsafe {
+                    pyo3::ffi::Py_DECREF(result_ptr);
+                }
+
                 // Release GIL briefly to allow event loop to process
                 py.detach(|| {
                     std::thread::sleep(std::time::Duration::from_micros(1));
