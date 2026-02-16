@@ -145,7 +145,7 @@ where
         rt.spawn_blocking(move |py| {
             let (handler, args) = args_builder(py);
 
-            // Call handler to get coroutine
+            // Call handler to get coroutine using raw C API for minimum overhead
             let coro_ptr = unsafe {
                 pyo3::ffi::PyObject_Call(handler.as_ptr(), args.as_ptr(), std::ptr::null_mut())
             };
@@ -158,29 +158,33 @@ where
                 return;
             }
 
-            // Step coroutine to completion, releasing GIL between steps
-            let none_ptr = unsafe { pyo3::ffi::Py_None() };
-            loop {
-                // Acquire GIL for each send operation
-                let result_ptr = unsafe {
-                    let send_method = pyo3::ffi::PyObject_GetAttrString(
-                        coro_ptr,
-                        b"send\0".as_ptr() as *const std::os::raw::c_char,
-                    );
-                    if send_method.is_null() {
-                        pyo3::ffi::PyErr_Print();
-                        pyo3::ffi::Py_DECREF(coro_ptr);
-                        on_complete();
-                        return;
-                    }
+            // Cache the send method pointer - don't look it up every iteration
+            let send_method = unsafe {
+                pyo3::ffi::PyObject_GetAttrString(
+                    coro_ptr,
+                    b"send\0".as_ptr() as *const std::os::raw::c_char,
+                )
+            };
+            if send_method.is_null() {
+                unsafe {
+                    pyo3::ffi::PyErr_Print();
+                    pyo3::ffi::Py_DECREF(coro_ptr);
+                }
+                on_complete();
+                return;
+            }
 
-                    let result = pyo3::ffi::PyObject_CallFunctionObjArgs(
+            let none_ptr = unsafe { pyo3::ffi::Py_None() };
+
+            // Step coroutine to completion
+            // Most handlers complete in 1-2 steps; optimize for that case
+            loop {
+                let result_ptr = unsafe {
+                    pyo3::ffi::PyObject_CallFunctionObjArgs(
                         send_method,
                         none_ptr,
                         std::ptr::null_mut::<pyo3::ffi::PyObject>(),
-                    );
-                    pyo3::ffi::Py_DECREF(send_method);
-                    result
+                    )
                 };
 
                 if result_ptr.is_null() {
@@ -191,7 +195,6 @@ where
                         } else {
                             pyo3::ffi::PyErr_Print();
                         }
-                        pyo3::ffi::Py_DECREF(coro_ptr);
                     }
                     break;
                 }
@@ -200,10 +203,14 @@ where
                     pyo3::ffi::Py_DECREF(result_ptr);
                 }
 
-                // Release GIL briefly to allow event loop to process
-                py.detach(|| {
-                    std::thread::sleep(std::time::Duration::from_micros(1));
-                });
+                // Yield to other threads without sleep - just a CPU hint
+                // This is ~1000x faster than sleep(1μs)
+                std::thread::yield_now();
+            }
+
+            unsafe {
+                pyo3::ffi::Py_DECREF(send_method);
+                pyo3::ffi::Py_DECREF(coro_ptr);
             }
             on_complete();
         });

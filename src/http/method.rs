@@ -20,7 +20,8 @@ pub enum HttpMethod {
 impl HttpMethod {
     #[staticmethod]
     pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_uppercase().as_str() {
+        // Fast path: check exact match first (methods from HTTP are always uppercase)
+        match s {
             "GET" => Some(HttpMethod::GET),
             "POST" => Some(HttpMethod::POST),
             "PUT" => Some(HttpMethod::PUT),
@@ -30,7 +31,21 @@ impl HttpMethod {
             "OPTIONS" => Some(HttpMethod::OPTIONS),
             "CONNECT" => Some(HttpMethod::CONNECT),
             "TRACE" => Some(HttpMethod::TRACE),
-            _ => None,
+            _ => {
+                // Slow path: case-insensitive match
+                match s.to_ascii_uppercase().as_str() {
+                    "GET" => Some(HttpMethod::GET),
+                    "POST" => Some(HttpMethod::POST),
+                    "PUT" => Some(HttpMethod::PUT),
+                    "DELETE" => Some(HttpMethod::DELETE),
+                    "PATCH" => Some(HttpMethod::PATCH),
+                    "HEAD" => Some(HttpMethod::HEAD),
+                    "OPTIONS" => Some(HttpMethod::OPTIONS),
+                    "CONNECT" => Some(HttpMethod::CONNECT),
+                    "TRACE" => Some(HttpMethod::TRACE),
+                    _ => None,
+                }
+            }
         }
     }
 

@@ -1,7 +1,8 @@
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyDict, PyList};
+use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 use serde_json::Value as JsonValue;
 
+/// Convert JSON value to Python object - optimized with type-specific checks
 pub fn json_value_to_py(py: Python<'_>, value: &JsonValue) -> PyResult<Py<PyAny>> {
     match value {
         JsonValue::Null => Ok(py.None()),
@@ -14,7 +15,6 @@ pub fn json_value_to_py(py: Python<'_>, value: &JsonValue) -> PyResult<Py<PyAny>
             } else if let Some(f) = n.as_f64() {
                 Ok(f.into_pyobject(py)?.into_any().unbind())
             } else {
-                // Fallback: treat as 0
                 Ok(0i64.into_pyobject(py)?.into_any().unbind())
             }
         }
@@ -36,38 +36,60 @@ pub fn json_value_to_py(py: Python<'_>, value: &JsonValue) -> PyResult<Py<PyAny>
     }
 }
 
+/// Convert Python object to JSON value - optimized with fast type checks
 pub fn py_to_json_value(obj: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
     if obj.is_none() {
         return Ok(JsonValue::Null);
     }
 
-    // Check for bool first (before int, since bool is subclass of int in Python)
-    if let Ok(b) = obj.extract::<bool>() {
-        return Ok(JsonValue::Bool(b));
+    // Use is_instance_of for fast type checking (avoids extract overhead for wrong types)
+    // Check bool before int since bool is a subclass of int in Python
+    if obj.is_instance_of::<PyBool>() {
+        return Ok(JsonValue::Bool(obj.extract::<bool>()?));
     }
 
-    // Integer
-    if let Ok(i) = obj.extract::<i64>() {
-        return Ok(JsonValue::Number(i.into()));
+    if obj.is_instance_of::<PyInt>() {
+        if let Ok(i) = obj.extract::<i64>() {
+            return Ok(JsonValue::Number(i.into()));
+        }
+        // Fallback for very large ints
+        if let Ok(u) = obj.extract::<u64>() {
+            return Ok(JsonValue::Number(u.into()));
+        }
+        // Really large int - convert to string
+        return Ok(JsonValue::String(obj.str()?.to_string()));
     }
 
-    // Float
-    if let Ok(f) = obj.extract::<f64>() {
+    if obj.is_instance_of::<PyFloat>() {
+        let f = obj.extract::<f64>()?;
         if let Some(n) = serde_json::Number::from_f64(f) {
             return Ok(JsonValue::Number(n));
         }
-        // NaN/Infinity - convert to null (JSON doesn't support these)
         return Ok(JsonValue::Null);
     }
 
-    // String
-    if let Ok(s) = obj.extract::<String>() {
-        return Ok(JsonValue::String(s));
+    if obj.is_instance_of::<PyString>() {
+        return Ok(JsonValue::String(obj.extract::<String>()?));
     }
 
-    // List/Tuple - use is_instance_of for type checking (check before bytes!)
+    // Dict - most common complex type in JSON APIs
+    if obj.is_instance_of::<PyDict>() {
+        let dict = obj.cast::<PyDict>()?;
+        let mut map = serde_json::Map::with_capacity(dict.len());
+        for (key, value) in dict.iter() {
+            let key_str = if key.is_instance_of::<PyString>() {
+                key.extract::<String>()?
+            } else {
+                key.str()?.to_string()
+            };
+            map.insert(key_str, py_to_json_value(&value)?);
+        }
+        return Ok(JsonValue::Object(map));
+    }
+
+    // List
     if obj.is_instance_of::<PyList>() {
-        let list = obj.extract::<Bound<'_, PyList>>()?;
+        let list = obj.cast::<PyList>()?;
         let mut arr = Vec::with_capacity(list.len());
         for item in list.iter() {
             arr.push(py_to_json_value(&item)?);
@@ -75,32 +97,14 @@ pub fn py_to_json_value(obj: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
         return Ok(JsonValue::Array(arr));
     }
 
-    // Bytes - convert to base64 or string
+    // Bytes - convert to string
     if let Ok(bytes) = obj.extract::<Vec<u8>>() {
-        // Try to decode as UTF-8 string first
         if let Ok(s) = String::from_utf8(bytes.clone()) {
             return Ok(JsonValue::String(s));
         }
-        // Fallback: convert to hex or just use lossy
         return Ok(JsonValue::String(
-            String::from_utf8_lossy(&bytes).to_string(),
+            String::from_utf8_lossy(&bytes).into_owned(),
         ));
-    }
-
-    // Dict
-    if obj.is_instance_of::<PyDict>() {
-        let dict = obj.extract::<Bound<'_, PyDict>>()?;
-        let mut map = serde_json::Map::new();
-        for (key, value) in dict.iter() {
-            let key_str: String = if let Ok(s) = key.extract::<String>() {
-                s
-            } else {
-                // Convert non-string keys to string
-                key.str()?.to_string()
-            };
-            map.insert(key_str, py_to_json_value(&value)?);
-        }
-        return Ok(JsonValue::Object(map));
     }
 
     // Try to iterate (for tuples, sets, etc.)
@@ -115,7 +119,7 @@ pub fn py_to_json_value(obj: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
     // Try __dict__ for custom objects
     if let Ok(dict) = obj.getattr("__dict__") {
         if dict.is_instance_of::<PyDict>() {
-            let d = dict.extract::<Bound<'_, PyDict>>()?;
+            let d = dict.cast::<PyDict>()?;
             let mut map = serde_json::Map::new();
             for (key, value) in d.iter() {
                 let key_str: String = key.str()?.to_string();
@@ -144,10 +148,11 @@ pub fn parse_json_to_py(py: Python<'_>, bytes: &[u8]) -> PyResult<Py<PyAny>> {
     }
 }
 
-/// Uses simd_json for serialization where possible.
+/// Serialize Python object to JSON bytes using simd-json when possible.
 pub fn serialize_py_to_json(obj: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
     let value = py_to_json_value(obj)?;
-    serde_json::to_vec(&value).map_err(|e| {
+    // Use simd-json for serialization - faster than serde_json
+    simd_json::to_vec(&value).map_err(|e| {
         pyo3::exceptions::PyValueError::new_err(format!("JSON serialization error: {}", e))
     })
 }
@@ -155,7 +160,8 @@ pub fn serialize_py_to_json(obj: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
 /// Serialize Python object to JSON string.
 pub fn serialize_py_to_json_string(obj: &Bound<'_, PyAny>) -> PyResult<String> {
     let value = py_to_json_value(obj)?;
-    serde_json::to_string(&value).map_err(|e| {
+    // Use simd-json for serialization
+    simd_json::to_string(&value).map_err(|e| {
         pyo3::exceptions::PyValueError::new_err(format!("JSON serialization error: {}", e))
     })
 }
@@ -163,6 +169,7 @@ pub fn serialize_py_to_json_string(obj: &Bound<'_, PyAny>) -> PyResult<String> {
 /// Serialize Python object to pretty-printed JSON string.
 pub fn serialize_py_to_json_pretty(obj: &Bound<'_, PyAny>) -> PyResult<String> {
     let value = py_to_json_value(obj)?;
+    // Pretty print still uses serde_json (simd-json doesn't have pretty print)
     serde_json::to_string_pretty(&value).map_err(|e| {
         pyo3::exceptions::PyValueError::new_err(format!("JSON serialization error: {}", e))
     })

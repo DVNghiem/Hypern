@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::database::operation::{DatabaseOperations, RowStream};
+use crate::database::pool::get_db_runtime;
 
 #[pyclass]
 #[derive(Clone, Debug)]
@@ -27,7 +28,7 @@ impl DatabaseTransaction {
     fn execute(&self, py: Python<'_>, query: &str, params: Vec<Py<PyAny>>) -> PyResult<u64> {
         let transaction = self.transaction.clone();
         let operations = self.operations.clone();
-        let result = futures::executor::block_on(async move {
+        let result = get_db_runtime().block_on(async move {
             operations.execute(py, transaction, query, params).await
         })?;
         Ok(result)
@@ -41,7 +42,7 @@ impl DatabaseTransaction {
     ) -> Result<Vec<Py<PyAny>>, PyErr> {
         let transaction = self.transaction.clone();
         let operations = self.operations.clone();
-        let result = futures::executor::block_on(async move {
+        let result = get_db_runtime().block_on(async move {
             operations.fetch_all(py, transaction, query, params).await
         })?;
         Ok(result)
@@ -57,7 +58,7 @@ impl DatabaseTransaction {
     ) -> PyResult<RowStream> {
         let transaction = self.transaction.clone();
         let operations = self.operations.clone();
-        let result = futures::executor::block_on(async move {
+        let result = get_db_runtime().block_on(async move {
             operations
                 .stream_data(py, transaction, query, params, chunk_size)
                 .await
@@ -74,7 +75,7 @@ impl DatabaseTransaction {
     ) -> PyResult<u64> {
         let transaction = self.transaction.clone();
         let operations = self.operations.clone();
-        let result = futures::executor::block_on(async move {
+        let result = get_db_runtime().block_on(async move {
             operations
                 .bulk_change(py, transaction, query, params, batch_size)
                 .await
@@ -84,7 +85,7 @@ impl DatabaseTransaction {
 
     fn commit(&mut self) -> PyResult<()> {
         let transaction = self.transaction.clone();
-        let _ = futures::executor::block_on(async move {
+        let _ = get_db_runtime().block_on(async move {
             let mut guard = transaction.lock().await;
             let transaction = guard.take().unwrap();
             transaction.commit().await.ok();
@@ -94,7 +95,7 @@ impl DatabaseTransaction {
 
     fn rollback(&mut self) -> PyResult<()> {
         let transaction = self.transaction.clone();
-        let _ = futures::executor::block_on(async move {
+        let _ = get_db_runtime().block_on(async move {
             let mut guard = transaction.lock().await;
             let transaction = guard.take().unwrap();
             transaction.rollback().await.ok();

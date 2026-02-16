@@ -18,13 +18,17 @@ pub use builtin::{
     SecurityHeadersMiddleware, TimeoutMiddleware,
 };
 
-/// Convert a MiddlewareResponse to a hyper Response
+/// Convert a MiddlewareResponse to a hyper Response - optimized
 pub fn middleware_response_to_hyper(response: MiddlewareResponse) -> axum::response::Response {
     let mut builder = axum::response::Response::builder().status(response.status);
 
+    // Pre-set all headers
     for (key, value) in &response.headers {
         builder = builder.header(key.as_str(), value.as_str());
     }
+
+    // Set content-length for better client compatibility
+    builder = builder.header("content-length", response.body.len().to_string());
 
     builder.body(Body::from(response.body)).unwrap_or_else(|_| {
         axum::response::Response::builder()

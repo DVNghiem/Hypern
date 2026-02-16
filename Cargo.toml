@@ -11,18 +11,15 @@ crate-type = ["cdylib", "staticlib"]
 [dependencies]
 pyo3 = { version = "0.27.2", features = ["extension-module", "generate-import-lib"] }
 
-tokio = { version = "1.49.0", features = ["full"] }
-futures = "0.3.28"
-socket2 = { version = "0.6.1", features = ["all"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "net", "sync", "time", "signal", "macros"] }
+futures-core = "0.3"
+socket2 = "0.6.1"
 
 # Axum as the main web framework (built on hyper + tower)
-axum = { version = "0.8", features = ["http2", "macros", "matched-path"] }
-tower-http = { version = "0.6", features = ["cors", "compression-gzip", "compression-br", "timeout", "request-id", "trace", "limit"] }
-
-tower = { version = "0.5.3", features = ["full"] }
+axum = { version = "0.8", features = ["http2"] }
 bytes = "1.11.0"
 percent-encoding = "2.3.1"
-serde = { version = "1.0", features = ["derive"] }
+serde = "1.0"
 serde_json = "1.0.149"
 form_urlencoded = "1.2.1"
 mimalloc = { version = "0.1.48", optional = true }
@@ -52,9 +49,6 @@ parking_lot = "0.12.5"
 tracing = { version = "0.1.44"}
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
-# Error handling
-thiserror = "2.0.18"
-
 # Smart String optimization
 smartstring = "1.0.1"
 
@@ -66,7 +60,6 @@ tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_j
 deadpool-postgres = { version = "0.14", features = ["serde"] }
 postgres-types = { version = "0.2", features = ["with-chrono-0_4", "with-serde_json-1"] }
 rust_decimal = { version = "1.36", features = ["db-tokio-postgres"] }
-uuid = { version = "1.0", features = ["v4", "serde"] }
 
 [target.'cfg(not(any(target_env = "musl", target_os = "freebsd", target_os = "openbsd", target_os = "windows")))'.dependencies]
 tikv-jemallocator = { version = "0.6.1", default-features = false, features = ["disable_initial_exec_tls"] }
@@ -85,6 +78,10 @@ lto = "fat"
 opt-level = 3
 panic = "abort"
 strip = "debuginfo"
+
+# Enable target-cpu=native for maximum SIMD utilization
+[profile.release.build-override]
+opt-level = 3
 
 [package.metadata.maturin]
 name = "hypern"

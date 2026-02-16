@@ -247,8 +247,8 @@ impl Router {
         path: &str,
         method: &str,
     ) -> Option<(Route, HashMap<String, String>)> {
-        let method = method.to_uppercase();
-        let router = match method.as_str() {
+        // Fast method dispatch without allocation - methods from HTTP are already uppercase
+        let router = match method {
             "GET" => &self.get_router,
             "POST" => &self.post_router,
             "PUT" => &self.put_router,
@@ -256,7 +256,20 @@ impl Router {
             "PATCH" => &self.patch_router,
             "HEAD" => &self.head_router,
             "OPTIONS" => &self.options_router,
-            _ => return None,
+            _ => {
+                // Fallback for non-standard methods - do the uppercase conversion
+                let method = method.to_uppercase();
+                return match method.as_str() {
+                    "GET" => self.get_router.at(path),
+                    "POST" => self.post_router.at(path),
+                    "PUT" => self.put_router.at(path),
+                    "DELETE" => self.delete_router.at(path),
+                    "PATCH" => self.patch_router.at(path),
+                    "HEAD" => self.head_router.at(path),
+                    "OPTIONS" => self.options_router.at(path),
+                    _ => None,
+                };
+            }
         };
 
         router.at(path)

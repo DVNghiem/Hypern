@@ -1,7 +1,8 @@
+use std::pin::Pin;
 use std::sync::Arc;
 
 use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
-use futures::StreamExt;
+use futures_core::Stream;
 use pyo3::{
     prelude::*,
     types::{
@@ -22,11 +23,11 @@ use tokio::sync::Mutex;
 #[pyclass]
 pub struct RowStream {
     /// The chunks that have been fetched (we still collect, but can be improved with channels)
-    chunks: Arc<Mutex<Vec<Vec<Py<PyAny>>>>>,
+    chunks: std::sync::Mutex<Vec<Vec<Py<PyAny>>>>,
     /// Current chunk index
-    current_index: Arc<Mutex<usize>>,
+    current_index: std::sync::Mutex<usize>,
     /// Whether the stream has been fully consumed
-    exhausted: Arc<Mutex<bool>>,
+    exhausted: std::sync::Mutex<bool>,
 }
 
 #[pymethods]
@@ -36,13 +37,9 @@ impl RowStream {
     }
 
     fn __next__(&self, py: Python<'_>) -> Option<Vec<Py<PyAny>>> {
-        let chunks = self.chunks.clone();
-        let current_index = self.current_index.clone();
-        let exhausted = self.exhausted.clone();
-
-        let chunks_guard = futures::executor::block_on(async { chunks.lock().await });
-        let mut index = futures::executor::block_on(async { current_index.lock().await });
-        let mut is_exhausted = futures::executor::block_on(async { exhausted.lock().await });
+        let chunks_guard = self.chunks.lock().unwrap();
+        let mut index = self.current_index.lock().unwrap();
+        let mut is_exhausted = self.exhausted.lock().unwrap();
 
         if *index >= chunks_guard.len() {
             *is_exhausted = true;
@@ -58,20 +55,20 @@ impl RowStream {
     }
 
     fn is_exhausted(&self) -> bool {
-        futures::executor::block_on(async { *self.exhausted.lock().await })
+        *self.exhausted.lock().unwrap()
     }
 
     fn chunk_count(&self) -> usize {
-        futures::executor::block_on(async { self.chunks.lock().await.len() })
+        self.chunks.lock().unwrap().len()
     }
 }
 
 impl RowStream {
     pub fn new(chunks: Vec<Vec<Py<PyAny>>>) -> Self {
         Self {
-            chunks: Arc::new(Mutex::new(chunks)),
-            current_index: Arc::new(Mutex::new(0)),
-            exhausted: Arc::new(Mutex::new(false)),
+            chunks: std::sync::Mutex::new(chunks),
+            current_index: std::sync::Mutex::new(0),
+            exhausted: std::sync::Mutex::new(false),
         }
     }
 }
@@ -302,7 +299,7 @@ impl DatabaseOperations {
         let mut chunks: Vec<Vec<Py<PyAny>>> = Vec::new();
         let mut current_chunk: Vec<Py<PyAny>> = Vec::new();
 
-        while let Some(row_result) = stream.next().await {
+        while let Some(row_result) = std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await {
             match row_result {
                 Ok(row) => {
                     let row_data: Py<PyAny> = ParameterBinder.bind_result(py, &row)?;

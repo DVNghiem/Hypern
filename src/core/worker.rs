@@ -2,11 +2,6 @@ use axum::{body::Body, extract::State, http::Request, response::IntoResponse, Ro
 use pyo3::prelude::*;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tower::ServiceBuilder;
-use tower_http::{
-    request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
-    trace::TraceLayer,
-};
 use tracing::info;
 
 use crate::core::interpreter::http_execute;
@@ -39,71 +34,85 @@ async fn handle_request(State(state): State<AppState>, req: Request<Body>) -> im
     // Convert Axum request to Hypern request
     let fast_req = HypernRequest::from_axum(req).await;
 
-    // Create middleware context from request
-    let method = HttpMethod::from_str(fast_req.method().as_str()).unwrap_or(HttpMethod::GET);
+    // Fast path: if no middleware, skip middleware context creation entirely
+    let has_before_middleware = !state.middleware.is_empty_before();
+    let has_after_middleware = !state.middleware.is_empty_after();
 
-    let headers_map = fast_req.headers_map();
-    let mw_ctx = MiddlewareContext::new(
-        fast_req.path(),
-        method,
-        headers_map,
-        fast_req.query_string(),
-        fast_req.body_ref(),
-    );
+    if has_before_middleware {
+        // Create middleware context only when middleware exists
+        let method = HttpMethod::from_str(fast_req.method().as_str()).unwrap_or(HttpMethod::GET);
+        let headers_map = fast_req.headers_map();
+        let mw_ctx = MiddlewareContext::new(
+            fast_req.path(),
+            method,
+            headers_map,
+            fast_req.query_string(),
+            fast_req.body_ref(),
+        );
 
-    // Execute "before" middleware (pure Rust, no GIL)
-    match state.middleware.execute_before(&mw_ctx).await {
-        MiddlewareResult::Continue() => {
-            // Middleware passed, continue to route handler
-        }
-        MiddlewareResult::Response(response) => {
-            return middleware_response_to_hyper(response);
-        }
-        MiddlewareResult::Error(err) => {
-            // Middleware returned an error
-            if let Some(response) = state.middleware.execute_error(&mw_ctx, &err).await {
+        // Execute "before" middleware (pure Rust, no GIL)
+        match state.middleware.execute_before(&mw_ctx).await {
+            MiddlewareResult::Continue() => {}
+            MiddlewareResult::Response(response) => {
                 return middleware_response_to_hyper(response);
             }
-            return middleware_response_to_hyper(err.to_response());
+            MiddlewareResult::Error(err) => {
+                if let Some(response) = state.middleware.execute_error(&mw_ctx, &err).await {
+                    return middleware_response_to_hyper(response);
+                }
+                return middleware_response_to_hyper(err.to_response());
+            }
+        }
+
+        // Match route and execute handler
+        let response = if let Some((route, params)) = state
+            .router
+            .find_matching_route(fast_req.path(), fast_req.method().as_str())
+        {
+            fast_req.set_path_params(params.clone());
+            mw_ctx.set_params(params);
+
+            let route_hash = route.handler_hash();
+            let res = http_execute(route_hash, fast_req).await;
+
+            if has_after_middleware {
+                let _ = state.middleware.execute_after(&mw_ctx).await;
+            }
+
+            // Apply middleware response headers
+            let headers_to_add = mw_ctx.get_response_headers();
+            if !headers_to_add.is_empty() {
+                let (mut parts, body) = res.into_parts();
+                for (name, value) in headers_to_add {
+                    if let (Ok(name), Ok(value)) = (
+                        axum::http::HeaderName::from_bytes(name.as_bytes()),
+                        axum::http::HeaderValue::from_str(&value),
+                    ) {
+                        parts.headers.insert(name, value);
+                    }
+                }
+                axum::http::Response::from_parts(parts, body)
+            } else {
+                res
+            }
+        } else {
+            response_404()
+        };
+
+        response
+    } else {
+        // Fast path: no middleware - go straight to route handler
+        if let Some((route, params)) = state
+            .router
+            .find_matching_route(fast_req.path(), fast_req.method().as_str())
+        {
+            fast_req.set_path_params(params);
+            let route_hash = route.handler_hash();
+            http_execute(route_hash, fast_req).await
+        } else {
+            response_404()
         }
     }
-
-    // Match route to get pattern-based hash and params
-    let response = if let Some((route, params)) = state
-        .router
-        .find_matching_route(fast_req.path(), fast_req.method().as_str())
-    {
-        // Set path params from routing
-        fast_req.set_path_params(params.clone());
-        mw_ctx.set_params(params);
-
-        let route_hash = route.handler_hash();
-
-        let res = http_execute(route_hash, fast_req).await;
-
-        let _ = state.middleware.execute_after(&mw_ctx).await;
-
-        // Apply middleware response headers to the actual HTTP response
-        let headers_to_add = mw_ctx.get_response_headers();
-        if !headers_to_add.is_empty() {
-            let (mut parts, body) = res.into_parts();
-            for (name, value) in headers_to_add {
-                if let (Ok(name), Ok(value)) = (
-                    axum::http::HeaderName::from_bytes(name.as_bytes()),
-                    axum::http::HeaderValue::from_str(&value),
-                ) {
-                    parts.headers.insert(name, value);
-                }
-            }
-            axum::http::Response::from_parts(parts, body)
-        } else {
-            res
-        }
-    } else {
-        response_404()
-    };
-
-    response
 }
 
 /// Run the Axum-based worker process
@@ -185,6 +194,12 @@ pub fn run_worker(
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(worker_threads)
         .max_blocking_threads(max_blocking_threads)
+        .thread_name_fn(|| {
+            static ATOMIC_ID: std::sync::atomic::AtomicUsize =
+                std::sync::atomic::AtomicUsize::new(0);
+            let id = ATOMIC_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            format!("hypern-worker-{}", id)
+        })
         .enable_all()
         .build()
         .expect("Failed to build Tokio runtime");
@@ -196,15 +211,9 @@ pub fn run_worker(
         // Build Axum application with state
         let state = AppState { router, middleware };
 
-        // Build the Axum router with middleware stack
-        let app = build_axum_router(state).layer(
-            ServiceBuilder::new()
-                // Request ID propagation
-                .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
-                .layer(PropagateRequestIdLayer::x_request_id())
-                // Tracing
-                .layer(TraceLayer::new_for_http()),
-        );
+        // Build the Axum router - minimal layer stack for maximum performance
+        // Request ID and tracing are handled by Rust middleware chain, not tower layers
+        let app = build_axum_router(state);
 
         info!("Axum worker {} started", worker_id);
 

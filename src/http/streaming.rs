@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use futures::Stream;
+use futures_core::Stream;
 use pyo3::prelude::*;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 

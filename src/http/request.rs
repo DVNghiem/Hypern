@@ -111,14 +111,17 @@ impl Request {
         self.method
     }
 
+    #[inline]
     pub fn take_body(&self) -> Option<Bytes> {
         self.body.write().take()
     }
 
+    #[inline]
     pub fn body_ref(&self) -> Option<Bytes> {
         self.body.read().as_ref().cloned()
     }
 
+    #[inline]
     pub fn headers_map(&self) -> HashMap<String, String> {
         self.headers
             .iter()
@@ -126,6 +129,7 @@ impl Request {
             .collect()
     }
 
+    #[inline]
     pub fn query_string(&self) -> &str {
         &self.query_string
     }
@@ -440,22 +444,43 @@ impl Request {
         let (path, query_string) = parts.uri.path_and_query().map_or_else(
             || ("/".to_string(), String::new()),
             |pq| {
-                let path_bytes: Vec<u8> = percent_decode_str(pq.path()).collect();
-                (
-                    String::from_utf8_lossy(&path_bytes).to_string(),
-                    pq.query().unwrap_or("").to_string(),
-                )
+                let raw_path = pq.path();
+                // Fast path: if no percent-encoded chars, avoid allocation
+                let path = if raw_path.contains('%') {
+                    let path_bytes: Vec<u8> = percent_decode_str(raw_path).collect();
+                    String::from_utf8_lossy(&path_bytes).into_owned()
+                } else {
+                    raw_path.to_string()
+                };
+                (path, pq.query().unwrap_or("").to_string())
             },
         );
 
         let method = HttpMethod::from_axum(&parts.method);
         let headers = HeaderMap::from_axum(&parts.headers);
 
-        // Collect body bytes using Axum's helper
-        let body_bytes = match to_bytes(body, 10 * 1024 * 1024).await {
-            // 10MB limit
-            Ok(bytes) => Some(bytes),
-            Err(_) => None,
+        // Skip body reading for methods that typically don't have a body
+        // This avoids an unnecessary await + allocation for GET/HEAD/DELETE/OPTIONS
+        let body_bytes = match method {
+            HttpMethod::GET | HttpMethod::HEAD | HttpMethod::OPTIONS | HttpMethod::DELETE => {
+                // Check Content-Length to see if there actually is a body
+                let has_body = parts
+                    .headers
+                    .get(axum::http::header::CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .map(|len| len > 0)
+                    .unwrap_or(false);
+                if has_body {
+                    to_bytes(body, 10 * 1024 * 1024).await.ok()
+                } else {
+                    None
+                }
+            }
+            _ => {
+                // POST, PUT, PATCH - read body
+                to_bytes(body, 10 * 1024 * 1024).await.ok()
+            }
         };
 
         Self::new(&path, method, headers, &query_string, body_bytes)

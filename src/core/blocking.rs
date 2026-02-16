@@ -43,8 +43,9 @@ impl BlockingRunner {
         let (qtx, qrx) = channel::unbounded();
         let threads = Arc::new(atomic::AtomicUsize::new(0));
 
-        // Pre-spawn threads up to max_threads for immediate availability
-        let initial_threads = max_threads.min(32); // Start with up to 32 threads
+        // Pre-spawn all threads up to max for immediate availability
+        // This avoids thread spawn overhead during request handling
+        let initial_threads = max_threads;
         for _ in 0..initial_threads {
             let queue = qrx.clone();
             let tcount = threads.clone();
@@ -69,8 +70,9 @@ impl BlockingRunner {
 
     #[inline(always)]
     fn spawn_thread(&self) {
+        // Reduced throttle: 100μs instead of 350μs for faster scaling
         let tick = self.birth.elapsed().as_micros() as u64;
-        if tick - self.spawn_tick.load(atomic::Ordering::Relaxed) < 350 {
+        if tick - self.spawn_tick.load(atomic::Ordering::Relaxed) < 100 {
             return;
         }
         if self
@@ -102,13 +104,14 @@ impl BlockingRunner {
         self.spawning.store(false, atomic::Ordering::Relaxed);
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn run<T>(&self, task: T) -> Result<(), channel::SendError<BlockingTask>>
     where
         T: FnOnce(Python) + Send + 'static,
     {
         self.queue.send(BlockingTask::new(task))?;
-        if self.queue.len() > 1 && self.threads.load(atomic::Ordering::Acquire) < self.tmax {
+        // Spawn additional threads if queue is building up
+        if self.queue.len() > 2 && self.threads.load(atomic::Ordering::Acquire) < self.tmax {
             self.spawn_thread();
         }
         Ok(())

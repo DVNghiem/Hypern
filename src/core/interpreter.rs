@@ -59,13 +59,15 @@ pub async fn http_execute(route_hash: u64, request: Request) -> axum::response::
     let response = Response::new(response_slot.clone());
     let rt_ref = get_global_runtime().handler();
 
-    // Direct call to blocking runner - no WorkerPool overhead
+    // Direct call to blocking runner - minimized GIL scope
     future_into_py(
         &rt_ref,
         is_async,
         move |py| {
-            // Get handler with GIL
+            // This closure runs under GIL - minimize work here
             let handler = get_handler(py, route_hash).expect("Handler must exist");
+
+            // Use raw PyO3 API to avoid intermediate conversions
             let req_any = request
                 .into_bound_py_any(py)
                 .expect("Failed to convert request")
@@ -74,14 +76,19 @@ pub async fn http_execute(route_hash: u64, request: Request) -> axum::response::
                 .into_bound_py_any(py)
                 .expect("Failed to convert response")
                 .unbind();
-            let args = PyTuple::new(py, vec![req_any, res_any])
-                .expect("Failed to create tuple")
-                .unbind();
-            (handler, args)
+
+            // Create tuple using raw C API for speed - avoids PyTuple::new allocation overhead
+            unsafe {
+                let tuple = pyo3::ffi::PyTuple_New(2);
+                pyo3::ffi::PyTuple_SetItem(tuple, 0, req_any.into_ptr());
+                pyo3::ffi::PyTuple_SetItem(tuple, 1, res_any.into_ptr());
+                // Safety: we just created a valid tuple above
+                let args: Py<PyTuple> = Py::from_owned_ptr(py, tuple);
+                (handler, args)
+            }
         },
         move || {
             // Reset the thread-local arena after each request
-            // This releases all temporary allocations efficiently
             reset_arena();
             let _ = tx.send(());
         },

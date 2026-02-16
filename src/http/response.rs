@@ -132,7 +132,6 @@ impl ResponseSlot {
     pub fn into_response(self: Arc<Self>) -> axum::response::Response {
         let status = self.status.load(Ordering::Acquire);
         let headers = self.headers.read();
-        let body = self.body.read();
 
         let mut header_map = HeaderMap::with_capacity(headers.len() + 2);
         for (key, value) in headers.iter() {
@@ -147,14 +146,18 @@ impl ResponseSlot {
             .entry(SERVER)
             .or_insert(HeaderValue::from_static("Hypern"));
 
+        // Take body data from the lock to avoid clone when possible
+        let body_data = std::mem::take(&mut *self.body.write());
+        let body_len = body_data.len();
+
         // Set Content-Length explicitly for better client compatibility
         header_map.insert(
             axum::http::header::CONTENT_LENGTH,
-            HeaderValue::from(body.len()),
+            HeaderValue::from(body_len),
         );
 
-        // Clone body data from the lock guard before creating the HTTP body
-        let http_body = body.clone().into();
+        // Move body data directly into response - zero-copy
+        let http_body = body_data.into();
 
         let mut res = axum::response::Response::new(http_body);
         *res.status_mut() =

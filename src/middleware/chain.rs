@@ -183,12 +183,14 @@ pub struct MiddlewareContext {
     pub method: HttpMethod,
     pub headers: Arc<RwLock<HashMap<String, String>>>,
     pub query_string: Arc<RwLock<String>>,
-    pub query_params: Arc<RwLock<HashMap<String, String>>>,
+    /// Lazily parsed query params - only parsed when accessed
+    pub query_params: Arc<RwLock<Option<HashMap<String, String>>>>,
     pub path_params: Arc<RwLock<HashMap<String, String>>>,
     pub body: Arc<RwLock<Option<Bytes>>>,
 
     // Middleware state (mutable, shared between middleware)
-    pub state: Arc<RwLock<MiddlewareState>>,
+    /// Lazily initialized - only allocate when middleware actually stores state
+    pub state: Arc<RwLock<Option<MiddlewareState>>>,
 
     // Response modifications (accumulated by middleware)
     pub response_headers: Arc<RwLock<Vec<(String, String)>>>,
@@ -301,19 +303,30 @@ impl MiddlewareContext {
     /// Get a query parameter
     #[pyo3(name = "get_query")]
     pub fn get_query_py(&self, name: &str) -> Option<String> {
-        self.query_params.read().get(name).cloned()
+        self.ensure_query_params();
+        self.query_params
+            .read()
+            .as_ref()
+            .and_then(|qp| qp.get(name).cloned())
     }
 
     /// Set a query parameter
     #[pyo3(name = "set_query")]
     pub fn set_query_py(&self, name: String, value: String) {
-        self.query_params.write().insert(name, value);
+        self.ensure_query_params();
+        if let Some(ref mut qp) = *self.query_params.write() {
+            qp.insert(name, value);
+        }
     }
 
     /// Remove a query parameter
     #[pyo3(name = "remove_query")]
     pub fn remove_query_py(&self, name: &str) -> Option<String> {
-        self.query_params.write().remove(name)
+        self.ensure_query_params();
+        self.query_params
+            .write()
+            .as_mut()
+            .and_then(|qp| qp.remove(name))
     }
 
     /// Get a path parameter
@@ -366,36 +379,55 @@ impl MiddlewareContext {
     /// Set a state value
     #[pyo3(name = "set_state")]
     pub fn set_state_py(&self, key: String, value: StateValue) {
-        self.state.write().values.insert(key, value);
+        self.ensure_state();
+        if let Some(ref mut state) = *self.state.write() {
+            state.values.insert(key, value);
+        }
     }
 
     /// Get a state value
     pub fn get_state(&self, key: &str) -> Option<StateValue> {
-        self.state.read().values.get(key).cloned()
+        self.state
+            .read()
+            .as_ref()
+            .and_then(|s| s.values.get(key).cloned())
     }
 
     /// Set the user as authenticated
     #[pyo3(name = "set_authenticated")]
     pub fn set_authenticated_py(&self, user_id: String, roles: Vec<String>) {
-        let mut state = self.state.write();
-        state.is_authenticated = true;
-        state.user_id = Some(user_id);
-        state.roles = roles;
+        self.ensure_state();
+        if let Some(ref mut state) = *self.state.write() {
+            state.is_authenticated = true;
+            state.user_id = Some(user_id);
+            state.roles = roles;
+        }
     }
 
     /// Check if authenticated
     pub fn is_authenticated(&self) -> bool {
-        self.state.read().is_authenticated
+        self.state
+            .read()
+            .as_ref()
+            .map(|s| s.is_authenticated)
+            .unwrap_or(false)
     }
 
     /// Get user ID if authenticated
     pub fn user_id(&self) -> Option<String> {
-        self.state.read().user_id.clone()
+        self.state
+            .read()
+            .as_ref()
+            .and_then(|s| s.user_id.clone())
     }
 
     /// Check if user has a role
     pub fn has_role(&self, role: &str) -> bool {
-        self.state.read().roles.contains(&role.to_string())
+        self.state
+            .read()
+            .as_ref()
+            .map(|s| s.roles.contains(&role.to_string()))
+            .unwrap_or(false)
     }
 
     /// Get elapsed time since request start in seconds
@@ -414,6 +446,7 @@ impl MiddlewareContext {
 
 impl MiddlewareContext {
     /// Create a new context from request data
+    /// Optimized: lazy initialization of query_params and state
     pub fn new(
         path: &str,
         method: HttpMethod,
@@ -423,32 +456,48 @@ impl MiddlewareContext {
     ) -> Self {
         use xxhash_rust::xxh3::xxh3_64;
 
-        // Generate request ID
+        // Generate request ID using fast hash - avoid format! allocation
         let now = std::time::Instant::now();
         let id_seed = format!("{}{}{:?}", path, query_string, now);
         let request_id = format!("{:016x}", xxh3_64(id_seed.as_bytes()));
 
-        // Parse query params
-        let query_params: HashMap<String, String> = if query_string.is_empty() {
-            HashMap::new()
-        } else {
-            form_urlencoded::parse(query_string.as_bytes())
-                .into_owned()
-                .collect()
-        };
-
+        // Don't parse query params eagerly - defer to first access
         Self {
             path: Arc::new(RwLock::new(path.to_string())),
             method,
             headers: Arc::new(RwLock::new(headers)),
             query_string: Arc::new(RwLock::new(query_string.to_string())),
-            query_params: Arc::new(RwLock::new(query_params)),
+            query_params: Arc::new(RwLock::new(None)), // Lazy - parsed on demand
             path_params: Arc::new(RwLock::new(HashMap::new())),
             body: Arc::new(RwLock::new(body)),
-            state: Arc::new(RwLock::new(MiddlewareState::default())),
+            state: Arc::new(RwLock::new(None)), // Lazy - initialized on demand
             response_headers: Arc::new(RwLock::new(Vec::new())),
             start_time: now,
             request_id: Arc::from(request_id),
+        }
+    }
+
+    /// Ensure query params are parsed (lazy initialization)
+    fn ensure_query_params(&self) {
+        let mut qp = self.query_params.write();
+        if qp.is_none() {
+            let qs = self.query_string.read();
+            let parsed: HashMap<String, String> = if qs.is_empty() {
+                HashMap::new()
+            } else {
+                form_urlencoded::parse(qs.as_bytes())
+                    .into_owned()
+                    .collect()
+            };
+            *qp = Some(parsed);
+        }
+    }
+
+    /// Ensure state is initialized (lazy initialization)
+    fn ensure_state(&self) {
+        let mut state = self.state.write();
+        if state.is_none() {
+            *state = Some(MiddlewareState::default());
         }
     }
 
@@ -471,17 +520,28 @@ impl MiddlewareContext {
 
     /// Get a query parameter
     pub fn get_query(&self, name: &str) -> Option<String> {
-        self.query_params.read().get(name).cloned()
+        self.ensure_query_params();
+        self.query_params
+            .read()
+            .as_ref()
+            .and_then(|qp| qp.get(name).cloned())
     }
 
     /// Set a query parameter
     pub fn set_query(&self, name: impl Into<String>, value: impl Into<String>) {
-        self.query_params.write().insert(name.into(), value.into());
+        self.ensure_query_params();
+        if let Some(ref mut qp) = *self.query_params.write() {
+            qp.insert(name.into(), value.into());
+        }
     }
 
     /// Remove a query parameter
     pub fn remove_query(&self, name: &str) -> Option<String> {
-        self.query_params.write().remove(name)
+        self.ensure_query_params();
+        self.query_params
+            .write()
+            .as_mut()
+            .and_then(|qp| qp.remove(name))
     }
 
     /// Set a path parameter
@@ -538,15 +598,20 @@ impl MiddlewareContext {
 
     /// Set a state value
     pub fn set_state(&self, key: impl Into<String>, value: StateValue) {
-        self.state.write().values.insert(key.into(), value);
+        self.ensure_state();
+        if let Some(ref mut state) = *self.state.write() {
+            state.values.insert(key.into(), value);
+        }
     }
 
     /// Set the user as authenticated
     pub fn set_authenticated(&self, user_id: impl Into<String>, roles: Vec<String>) {
-        let mut state = self.state.write();
-        state.is_authenticated = true;
-        state.user_id = Some(user_id.into());
-        state.roles = roles;
+        self.ensure_state();
+        if let Some(ref mut state) = *self.state.write() {
+            state.is_authenticated = true;
+            state.user_id = Some(user_id.into());
+            state.roles = roles;
+        }
     }
 
     /// Set path parameters from a map
@@ -660,10 +725,17 @@ impl MiddlewareChain {
     /// Execute all "before" middleware in order
     /// Returns Continue if all passed, or the first Response/Error
     pub async fn execute_before(&self, ctx: &MiddlewareContext) -> MiddlewareResult {
+        if self.before.is_empty() {
+            return MiddlewareResult::Continue();
+        }
+
+        // Read path once for all middleware checks
+        let path = ctx.path.read().clone();
+        let method = ctx.method;
+
         for middleware in &self.before {
             // Check if middleware applies to this request
-            let path = ctx.get_path();
-            if !middleware.applies_to(&path) || !middleware.applies_to_method(ctx.method) {
+            if !middleware.applies_to(&path) || !middleware.applies_to_method(method) {
                 continue;
             }
 
@@ -677,9 +749,15 @@ impl MiddlewareChain {
 
     /// Execute all "after" middleware in order
     pub async fn execute_after(&self, ctx: &MiddlewareContext) -> MiddlewareResult {
+        if self.after.is_empty() {
+            return MiddlewareResult::Continue();
+        }
+
+        let path = ctx.path.read().clone();
+        let method = ctx.method;
+
         for middleware in &self.after {
-            let path = ctx.get_path();
-            if !middleware.applies_to(&path) || !middleware.applies_to_method(ctx.method) {
+            if !middleware.applies_to(&path) || !middleware.applies_to_method(method) {
                 continue;
             }
 
@@ -733,6 +811,18 @@ impl MiddlewareChain {
             self.after.len(),
             self.error_handlers.len(),
         )
+    }
+
+    /// Check if there are no before middleware (for fast-path optimization)
+    #[inline]
+    pub fn is_empty_before(&self) -> bool {
+        self.before.is_empty()
+    }
+
+    /// Check if there are no after middleware (for fast-path optimization)
+    #[inline]
+    pub fn is_empty_after(&self) -> bool {
+        self.after.is_empty()
     }
 }
 
