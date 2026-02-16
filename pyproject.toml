@@ -5,7 +5,7 @@ build-backend = "maturin"
 
 [project]
 name = "hypern"
-version = "0.3.15"
+version = "1.0.0"
 description = "A Fast Async Python backend with a Rust runtime."
 authors = [{ name = "Martin Dang", email = "vannghiem848@gmail.com" }]
 requires-python = ">=3.11,<4.0"
@@ -27,7 +27,7 @@ module-name = "hypern._hypern"
 
 [tool.poetry]
 name = "hypern"
-version = "0.3.15"
+version = "1.0.0"
 description = "A Fast Async Python backend with a Rust runtime."
 authors = ["Martin Dang <vannghiem848@gmail.com>"]
 
