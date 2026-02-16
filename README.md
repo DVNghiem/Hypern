@@ -98,7 +98,7 @@ You can open swagger UI at path `/docs`
 - File upload handling
 
 ### 🔒 Security
-- Built-in authentication/authorization (Comming soon)
+- Built-in authentication/authorization (JWT, API keys, RBAC)
 - CORS configuration
 - Rate limiting
 - Request validation

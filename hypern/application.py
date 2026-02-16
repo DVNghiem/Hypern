@@ -23,6 +23,8 @@ from hypern._hypern import get_db as _get_db
 
 if TYPE_CHECKING:
     from hypern.openapi import OpenAPIGenerator
+    from hypern.websocket import WebSocket, WebSocketRouter
+    from hypern.scheduler import TaskScheduler
 
 AppType = TypeVar("AppType", bound="Hypern")
 HandlerType = Callable[..., Union[None, Awaitable[None]]]
@@ -109,6 +111,13 @@ class Hypern:
         self.response_headers: Dict[str, str] = {}
         self.start_up_handler = None
         self.shutdown_handler = None
+        
+        # WebSocket router
+        from hypern.websocket import WebSocketRouter as _WSRouter
+        self._ws_router: _WSRouter = _WSRouter()
+        
+        # Task scheduler (lazy-initialised)
+        self._scheduler: Optional['TaskScheduler'] = None
         
         if routes is not None:
             self._router.extend_route(routes)
@@ -330,6 +339,57 @@ class Hypern:
         """
         # Return a new StreamingResponse instance
         return StreamingResponse(content_type, buffer_size)
+    
+    # ------------------------------------------------------------------
+    # WebSocket support
+    # ------------------------------------------------------------------
+    
+    def ws(self, path: str, **options) -> Callable:
+        """
+        Decorator to register a WebSocket handler.
+        
+        Example:
+            @app.ws("/chat")
+            async def chat(ws):
+                await ws.accept()
+                while True:
+                    msg = await ws.receive_text()
+                    await ws.send_text(f"echo: {msg}")
+        """
+        def decorator(handler: Callable) -> Callable:
+            self._ws_router.add_route(path, handler, **options)
+            return handler
+        return decorator
+    
+    @property
+    def ws_router(self) -> 'WebSocketRouter':
+        """Access the WebSocket router."""
+        return self._ws_router
+    
+    # ------------------------------------------------------------------
+    # Task Scheduler
+    # ------------------------------------------------------------------
+    
+    @property
+    def scheduler(self) -> 'TaskScheduler':
+        """
+        Access or create the task scheduler.
+        
+        The scheduler is lazily created on first access.
+        
+        Example:
+            @app.scheduler.cron("0 3 * * *")
+            def nightly_cleanup():
+                ...
+            
+            @app.scheduler.interval(seconds=30)
+            def health_check():
+                ...
+        """
+        if self._scheduler is None:
+            from hypern.scheduler import TaskScheduler
+            self._scheduler = TaskScheduler()
+        return self._scheduler
     
     def setup_openapi(
         self,
@@ -948,6 +1008,10 @@ class Hypern:
         finally:
             loop.close()
         
+        # Auto-start the scheduler if it was configured
+        if self._scheduler is not None and not self._scheduler.is_running:
+            self._scheduler.start()
+        
         try:
             server = Server()
             server.set_router(router=self._router)
@@ -984,6 +1048,10 @@ class Hypern:
             # Stop task executor
             if self._tasks is not None:
                 self._tasks.shutdown()
+            
+            # Stop scheduler
+            if self._scheduler is not None:
+                self._scheduler.stop()
     
     def run_dev(
         self,

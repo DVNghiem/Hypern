@@ -27,7 +27,7 @@ def reset_database():
 
 
 # Test database configuration
-TEST_DB_URL = "postgresql://nghiem:nghiem@localhost:5432/test"
+TEST_DB_URL = "postgresql://nghiem:nghiem@localhost:6543/test"
 
 
 @pytest.fixture(scope="module")

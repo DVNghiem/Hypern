@@ -371,6 +371,18 @@ class OpenAPIGenerator:
         if hasattr(handler, "_requires_auth"):
             endpoint.security = [{"bearerAuth": []}]
         
+        # Extract RBAC metadata for description
+        required_roles = getattr(handler, "_required_roles", None)
+        required_permissions = getattr(handler, "_required_permissions", None)
+        rbac_notes = []
+        if required_roles:
+            rbac_notes.append(f"**Required roles**: {', '.join(required_roles)}")
+        if required_permissions:
+            rbac_notes.append(f"**Required permissions**: {', '.join(required_permissions)}")
+        if rbac_notes:
+            extra = "\n\n" + "\n\n".join(rbac_notes)
+            endpoint.description = (endpoint.description or "") + extra
+        
         # Extract deprecation
         endpoint.deprecated = getattr(handler, "_deprecated", False)
         

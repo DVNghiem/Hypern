@@ -28,7 +28,10 @@ if __name__ == "__main__":
 | [SSE & Streaming](sse.md) | Server-Sent Events and streaming responses |
 | [Validation](validation.md) | Request validation and schema definition |
 | [Dependency Injection](dependency-injection.md) | DI container and service registration |
+| [Authentication](auth.md) | JWT, API keys, and RBAC authorization |
+| [WebSocket](websocket.md) | Real-time WebSocket connections and rooms |
 | [Background Tasks](tasks.md) | Background job processing |
+| [Task Scheduling](scheduling.md) | Cron, intervals, retry, and monitoring |
 | [Error Handling](error-handling.md) | Exception handling and error responses |
 | [File Uploads](file-uploads.md) | Multipart file handling |
 | [Database](database.md) | Database operations and connection pooling |

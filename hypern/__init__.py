@@ -87,6 +87,40 @@ from .openapi import (
     setup_openapi_routes,
 )
 
+# Auth module
+from .auth import (
+    JWTAuth,
+    JWTError,
+    APIKeyAuth,
+    RBACPolicy,
+    requires_role,
+    requires_permission,
+)
+
+# WebSocket module
+from .websocket import (
+    WebSocket,
+    WebSocketState,
+    WebSocketMessage,
+    WebSocketDisconnect,
+    WebSocketError,
+    WebSocketRoom,
+    WebSocketRoute,
+    WebSocketRouter,
+)
+
+# Scheduler module
+from .scheduler import (
+    RetryPolicy,
+    TaskMetrics,
+    TaskMonitor,
+    TaskScheduler,
+    ScheduledTaskState,
+    ScheduledTaskResult,
+    CronExpression,
+    periodic,
+)
+
 
 __version__ = "0.4.0"
 
@@ -168,6 +202,31 @@ __all__ = [
     "api_doc",
     "api_tags",
     "setup_openapi_routes",
+    # Auth
+    "JWTAuth",
+    "JWTError",
+    "APIKeyAuth",
+    "RBACPolicy",
+    "requires_role",
+    "requires_permission",
+    # WebSocket
+    "WebSocket",
+    "WebSocketState",
+    "WebSocketMessage",
+    "WebSocketDisconnect",
+    "WebSocketError",
+    "WebSocketRoom",
+    "WebSocketRoute",
+    "WebSocketRouter",
+    # Scheduler
+    "RetryPolicy",
+    "TaskMetrics",
+    "TaskMonitor",
+    "TaskScheduler",
+    "ScheduledTaskState",
+    "ScheduledTaskResult",
+    "CronExpression",
+    "periodic",
     # Database
     "Database",
     "get_database",

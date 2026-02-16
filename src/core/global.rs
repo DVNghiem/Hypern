@@ -26,10 +26,20 @@ pub fn get_asyncio(py: Python<'_>) -> &Py<PyModule> {
 pub fn get_event_loop(py: Python<'_>) -> &Py<PyAny> {
     EV_LOOP.get_or_init(|| {
         let asyncio = get_asyncio(py).bind(py);
-        asyncio
-            .call_method0("get_event_loop")
-            .expect("Failed to get event loop")
-            .into()
+        // Python 3.12+ raises RuntimeError from get_event_loop() when no
+        // current event loop exists.  Fall back to creating a new one.
+        match asyncio.call_method0("get_event_loop") {
+            Ok(loop_obj) => loop_obj.into(),
+            Err(_) => {
+                let new_loop = asyncio
+                    .call_method0("new_event_loop")
+                    .expect("Failed to create new event loop");
+                asyncio
+                    .call_method1("set_event_loop", (&new_loop,))
+                    .expect("Failed to set event loop");
+                new_loop.into()
+            }
+        }
     })
 }
 

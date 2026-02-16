@@ -18,9 +18,12 @@ nav:
       - Request & Response: request-response.md
       - Middleware: middleware.md
   - Features:
+      - Authentication: auth.md
+      - WebSocket: websocket.md
       - Validation: validation.md
       - Dependency Injection: dependency-injection.md
       - Background Tasks: tasks.md
+      - Task Scheduling: scheduling.md
       - Streaming & SSE: sse.md
       - File Uploads: file-uploads.md
       - Error Handling: error-handling.md
