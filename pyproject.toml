@@ -5,14 +5,31 @@ build-backend = "maturin"
 
 [project]
 name = "hypern"
-version = "1.0.0"
+version = "1.0.1"
 description = "A Fast Async Python backend with a Rust runtime."
 authors = [{ name = "Martin Dang", email = "vannghiem848@gmail.com" }]
 requires-python = ">=3.11,<4.0"
+readme = "README.md"
 classifiers = [
-    "Programming Language :: Rust",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+    "Programming Language :: Rust",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Server",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Framework :: AsyncIO",
+    "Environment :: Web Environment",
+    "Typing :: Typed",
 ]
 dependencies=[
     "orjson>=3.10.11",
@@ -27,7 +44,7 @@ module-name = "hypern._hypern"
 
 [tool.poetry]
 name = "hypern"
-version = "1.0.0"
+version = "1.0.1"
 description = "A Fast Async Python backend with a Rust runtime."
 authors = ["Martin Dang <vannghiem848@gmail.com>"]
 
