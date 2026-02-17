@@ -25,6 +25,7 @@ nav:
       - Background Tasks: tasks.md
       - Task Scheduling: scheduling.md
       - Streaming & SSE: sse.md
+      - Zero-Downtime Reloads: zero-downtime.md
       - File Uploads: file-uploads.md
       - Error Handling: error-handling.md
   - Best Practices: best-practices.md

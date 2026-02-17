@@ -44,6 +44,8 @@ pub use crate::core::tasks::{TaskExecutor, TaskResult, TaskStatus};
 
 pub use crate::http::streaming::{SSEEvent, SSEGenerator, SSEStream, StreamingResponse};
 
+pub use crate::core::reload::{PyHealthCheck, PyReloadConfig, PyReloadManager};
+
 pub use crate::middleware::{
     PyBasicAuthMiddleware, PyCompressionMiddleware, PyCorsMiddleware, PyLogMiddleware,
     PyRateLimitMiddleware, PyRequestIdMiddleware, PySecurityHeadersMiddleware, PyTimeoutMiddleware,
@@ -90,6 +92,11 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<SSEStream>()?;
     module.add_class::<SSEGenerator>()?;
     module.add_class::<StreamingResponse>()?;
+
+    // Reload / Health
+    module.add_class::<PyHealthCheck>()?;
+    module.add_class::<PyReloadConfig>()?;
+    module.add_class::<PyReloadManager>()?;
 
     // Rust Middleware
     module.add_class::<PyCorsMiddleware>()?;

@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use std::sync::Arc;
 use tracing::info;
 
+use crate::core::reload::ReloadManager;
 use crate::middleware::MiddlewareChain;
 use crate::routing::router::Router;
 use crate::socket::SocketHeld;
@@ -18,6 +19,7 @@ pub fn spawn_workers(
     router: Arc<Router>,
     middleware: Arc<MiddlewareChain>,
     handlers: Vec<(u64, Py<PyAny>)>,
+    reload_manager: ReloadManager,
 ) -> Vec<libc::pid_t> {
     use std::process;
 
@@ -43,6 +45,9 @@ pub fn spawn_workers(
                     // Child process - use Axum worker
                     use crate::core::worker::run_worker;
 
+                    // Each child gets its own ReloadManager instance
+                    let child_reload = ReloadManager::new(reload_manager.config().clone());
+
                     // Run the Axum worker (this blocks forever)
                     let _ = run_worker(
                         py,
@@ -54,6 +59,7 @@ pub fn spawn_workers(
                         middleware.clone(),
                         handlers_clone,
                         worker_id,
+                        child_reload,
                     );
                     // Should never reach here
                     process::exit(0);
@@ -146,6 +152,7 @@ pub fn spawn_workers(
     router: Arc<Router>,
     middleware: Arc<MiddlewareChain>,
     handlers: Vec<(u64, Py<PyAny>)>,
+    reload_manager: ReloadManager,
 ) -> Vec<std::thread::JoinHandle<()>> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
@@ -165,6 +172,7 @@ pub fn spawn_workers(
         let socket = socket_held.try_clone().expect("Failed to clone socket");
         let router = router.clone();
         let middleware = middleware.clone();
+        let rm = ReloadManager::new(reload_manager.config().clone());
 
         // Clone handlers with GIL
         let handlers_clone: Vec<(u64, Py<PyAny>)> = Python::attach(|inner_py| {
@@ -192,13 +200,11 @@ pub fn spawn_workers(
                     .expect("Failed to create Tokio runtime");
 
                 rt.block_on(async {
-                    use axum::routing::any;
-                    use axum::Router as AxumRouter;
                     use std::net::TcpListener;
                     use tokio::net::TcpListener as TokioListener;
 
                     // Convert socket to TcpListener
-                    let std_listener: TcpListener = socket.into();
+                    let std_listener: TcpListener = socket.get_socket().into();
                     std_listener
                         .set_nonblocking(true)
                         .expect("Failed to set non-blocking");
@@ -208,33 +214,23 @@ pub fn spawn_workers(
 
                     info!("Thread worker {} listening", worker_id);
 
-                    // Build Axum router with handler
-                    let router_arc = router.clone();
-                    let middleware_arc = middleware.clone();
+                    // Build Axum router using the standard AppState path
+                    let state = crate::core::worker::AppState {
+                        router: router.clone(),
+                        middleware: middleware.clone(),
+                        reload_manager: rm.clone(),
+                    };
 
-                    let app = AxumRouter::new()
-                        .route(
-                            "/{*path}",
-                            any(move |req: axum::extract::Request| {
-                                let router = router_arc.clone();
-                                let middleware = middleware_arc.clone();
-                                async move {
-                                    crate::core::worker::handle_request(req, router, middleware)
-                                        .await
-                                }
-                            }),
-                        )
-                        .route(
-                            "/",
-                            any(move |req: axum::extract::Request| {
-                                let router = router.clone();
-                                let middleware = middleware.clone();
-                                async move {
-                                    crate::core::worker::handle_request(req, router, middleware)
-                                        .await
-                                }
-                            }),
-                        );
+                    let app = crate::core::worker::build_axum_router_public(state);
+
+                    // Mark healthy after grace period
+                    let rm_startup = rm.clone();
+                    let startup_grace = rm.config().startup_grace_secs;
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(startup_grace)).await;
+                        rm_startup.health().mark_healthy();
+                        info!("Thread worker {} marked healthy", worker_id);
+                    });
 
                     // Serve with connection limits
                     let server = axum::serve(listener, app).with_graceful_shutdown(async {

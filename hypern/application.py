@@ -17,6 +17,7 @@ from hypern.exceptions import ExceptionHandler
 from hypern.router import Router
 from hypern._hypern import DIContainer, TaskExecutor, TaskResult
 from hypern._hypern import SSEStream, StreamingResponse
+from hypern._hypern import HealthCheck, ReloadConfig, ReloadManager
 
 from hypern.database import Database as _Database, finalize_db as _finalize_db
 from hypern._hypern import get_db as _get_db
@@ -118,6 +119,10 @@ class Hypern:
         
         # Task scheduler (lazy-initialised)
         self._scheduler: Optional['TaskScheduler'] = None
+        
+        # Reload / health configuration
+        self._reload_config: Optional[ReloadConfig] = None
+        self._reload_manager: Optional[ReloadManager] = None
         
         if routes is not None:
             self._router.extend_route(routes)
@@ -390,6 +395,114 @@ class Hypern:
             from hypern.scheduler import TaskScheduler
             self._scheduler = TaskScheduler()
         return self._scheduler
+    
+    # ------------------------------------------------------------------
+    # Zero-Downtime Reload / Health Probes
+    # ------------------------------------------------------------------
+    
+    def setup_reload(
+        self,
+        drain_timeout_secs: int = 30,
+        startup_grace_secs: int = 2,
+        health_probes: bool = True,
+        health_path: str = "/_health",
+    ) -> 'Hypern':
+        """
+        Configure zero-downtime reload and health probes.
+        
+        Args:
+            drain_timeout_secs: Max seconds to wait for in-flight requests during graceful reload
+            startup_grace_secs: Seconds to wait before marking new workers as healthy
+            health_probes: Whether to enable built-in health probe endpoints
+            health_path: Path prefix for health probes (default "/health")
+        
+        Health probe endpoints (when enabled):
+            - GET {health_path}          → Full health status JSON
+            - GET {health_path}/live     → Liveness probe (is process alive?)
+            - GET {health_path}/ready    → Readiness probe (accepting traffic?)
+            - GET {health_path}/startup  → Startup probe (finished starting?)
+        
+        Reload signals (Unix):
+            - SIGUSR1 → Graceful reload (drain in-flight requests, then restart workers)
+            - SIGUSR2 → Hot reload (immediate restart, for development)
+        
+        Example:
+            app = Hypern()
+            app.setup_reload(
+                drain_timeout_secs=60,
+                health_probes=True,
+                health_path="/health",
+            )
+            
+            # Check health:
+            # curl http://localhost:3000/health
+            # curl http://localhost:3000/health/ready
+            
+            # Graceful reload (from shell):
+            # kill -USR1 <pid>
+            
+            # Hot reload (from shell):
+            # kill -USR2 <pid>
+        """
+        self._reload_config = ReloadConfig(
+            drain_timeout_secs=drain_timeout_secs,
+            startup_grace_secs=startup_grace_secs,
+            health_probes_enabled=health_probes,
+            health_path_prefix=health_path,
+        )
+        return self
+    
+    @property
+    def health(self) -> Optional[HealthCheck]:
+        """
+        Access the health check instance (available after server starts).
+        
+        Example:
+            if app.health and app.health.is_ready():
+                print(f"Healthy, {app.health.in_flight()} requests in flight")
+        """
+        if self._reload_manager is not None:
+            return self._reload_manager.health()
+        return None
+    
+    @property
+    def reload_manager(self) -> Optional[ReloadManager]:
+        """
+        Access the reload manager (available after server starts).
+        
+        Example:
+            # Programmatic graceful reload
+            app.reload_manager.graceful_reload()
+            
+            # Check status
+            print(app.reload_manager.status())
+            print(app.reload_manager.in_flight())
+        """
+        return self._reload_manager
+    
+    def graceful_reload(self):
+        """
+        Trigger a graceful reload: drain in-flight requests, then restart workers.
+        
+        Equivalent to sending SIGUSR1 to the parent process.
+        """
+        if self._reload_manager is not None:
+            self._reload_manager.graceful_reload()
+        else:
+            import os
+            os.kill(os.getpid(), signal.SIGUSR1)
+    
+    def hot_reload_signal(self):
+        """
+        Trigger an immediate hot reload (development mode).
+        
+        Equivalent to sending SIGUSR2 to the parent process.
+        """
+        if self._reload_manager is not None:
+            self._reload_manager.hot_reload()
+        else:
+            import os
+            os.kill(os.getpid(), signal.SIGUSR2)
     
     def setup_openapi(
         self,
@@ -1016,6 +1129,13 @@ class Hypern:
             server = Server()
             server.set_router(router=self._router)
             
+            # Configure reload / health probes
+            if self._reload_config is not None:
+                server.set_reload_config(self._reload_config)
+            else:
+                # Default: enable health probes
+                server.set_reload_config(ReloadConfig())
+            
             # Register Rust middleware
             for mw in self._middleware:
                 # Skip path-specific middleware tuples and Python callables
@@ -1037,6 +1157,9 @@ class Hypern:
                 max_blocking_threads=max_blocking_threads,
                 max_connections=max_connections,
             )
+            
+            # Store reload manager reference after start
+            self._reload_manager = server.get_reload_manager()
         finally:
             # Run shutdown handlers
             loop = asyncio.new_event_loop()
