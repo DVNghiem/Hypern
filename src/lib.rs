@@ -25,6 +25,7 @@ pub mod fast_path;
 pub mod http;
 pub mod memory;
 pub mod middleware;
+pub mod realtime;
 pub mod routing;
 pub mod utils;
 
@@ -43,6 +44,14 @@ pub use crate::core::context::{Context, DIContainer};
 pub use crate::core::tasks::{TaskExecutor, TaskResult, TaskStatus};
 
 pub use crate::http::streaming::{SSEEvent, SSEGenerator, SSEStream, StreamingResponse};
+
+// Realtime exports
+pub use crate::realtime::broadcast::{
+    BackpressurePolicy, BroadcastConfig, BroadcastStats, BroadcastSubscriber, RealtimeBroadcast,
+};
+pub use crate::realtime::channel::{ChannelManager, ChannelStats, Subscriber, TopicMatcher};
+pub use crate::realtime::heartbeat::{HeartbeatConfig, HeartbeatMonitor, HeartbeatStats};
+pub use crate::realtime::presence::{PresenceDiff, PresenceInfo, PresenceTracker};
 
 pub use crate::middleware::{
     PyBasicAuthMiddleware, PyCompressionMiddleware, PyCorsMiddleware, PyLogMiddleware,
@@ -90,6 +99,29 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<SSEStream>()?;
     module.add_class::<SSEGenerator>()?;
     module.add_class::<StreamingResponse>()?;
+
+    // Realtime: Channel/Topic
+    module.add_class::<ChannelManager>()?;
+    module.add_class::<ChannelStats>()?;
+    module.add_class::<Subscriber>()?;
+    module.add_class::<TopicMatcher>()?;
+
+    // Realtime: Presence
+    module.add_class::<PresenceTracker>()?;
+    module.add_class::<PresenceInfo>()?;
+    module.add_class::<PresenceDiff>()?;
+
+    // Realtime: Broadcast
+    module.add_class::<RealtimeBroadcast>()?;
+    module.add_class::<BroadcastConfig>()?;
+    module.add_class::<BroadcastStats>()?;
+    module.add_class::<BroadcastSubscriber>()?;
+    module.add_class::<BackpressurePolicy>()?;
+
+    // Realtime: Heartbeat
+    module.add_class::<HeartbeatMonitor>()?;
+    module.add_class::<HeartbeatConfig>()?;
+    module.add_class::<HeartbeatStats>()?;
 
     // Rust Middleware
     module.add_class::<PyCorsMiddleware>()?;
