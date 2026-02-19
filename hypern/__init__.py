@@ -125,6 +125,26 @@ from .scheduler import (
     periodic,
 )
 
+# Realtime module
+from .realtime import (
+    ChannelManager,
+    ChannelStats,
+    Subscriber,
+    TopicMatcher,
+    PresenceTracker,
+    PresenceInfo,
+    PresenceDiff,
+    RealtimeBroadcast,
+    BroadcastConfig,
+    BroadcastStats,
+    BroadcastSubscriber,
+    BackpressurePolicy,
+    HeartbeatMonitor,
+    HeartbeatConfig,
+    HeartbeatStats,
+    RealtimeHub,
+)
+
 
 __version__ = "0.4.0"
 
@@ -238,4 +258,21 @@ __all__ = [
     # Database
     "Database",
     "get_database",
+    # Realtime
+    "ChannelManager",
+    "ChannelStats",
+    "Subscriber",
+    "TopicMatcher",
+    "PresenceTracker",
+    "PresenceInfo",
+    "PresenceDiff",
+    "RealtimeBroadcast",
+    "BroadcastConfig",
+    "BroadcastStats",
+    "BroadcastSubscriber",
+    "BackpressurePolicy",
+    "HeartbeatMonitor",
+    "HeartbeatConfig",
+    "HeartbeatStats",
+    "RealtimeHub",
 ]
