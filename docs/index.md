@@ -26,6 +26,7 @@ if __name__ == "__main__":
 | [Request & Response](request-response.md) | Request handling and response methods |
 | [Middleware](middleware.md) | Built-in and custom middleware |
 | [SSE & Streaming](sse.md) | Server-Sent Events and streaming responses |
+| [Zero-Downtime Reloads](zero-downtime.md) | Graceful/hot reloads with health probes |
 | [Validation](validation.md) | Request validation and schema definition |
 | [Dependency Injection](dependency-injection.md) | DI container and service registration |
 | [Authentication](auth.md) | JWT, API keys, and RBAC authorization |

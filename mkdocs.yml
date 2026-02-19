@@ -26,6 +26,7 @@ nav:
       - Task Scheduling: scheduling.md
       - Streaming & SSE: sse.md
       - Realtime: realtime.md
+      - Zero-Downtime Reloads: zero-downtime.md
       - File Uploads: file-uploads.md
       - Error Handling: error-handling.md
   - Best Practices: best-practices.md

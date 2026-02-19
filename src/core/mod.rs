@@ -3,6 +3,7 @@ pub mod context;
 pub mod global;
 pub mod interpreter;
 pub mod multiprocess;
+pub mod reload;
 pub mod runtime;
 pub mod server;
 pub mod socket;

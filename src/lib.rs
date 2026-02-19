@@ -52,6 +52,7 @@ pub use crate::realtime::broadcast::{
 pub use crate::realtime::channel::{ChannelManager, ChannelStats, Subscriber, TopicMatcher};
 pub use crate::realtime::heartbeat::{HeartbeatConfig, HeartbeatMonitor, HeartbeatStats};
 pub use crate::realtime::presence::{PresenceDiff, PresenceInfo, PresenceTracker};
+pub use crate::core::reload::{PyHealthCheck, PyReloadConfig, PyReloadManager};
 
 pub use crate::middleware::{
     PyBasicAuthMiddleware, PyCompressionMiddleware, PyCorsMiddleware, PyLogMiddleware,
@@ -122,6 +123,11 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<HeartbeatMonitor>()?;
     module.add_class::<HeartbeatConfig>()?;
     module.add_class::<HeartbeatStats>()?;
+
+    // Reload / Health
+    module.add_class::<PyHealthCheck>()?;
+    module.add_class::<PyReloadConfig>()?;
+    module.add_class::<PyReloadManager>()?;
 
     // Rust Middleware
     module.add_class::<PyCorsMiddleware>()?;
