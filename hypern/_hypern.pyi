@@ -48,6 +48,11 @@ class Server:
     def use_middleware(self, middleware: Any) -> None: ...
     def start(self, host: str, port: int, num_processes: int, workers_threads: int, max_blocking_threads: int, max_connections: int) -> None: ...
     def enable_http2(self) -> None: ...
+    def set_reload_config(self, config: "ReloadConfig") -> None: ...
+    def get_reload_manager(self) -> Optional["ReloadManager"]: ...
+    def get_health_check(self) -> Optional["HealthCheck"]: ...
+    def graceful_reload(self) -> None: ...
+    def hot_reload(self) -> None: ...
 
 class Route:
     path: str
@@ -304,6 +309,113 @@ class BasicAuthMiddleware:
         realm: str = "Restricted",
         users: Optional[Dict[str, str]] = None
     ) -> None: ...
+
+
+class HealthCheck:
+    """
+    Health check / probe state for zero-downtime reload support.
+    
+    Tracks service health status, in-flight requests, and uptime.
+    Used by Kubernetes-style liveness/readiness/startup probes.
+    """
+    
+    def __init__(self) -> None: ...
+    def status(self) -> str:
+        """Current health status: 'starting', 'healthy', 'draining', 'unhealthy'."""
+        ...
+    def mark_healthy(self) -> None:
+        """Mark the service as healthy and ready to accept traffic."""
+        ...
+    def mark_draining(self) -> None:
+        """Mark the service as draining (no new traffic accepted)."""
+        ...
+    def mark_unhealthy(self) -> None:
+        """Mark the service as unhealthy."""
+        ...
+    def in_flight(self) -> int:
+        """Number of currently in-flight requests."""
+        ...
+    def uptime_secs(self) -> float:
+        """Uptime in seconds since the process started."""
+        ...
+    def is_live(self) -> bool:
+        """Whether the liveness probe passes (process is alive)."""
+        ...
+    def is_ready(self) -> bool:
+        """Whether the readiness probe passes (ready for traffic)."""
+        ...
+    def to_json(self) -> str:
+        """JSON representation of health state."""
+        ...
+    def add_custom_check(self, name: str) -> None:
+        """Add a named custom health check."""
+        ...
+
+
+class ReloadConfig:
+    """
+    Configuration for zero-downtime reload behavior.
+    
+    Controls drain timeouts, health probe paths, and startup grace periods.
+    """
+    drain_timeout_secs: int
+    health_poll_interval_ms: int
+    startup_grace_secs: int
+    health_probes_enabled: bool
+    health_path_prefix: str
+    
+    def __init__(
+        self,
+        drain_timeout_secs: int = 30,
+        health_poll_interval_ms: int = 100,
+        startup_grace_secs: int = 2,
+        health_probes_enabled: bool = True,
+        health_path_prefix: str = "/_health",
+    ) -> None: ...
+
+
+class ReloadManager:
+    """
+    Manager for zero-downtime reloads with health probes.
+    
+    Supports:
+    - Graceful reload (drain in-flight requests, then restart workers)
+    - Hot reload (immediate restart for development)
+    - Health probes (liveness, readiness, startup) for Kubernetes
+    
+    Health probe endpoints (when enabled):
+    - GET /_health          - Full health status JSON
+    - GET /_health/live     - Liveness probe (is process alive?)
+    - GET /_health/ready    - Readiness probe (accepting traffic?)
+    - GET /_health/startup  - Startup probe (finished starting?)
+    
+    Signals:
+    - SIGUSR1 → Graceful reload (drain + restart)
+    - SIGUSR2 → Hot reload (immediate restart)
+    """
+    
+    def __init__(self, config: Optional[ReloadConfig] = None) -> None: ...
+    def health(self) -> HealthCheck:
+        """Get the health check instance."""
+        ...
+    def graceful_reload(self) -> None:
+        """Trigger a graceful reload (drain in-flight, then restart workers)."""
+        ...
+    def hot_reload(self) -> None:
+        """Trigger a hot reload (immediate restart, for development)."""
+        ...
+    def shutdown(self) -> None:
+        """Trigger a full shutdown."""
+        ...
+    def is_draining(self) -> bool:
+        """Whether the server is currently draining connections."""
+        ...
+    def status(self) -> str:
+        """Current health status string."""
+        ...
+    def in_flight(self) -> int:
+        """Number of in-flight requests."""
+        ...
 
 
 class PoolConfig:

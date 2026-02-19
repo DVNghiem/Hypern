@@ -5,6 +5,7 @@ use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::core::interpreter::http_execute;
+use crate::core::reload::ReloadManager;
 use crate::http::method::HttpMethod;
 use crate::http::request::Request as HypernRequest;
 use crate::middleware::{
@@ -22,15 +23,144 @@ use crate::{
 pub struct AppState {
     pub router: Arc<HypernRouter>,
     pub middleware: Arc<MiddlewareChain>,
+    pub reload_manager: ReloadManager,
 }
 
-/// Convert HypernRouter routes to Axum Router
+/// Public wrapper for building Axum router (used from multiprocess.rs non-unix path)
+pub fn build_axum_router_public(state: AppState) -> axum::Router {
+    build_axum_router(state)
+}
+
+/// Convert HypernRouter routes to Axum Router with health probe routes
 fn build_axum_router(state: AppState) -> axum::Router {
-    Router::new().fallback(handle_request).with_state(state)
+    let health_prefix = state.reload_manager.config().health_path_prefix.clone();
+    let probes_enabled = state.reload_manager.config().health_probes_enabled;
+
+    let mut router = Router::new();
+
+    if probes_enabled {
+        // Health probe routes
+        let live_path = format!("{}/live", health_prefix);
+        let ready_path = format!("{}/ready", health_prefix);
+        let startup_path = format!("{}/startup", health_prefix);
+        let status_path = health_prefix.clone();
+
+        router = router
+            .route(
+                &live_path,
+                axum::routing::get({
+                    let rm = state.reload_manager.clone();
+                    move || {
+                        let rm = rm.clone();
+                        async move { health_liveness(rm) }
+                    }
+                }),
+            )
+            .route(
+                &ready_path,
+                axum::routing::get({
+                    let rm = state.reload_manager.clone();
+                    move || {
+                        let rm = rm.clone();
+                        async move { health_readiness(rm) }
+                    }
+                }),
+            )
+            .route(
+                &startup_path,
+                axum::routing::get({
+                    let rm = state.reload_manager.clone();
+                    move || {
+                        let rm = rm.clone();
+                        async move { health_startup(rm) }
+                    }
+                }),
+            )
+            .route(
+                &status_path,
+                axum::routing::get({
+                    let rm = state.reload_manager.clone();
+                    move || {
+                        let rm = rm.clone();
+                        async move { health_status(rm) }
+                    }
+                }),
+            );
+    }
+
+    router.fallback(handle_request).with_state(state)
+}
+
+// -- health probe handlers --
+
+fn health_liveness(rm: ReloadManager) -> impl IntoResponse {
+    let code = rm.health().liveness_code();
+    let body = rm.health().to_json();
+    (
+        axum::http::StatusCode::from_u16(code).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    )
+}
+
+fn health_readiness(rm: ReloadManager) -> impl IntoResponse {
+    let code = rm.health().readiness_code();
+    let body = rm.health().to_json();
+    (
+        axum::http::StatusCode::from_u16(code).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    )
+}
+
+fn health_startup(rm: ReloadManager) -> impl IntoResponse {
+    let code = rm.health().startup_code();
+    let body = rm.health().to_json();
+    (
+        axum::http::StatusCode::from_u16(code).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    )
+}
+
+fn health_status(rm: ReloadManager) -> impl IntoResponse {
+    let code = if rm.health().status().is_live() { 200u16 } else { 503u16 };
+    let body = rm.health().to_json();
+    (
+        axum::http::StatusCode::from_u16(code).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    )
 }
 
 /// Main request handler that dispatches to Python handlers
 async fn handle_request(State(state): State<AppState>, req: Request<Body>) -> impl IntoResponse {
+    // If draining, reject new requests with 503
+    if state.reload_manager.is_draining() {
+        return axum::http::Response::builder()
+            .status(503)
+            .header("Content-Type", "application/json")
+            .header("Connection", "close")
+            .header("Retry-After", "5")
+            .body(Body::from(r#"{"error":"service_draining","message":"Server is reloading, please retry"}"#))
+            .unwrap();
+    }
+
+    // Track in-flight request
+    state.reload_manager.health().increment_in_flight();
+    let rm = state.reload_manager.clone();
+
+    // Execute the actual handler and ensure we decrement on exit
+    let response = handle_request_inner(&state, req).await;
+
+    // Decrement in-flight and notify drain if needed
+    rm.on_request_complete();
+
+    response
+}
+
+/// Inner request handler logic (separated for clean in-flight tracking)
+async fn handle_request_inner(state: &AppState, req: Request<Body>) -> axum::http::Response<Body> {
     // Convert Axum request to Hypern request
     let fast_req = HypernRequest::from_axum(req).await;
 
@@ -126,6 +256,7 @@ pub fn run_worker(
     middleware: Arc<MiddlewareChain>,
     handlers: Vec<(u64, Py<PyAny>)>,
     worker_id: usize,
+    reload_manager: ReloadManager,
 ) -> PyResult<()> {
     // Register handlers in this process's interpreter pool
     for (hash, handler) in handlers {
@@ -146,17 +277,23 @@ pub fn run_worker(
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let shutdown_tx = Arc::new(std::sync::Mutex::new(Some(shutdown_tx)));
 
-    // Setup signal handler for Python event loop to stop on SIGTERM/SIGINT
+    // Clone reload_manager for the signal thread and the async runtime
+    let rm_for_signal = reload_manager.clone();
+    let rm_for_drain = reload_manager.clone();
+
+    // Setup signal handler for Python event loop to stop on SIGTERM/SIGINT/SIGUSR1/SIGUSR2
     let loop_for_signal = ev_loop.clone().unbind();
     let shutdown_tx_clone = shutdown_tx.clone();
     std::thread::spawn(move || {
-        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
         static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+        static LAST_SIGNAL: AtomicI32 = AtomicI32::new(0);
 
         #[cfg(unix)]
         unsafe {
             extern "C" fn handle_signal(sig: libc::c_int) {
                 tracing::info!("Worker received signal {}", sig);
+                LAST_SIGNAL.store(sig, Ordering::SeqCst);
                 SHUTDOWN.store(true, Ordering::SeqCst);
             }
 
@@ -168,6 +305,16 @@ pub fn run_worker(
                 libc::SIGTERM,
                 handle_signal as extern "C" fn(libc::c_int) as libc::sighandler_t,
             );
+            // SIGUSR1 = graceful reload
+            libc::signal(
+                libc::SIGUSR1,
+                handle_signal as extern "C" fn(libc::c_int) as libc::sighandler_t,
+            );
+            // SIGUSR2 = hot reload (dev)
+            libc::signal(
+                libc::SIGUSR2,
+                handle_signal as extern "C" fn(libc::c_int) as libc::sighandler_t,
+            );
         }
 
         // Wait for signal
@@ -175,7 +322,28 @@ pub fn run_worker(
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
 
-        tracing::info!("Worker {} initiating shutdown", worker_id);
+        let sig = LAST_SIGNAL.load(Ordering::SeqCst);
+        tracing::info!("Worker {} initiating shutdown (signal={})", worker_id, sig);
+
+        #[cfg(unix)]
+        {
+            // SIGUSR1 = graceful: drain in-flight first
+            if sig == libc::SIGUSR1 {
+                rm_for_signal.start_drain();
+                // We don't block the signal thread; the async runtime handles drain.
+                // Just give it a brief moment, then signal shutdown.
+                std::thread::sleep(std::time::Duration::from_secs(
+                    rm_for_signal.config().drain_timeout_secs,
+                ));
+            } else if sig == libc::SIGUSR2 {
+                // Hot reload: immediate
+                rm_for_signal.signal_hot_reload();
+            } else {
+                // SIGINT/SIGTERM: normal shutdown with brief drain
+                rm_for_signal.start_drain();
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+        }
 
         // Signal the async runtime to shutdown
         if let Ok(mut tx) = shutdown_tx_clone.lock() {
@@ -204,15 +372,27 @@ pub fn run_worker(
         .build()
         .expect("Failed to build Tokio runtime");
 
+    // Mark healthy after startup grace period
+    let rm_startup = reload_manager.clone();
+    let startup_grace = reload_manager.config().startup_grace_secs;
+    rt.spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(startup_grace)).await;
+        rm_startup.health().mark_healthy();
+        info!("Worker {} marked healthy after {}s grace period", worker_id, startup_grace);
+    });
+
     rt.spawn(async move {
         let listener = TcpListener::from_std(std::net::TcpListener::from(socket_held.get_socket()))
             .expect("Failed to convert listener");
 
-        // Build Axum application with state
-        let state = AppState { router, middleware };
+        // Build Axum application with state including reload manager
+        let state = AppState {
+            router,
+            middleware,
+            reload_manager: rm_for_drain,
+        };
 
-        // Build the Axum router - minimal layer stack for maximum performance
-        // Request ID and tracing are handled by Rust middleware chain, not tower layers
+        // Build the Axum router with health probe routes
         let app = build_axum_router(state);
 
         info!("Axum worker {} started", worker_id);
@@ -235,4 +415,19 @@ pub fn run_worker(
 
     info!("Worker {} stopped", worker_id);
     Ok(())
+}
+
+/// Public helper for non-unix thread-based workers (used from multiprocess.rs)
+pub async fn handle_request_standalone(
+    req: Request<Body>,
+    router: Arc<HypernRouter>,
+    middleware: Arc<MiddlewareChain>,
+    reload_manager: ReloadManager,
+) -> axum::http::Response<Body> {
+    let state = AppState {
+        router,
+        middleware,
+        reload_manager,
+    };
+    handle_request_inner(&state, req).await
 }
