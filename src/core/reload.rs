@@ -367,7 +367,7 @@ impl ReloadManager {
 // ---------------------------------------------------------------------------
 
 /// Python-facing health check / probe object.
-#[pyclass(name = "HealthCheck")]
+#[pyclass(name = "HealthCheck", from_py_object)]
 #[derive(Clone)]
 pub struct PyHealthCheck {
     pub inner: HealthCheck,
@@ -443,7 +443,7 @@ impl PyHealthCheck {
 }
 
 /// Python-facing reload configuration.
-#[pyclass(name = "ReloadConfig")]
+#[pyclass(name = "ReloadConfig", from_py_object)]
 #[derive(Clone)]
 pub struct PyReloadConfig {
     pub inner: ReloadConfig,
@@ -511,7 +511,7 @@ impl PyReloadConfig {
 }
 
 /// Python-facing reload manager.
-#[pyclass(name = "ReloadManager")]
+#[pyclass(name = "ReloadManager", from_py_object)]
 #[derive(Clone)]
 pub struct PyReloadManager {
     pub inner: ReloadManager,

@@ -8,7 +8,7 @@ use std::time::Duration;
 use tracing::log::LevelFilter;
 
 #[derive(Debug, Clone, Default)]
-#[pyclass]
+#[pyclass(from_py_object)]
 pub struct DatabaseConfig {
     pub url: String,
     pub max_connections: u32,

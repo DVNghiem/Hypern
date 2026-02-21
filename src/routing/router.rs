@@ -41,7 +41,7 @@ fn convert_to_matchit_path(path: &str) -> String {
 }
 
 /// Contains routers for each HTTP method using matchit
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct Router {
     #[pyo3(get, set)]
@@ -69,7 +69,7 @@ pub struct Router {
 
 /// Wrapper around matchit::Router to make it Clone and PyO3 compatible
 #[derive(Clone, Default)]
-#[pyclass]
+#[pyclass(from_py_object)]
 pub struct MatchitRouter {
     inner: matchit::Router<Route>,
 }

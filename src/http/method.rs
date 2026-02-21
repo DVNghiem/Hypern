@@ -2,7 +2,7 @@ use axum::http::Method;
 use pyo3::prelude::*;
 
 /// HTTP Method enum for fast matching
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HttpMethod {
     GET,

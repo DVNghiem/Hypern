@@ -279,7 +279,7 @@ impl DatabaseContextInner {
     }
 }
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct DbSession {
     context: Arc<DatabaseContextInner>,

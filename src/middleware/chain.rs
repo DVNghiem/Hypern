@@ -11,7 +11,6 @@ use crate::http::method::HttpMethod;
 
 /// The result of middleware execution
 #[pyclass]
-#[derive(Debug, Clone)]
 pub enum MiddlewareResult {
     /// Continue to the next middleware/handler
     Continue(),
@@ -22,7 +21,7 @@ pub enum MiddlewareResult {
 }
 
 /// A response that can be returned by middleware to short-circuit the chain
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, Clone)]
 pub struct MiddlewareResponse {
     #[pyo3(get, set)]
@@ -141,7 +140,7 @@ impl MiddlewareResponse {
 }
 
 /// Error information from middleware
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, Clone)]
 pub struct MiddlewareError {
     #[pyo3(get, set)]
@@ -175,7 +174,7 @@ impl MiddlewareError {
 }
 
 /// Context passed through the middleware chain - contains request data and mutable state
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct MiddlewareContext {
     // Request data - now mutable to allow middleware modifications
@@ -203,7 +202,7 @@ pub struct MiddlewareContext {
 }
 
 /// Mutable state that can be set by middleware and read by handlers
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Default, Clone)]
 pub struct MiddlewareState {
     /// Custom key-value store for middleware communication
@@ -227,7 +226,7 @@ pub struct MiddlewareState {
 }
 
 /// A value that can be stored in middleware state
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, Clone)]
 pub enum StateValue {
     String(String),

@@ -8,7 +8,7 @@ use pyo3::prelude::*;
 use tokio::sync::broadcast;
 
 /// Statistics for a single channel
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Debug)]
 pub struct ChannelStats {
     /// Channel name
@@ -145,7 +145,7 @@ impl Subscriber {
 /// - Exact match: "chat:room1"
 /// - Wildcard: "chat:*" matches "chat:room1", "chat:room2"
 /// - Multi-level wildcard: "events:#" matches "events:user:login", "events:system:alert"
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct TopicMatcher {
     /// Pattern → set of subscriber client IDs

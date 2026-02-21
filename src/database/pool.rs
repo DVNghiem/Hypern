@@ -25,7 +25,7 @@ fn get_pools() -> &'static RwLock<HashMap<String, Pool>> {
 }
 
 #[derive(Debug, Clone)]
-#[pyclass]
+#[pyclass(from_py_object)]
 pub struct PoolConfig {
     #[pyo3(get, set)]
     pub url: String,
@@ -238,7 +238,7 @@ impl ConnectionPoolManager {
 }
 
 #[derive(Debug, Clone)]
-#[pyclass]
+#[pyclass(from_py_object)]
 pub struct PoolStatus {
     #[pyo3(get)]
     pub size: usize,

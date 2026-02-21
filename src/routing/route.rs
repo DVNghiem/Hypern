@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 
-#[pyclass]
+#[pyclass(from_py_object)]
 pub struct Route {
     #[pyo3(get, set)]
     pub path: String,

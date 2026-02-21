@@ -83,7 +83,10 @@ pub async fn http_execute(route_hash: u64, request: Request) -> axum::response::
                 pyo3::ffi::PyTuple_SetItem(tuple, 0, req_any.into_ptr());
                 pyo3::ffi::PyTuple_SetItem(tuple, 1, res_any.into_ptr());
                 // Safety: we just created a valid tuple above
-                let args: Py<PyTuple> = Py::from_owned_ptr(py, tuple);
+                let args = <pyo3::Bound<'_, PyTuple> as Clone>::clone(
+                    &Bound::from_owned_ptr(py, tuple).cast::<PyTuple>().unwrap(),
+                )
+                .unbind();
                 (handler, args)
             }
         },

@@ -6,7 +6,7 @@ use dashmap::DashMap;
 use pyo3::prelude::*;
 
 /// Information about a connected client's presence
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PresenceInfo {
     /// Client identifier
@@ -54,7 +54,7 @@ impl PresenceInfo {
 }
 
 /// Diff of presence changes (joins and leaves) for incremental updates
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Debug, Default)]
 pub struct PresenceDiff {
     /// Clients who joined since last diff

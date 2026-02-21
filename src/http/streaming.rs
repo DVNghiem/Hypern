@@ -11,7 +11,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use crate::memory::arena::with_arena;
 
 /// SSE Event structure
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Debug)]
 pub struct SSEEvent {
     /// Event ID (optional)
@@ -112,7 +112,7 @@ impl SSEEvent {
 }
 
 /// SSE Stream for sending events
-#[pyclass]
+#[pyclass(from_py_object)]
 pub struct SSEStream {
     sender: Sender<Bytes>,
     closed: Arc<AtomicBool>,
@@ -249,7 +249,7 @@ impl Stream for SSEBody {
 }
 
 /// Streaming response builder
-#[pyclass]
+#[pyclass(from_py_object)]
 pub struct StreamingResponse {
     sender: Sender<Bytes>,
     closed: Arc<AtomicBool>,

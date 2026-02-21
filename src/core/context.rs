@@ -130,7 +130,7 @@ impl DIValue {
     }
 }
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct Context {
     values: Arc<DashMap<String, DIValue>>,
@@ -258,7 +258,7 @@ impl Context {
     }
 }
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct DIContainer {
     /// Singleton instances

@@ -5,7 +5,7 @@ use tokio::sync::Mutex;
 use crate::database::operation::{DatabaseOperations, RowStream};
 use crate::database::pool::get_db_runtime;
 
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Debug)]
 pub struct DatabaseTransaction {
     transaction: Arc<Mutex<Option<sqlx::Transaction<'static, sqlx::Postgres>>>>,

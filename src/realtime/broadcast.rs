@@ -8,7 +8,7 @@ use pyo3::prelude::*;
 use tokio::sync::broadcast;
 
 /// Policy for handling backpressure when subscribers are slow
-#[pyclass(eq, eq_int)]
+#[pyclass(eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackpressurePolicy {
     /// Drop oldest messages when buffer is full (default)
@@ -18,7 +18,7 @@ pub enum BackpressurePolicy {
 }
 
 /// Configuration for a broadcast channel
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Debug)]
 pub struct BroadcastConfig {
     /// Maximum number of messages to buffer per subscriber
@@ -73,7 +73,7 @@ impl Default for BroadcastConfig {
 }
 
 /// Statistics for broadcast operations
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Debug, Default)]
 pub struct BroadcastStats {
     /// Total messages sent

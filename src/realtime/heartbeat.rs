@@ -7,7 +7,7 @@ use dashmap::DashMap;
 use pyo3::prelude::*;
 
 /// Configuration for heartbeat monitoring
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Debug)]
 pub struct HeartbeatConfig {
     /// Interval between heartbeat pings (seconds)
@@ -72,7 +72,7 @@ impl Default for HeartbeatConfig {
 }
 
 /// Stats for heartbeat monitoring
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Debug, Default)]
 pub struct HeartbeatStats {
     /// Number of clients being monitored

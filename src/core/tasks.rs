@@ -8,7 +8,7 @@ use pyo3::prelude::*;
 use tracing::info;
 
 /// Task status
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
     Pending,
@@ -19,7 +19,7 @@ pub enum TaskStatus {
 }
 
 /// A background task result
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct TaskResult {
     #[pyo3(get)]

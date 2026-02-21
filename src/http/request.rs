@@ -43,7 +43,7 @@ impl QueryParams {
 }
 
 /// Zero-copy request structure for high-performance request handling.
-#[pyclass(frozen)]
+#[pyclass(frozen, from_py_object)]
 pub struct Request {
     path: Arc<str>,
     method: HttpMethod,

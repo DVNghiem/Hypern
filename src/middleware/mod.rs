@@ -41,7 +41,7 @@ pub fn middleware_response_to_hyper(response: MiddlewareResponse) -> axum::respo
 use crate::http::method::HttpMethod;
 use std::sync::Arc;
 
-#[pyclass(name = "CorsMiddleware")]
+#[pyclass(name = "CorsMiddleware", from_py_object)]
 #[derive(Clone)]
 pub struct PyCorsMiddleware {
     pub(crate) inner: Arc<CorsMiddleware>,
@@ -109,7 +109,7 @@ impl PyCorsMiddleware {
     }
 }
 
-#[pyclass(name = "RateLimitMiddleware")]
+#[pyclass(name = "RateLimitMiddleware", from_py_object)]
 #[derive(Clone)]
 pub struct PyRateLimitMiddleware {
     pub(crate) inner: Arc<RateLimitMiddleware>,
@@ -182,7 +182,7 @@ impl PyRateLimitMiddleware {
 /// - X-XSS-Protection: 1; mode=block
 /// - Strict-Transport-Security (HSTS)
 /// - Content-Security-Policy (CSP)
-#[pyclass(name = "SecurityHeadersMiddleware")]
+#[pyclass(name = "SecurityHeadersMiddleware", from_py_object)]
 #[derive(Clone)]
 pub struct PySecurityHeadersMiddleware {
     pub(crate) inner: Arc<SecurityHeadersMiddleware>,
@@ -263,7 +263,7 @@ impl PySecurityHeadersMiddleware {
 /// Python-accessible timeout middleware
 ///
 /// Enforces request timeout at the Rust/Tokio level for maximum efficiency.
-#[pyclass(name = "TimeoutMiddleware")]
+#[pyclass(name = "TimeoutMiddleware", from_py_object)]
 #[derive(Clone)]
 pub struct PyTimeoutMiddleware {
     pub(crate) inner: Arc<TimeoutMiddleware>,
@@ -293,7 +293,7 @@ impl PyTimeoutMiddleware {
 /// Python-accessible compression middleware
 ///
 /// Compresses response bodies using gzip for smaller transfer sizes.
-#[pyclass(name = "CompressionMiddleware")]
+#[pyclass(name = "CompressionMiddleware", from_py_object)]
 #[derive(Clone)]
 pub struct PyCompressionMiddleware {
     pub(crate) inner: Arc<CompressionMiddleware>,
@@ -321,7 +321,7 @@ impl PyCompressionMiddleware {
 /// Python-accessible request ID middleware
 ///
 /// Adds a unique request ID to each request for tracing.
-#[pyclass(name = "RequestIdMiddleware")]
+#[pyclass(name = "RequestIdMiddleware", from_py_object)]
 #[derive(Clone)]
 pub struct PyRequestIdMiddleware {
     pub(crate) inner: Arc<RequestIdMiddleware>,
@@ -349,7 +349,7 @@ impl PyRequestIdMiddleware {
 /// Python-accessible logging middleware
 ///
 /// Logs incoming requests with method, path, and timing information.
-#[pyclass(name = "LogMiddleware")]
+#[pyclass(name = "LogMiddleware", from_py_object)]
 #[derive(Clone)]
 pub struct PyLogMiddleware {
     pub(crate) inner: Arc<LogMiddleware>,
@@ -410,7 +410,7 @@ impl PyLogMiddleware {
 /// Python-accessible basic authentication middleware
 ///
 /// Implements HTTP Basic Authentication.
-#[pyclass(name = "BasicAuthMiddleware")]
+#[pyclass(name = "BasicAuthMiddleware", from_py_object)]
 #[derive(Clone)]
 pub struct PyBasicAuthMiddleware {
     pub(crate) inner: Arc<BasicAuthMiddleware>,
