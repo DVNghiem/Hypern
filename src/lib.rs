@@ -69,6 +69,7 @@ pub use crate::database::{
 pub use fast_path::json_cache::JsonResponseCache;
 pub use fast_path::static_files::StaticFileHandler;
 pub use memory::pool::{RequestPool, ResponsePool};
+pub use utils::pagination::PageInfo;
 
 #[pymodule(gil_used = false)]
 fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
@@ -148,6 +149,9 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(get_db, module)?)?;
     module.add_function(wrap_pyfunction!(finalize_db, module)?)?;
     module.add_function(wrap_pyfunction!(finalize_db_all, module)?)?;
+
+    // Utils: string, pagination, crypto, time
+    crate::utils::register_utils(module)?;
 
     Ok(())
 }

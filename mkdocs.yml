@@ -29,6 +29,7 @@ nav:
       - Zero-Downtime Reloads: zero-downtime.md
       - File Uploads: file-uploads.md
       - Error Handling: error-handling.md
+      - Utilities: utils.md
   - Best Practices: best-practices.md
   - Advanced:
       - Database: database.md
