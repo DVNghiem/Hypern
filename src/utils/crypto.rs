@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use rand::{Rng, RngExt};
 
 // ──────────────────────── random / token generators ──────────────────────── //
 
@@ -12,7 +13,6 @@ use pyo3::prelude::*;
 #[pyfunction]
 #[pyo3(signature = (length=32))]
 pub fn random_token(length: usize) -> String {
-    use rand::Rng;
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut rng = rand::rng();
     (0..length)
@@ -30,7 +30,6 @@ pub fn random_token(length: usize) -> String {
 ///     assert isinstance(raw, bytes) and len(raw) == 16
 #[pyfunction]
 pub fn random_bytes(n: usize) -> Vec<u8> {
-    use rand::RngCore;
     let mut buf = vec![0u8; n];
     rand::rng().fill_bytes(&mut buf);
     buf
