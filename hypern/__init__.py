@@ -23,6 +23,9 @@ from ._hypern import (
     HealthCheck,
     ReloadConfig,
     ReloadManager,
+    # Utils (Rust-accelerated)
+    PageInfo,
+    paginate,
 )
 from .application import Hypern, create_app, hypern
 
@@ -275,4 +278,7 @@ __all__ = [
     "HeartbeatConfig",
     "HeartbeatStats",
     "RealtimeHub",
+    # Utils
+    "PageInfo",
+    "paginate",
 ]

@@ -826,3 +826,192 @@ class HeartbeatMonitor:
     def clear(self) -> None: ...
     def client_count(self) -> int: ...
 
+
+# ============================================================================
+# Utils: String Helpers
+# ============================================================================
+
+def slugify(text: str, separator: str = "-") -> str:
+    """Convert text to a URL-safe slug."""
+    ...
+
+def truncate(text: str, max_len: int, suffix: str = "...") -> str:
+    """Truncate text, appending suffix if truncated."""
+    ...
+
+def mask_email(email: str) -> str:
+    """Mask an email address for display (PII)."""
+    ...
+
+def mask_phone(phone: str, keep_last: int = 4) -> str:
+    """Mask a phone number, keeping only the last N digits visible."""
+    ...
+
+def mask_string(text: str, keep_start: int = 1, keep_end: int = 1) -> str:
+    """Mask a string, keeping keep_start/keep_end chars visible."""
+    ...
+
+def snake_to_camel(text: str, upper_first: bool = False) -> str:
+    """Convert snake_case to camelCase (or PascalCase)."""
+    ...
+
+def camel_to_snake(text: str) -> str:
+    """Convert camelCase/PascalCase to snake_case."""
+    ...
+
+def keys_to_camel(data: Dict[str, Any], upper_first: bool = False) -> Dict[str, Any]:
+    """Convert all dict keys from snake_case to camelCase."""
+    ...
+
+def keys_to_snake(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert all dict keys from camelCase to snake_case."""
+    ...
+
+def pad_left(text: str, width: int, pad_char: str = " ") -> str:
+    """Left-pad a string to reach ``width`` characters."""
+    ...
+
+def pad_right(text: str, width: int, pad_char: str = " ") -> str:
+    """Right-pad a string to reach ``width`` characters."""
+    ...
+
+def word_count(text: str) -> int:
+    """Count whitespace-delimited words."""
+    ...
+
+def is_url_safe(text: str) -> bool:
+    """Check whether text contains only URL-safe ASCII characters."""
+    ...
+
+
+# ============================================================================
+# Utils: Pagination
+# ============================================================================
+
+class PageInfo:
+    """Pagination metadata (immutable, computed in Rust)."""
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+    has_next: bool
+    has_prev: bool
+    offset: int
+    from_item: int
+    to_item: int
+
+    def to_dict(self) -> Dict[str, Any]: ...
+
+def paginate(total: int, page: int = 1, per_page: int = 20) -> PageInfo:
+    """Compute pagination metadata."""
+    ...
+
+def encode_cursor(offset: int) -> str:
+    """Encode an offset into an opaque cursor string."""
+    ...
+
+def decode_cursor(cursor: str) -> int:
+    """Decode a cursor string back to an integer offset."""
+    ...
+
+
+# ============================================================================
+# Utils: Crypto / Encoding / IDs
+# ============================================================================
+
+def random_token(length: int = 32) -> str:
+    """Generate a cryptographically-secure URL-safe token."""
+    ...
+
+def random_bytes(n: int) -> bytes:
+    """Generate n cryptographically-secure random bytes."""
+    ...
+
+def hmac_sha256_hex(key: str, data: str) -> str:
+    """Compute HMAC-SHA-256 hex digest."""
+    ...
+
+def hmac_sha256_bytes(key: bytes, data: bytes) -> bytes:
+    """Compute HMAC-SHA-256 from raw bytes, return raw bytes."""
+    ...
+
+def sha256_hex(data: str) -> str:
+    """Compute SHA-256 hex digest of a string."""
+    ...
+
+def secure_compare(a: bytes, b: bytes) -> bool:
+    """Constant-time comparison (timing-attack safe)."""
+    ...
+
+def b64_encode(data: bytes) -> str:
+    """Encode bytes to standard Base64."""
+    ...
+
+def b64_decode(data: str) -> Optional[bytes]:
+    """Decode standard Base64.  Returns None on invalid input."""
+    ...
+
+def b64url_encode(data: bytes) -> str:
+    """Encode bytes to URL-safe Base64 (no padding)."""
+    ...
+
+def b64url_decode(data: str) -> Optional[bytes]:
+    """Decode URL-safe Base64.  Returns None on invalid input."""
+    ...
+
+def uuid_v4() -> str:
+    """Generate a UUID v4 (random)."""
+    ...
+
+def uuid_v7() -> str:
+    """Generate a UUID v7 (time-sortable)."""
+    ...
+
+def fast_hash(data: str) -> int:
+    """Compute xxHash3-64 of a string (non-cryptographic)."""
+    ...
+
+def fast_hash_bytes(data: bytes) -> int:
+    """Compute xxHash3-64 of raw bytes (non-cryptographic)."""
+    ...
+
+
+# ============================================================================
+# Utils: Time Helpers
+# ============================================================================
+
+def now_ms() -> int:
+    """Current UTC Unix timestamp in milliseconds."""
+    ...
+
+def now_sec() -> int:
+    """Current UTC Unix timestamp in seconds."""
+    ...
+
+def now_iso() -> str:
+    """Current UTC time as ISO 8601 string."""
+    ...
+
+def format_timestamp(ts_secs: int) -> str:
+    """Format a Unix timestamp (seconds) to ISO 8601 UTC."""
+    ...
+
+def parse_iso(s: str) -> Optional[int]:
+    """Parse ISO 8601 datetime to Unix seconds.  Returns None on failure."""
+    ...
+
+def relative_time(ts_secs: int) -> str:
+    """Human-readable relative time (e.g. '3 hours ago')."""
+    ...
+
+def elapsed_ms(start_ms: int) -> int:
+    """Elapsed milliseconds from start_ms to now."""
+    ...
+
+def ms_to_sec(ms: int) -> int:
+    """Convert milliseconds to seconds."""
+    ...
+
+def sec_to_ms(sec: int) -> int:
+    """Convert seconds to milliseconds."""
+    ...
