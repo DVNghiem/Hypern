@@ -83,6 +83,7 @@ jobs:
 
   macos:
     runs-on: ${{ matrix.platform.runner }}
+    environment: stag
     strategy:
       matrix:
         platform:
