@@ -13,6 +13,7 @@ plugins:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - CLI: cli.md
   - Core Concepts:
       - Routing: routing.md
       - Request & Response: request-response.md
