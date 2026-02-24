@@ -103,6 +103,27 @@ class OpenAPIGenerator:
         self.security_schemes: Dict[str, Dict[str, Any]] = {}
         self.tags: List[Dict[str, Any]] = []
     
+    @staticmethod
+    def _get_handler_attr(handler: Callable, attr: str, default: Any = None) -> Any:
+        """
+        Get an attribute from a handler, traversing the __wrapped__ chain
+        to find decorator metadata set on the original function.
+        """
+        # Check the handler itself first
+        value = getattr(handler, attr, None)
+        if value is not None:
+            return value
+        
+        # Traverse __wrapped__ chain (set by functools.wraps)
+        current = handler
+        while hasattr(current, "__wrapped__"):
+            current = current.__wrapped__
+            value = getattr(current, attr, None)
+            if value is not None:
+                return value
+        
+        return default
+
     def add_security_scheme(
         self,
         name: str,
@@ -297,8 +318,8 @@ class OpenAPIGenerator:
             if len(lines) > 1:
                 endpoint.description = "\n".join(lines[1:]).strip()
         
-        # Extract tags
-        endpoint.tags = tags or getattr(handler, "_tags", [])
+        # Extract tags - check __wrapped__ chain for decorator metadata
+        endpoint.tags = tags or self._get_handler_attr(handler, "_tags", [])
         
         # Extract parameters from path
         path_params = re.findall(r":(\w+)", path)
@@ -368,12 +389,12 @@ class OpenAPIGenerator:
         )
         
         # Extract security requirements
-        if hasattr(handler, "_requires_auth"):
+        if self._get_handler_attr(handler, "_requires_auth", False):
             endpoint.security = [{"bearerAuth": []}]
         
         # Extract RBAC metadata for description
-        required_roles = getattr(handler, "_required_roles", None)
-        required_permissions = getattr(handler, "_required_permissions", None)
+        required_roles = self._get_handler_attr(handler, "_required_roles", None)
+        required_permissions = self._get_handler_attr(handler, "_required_permissions", None)
         rbac_notes = []
         if required_roles:
             rbac_notes.append(f"**Required roles**: {', '.join(required_roles)}")
@@ -384,10 +405,10 @@ class OpenAPIGenerator:
             endpoint.description = (endpoint.description or "") + extra
         
         # Extract deprecation
-        endpoint.deprecated = getattr(handler, "_deprecated", False)
+        endpoint.deprecated = self._get_handler_attr(handler, "_deprecated", False)
         
         # Generate operation ID
-        endpoint.operation_id = getattr(
+        endpoint.operation_id = self._get_handler_attr(
             handler,
             "_operation_id",
             f"{method.lower()}_{path.replace('/', '_').replace(':', '_')}",

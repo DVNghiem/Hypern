@@ -736,12 +736,12 @@ def create_test_app() -> Hypern:
     api_v1 = Router(prefix="/api/v1")
     
     @api_v1.get("/users")
-    def v1_list_users(req, res):
+    def v1_list_users(req, res, ctx):
         users = test_db.get_all_users()
         res.json({"version": "v1", "users": users})
     
     @api_v1.get("/users/:id")
-    def v1_get_user(req, res):
+    def v1_get_user(req, res, ctx):
         user_id = req.param("id")
         user = test_db.get_user(user_id)
         if user:
@@ -750,7 +750,7 @@ def create_test_app() -> Hypern:
             res.status(404).json({"error": "User not found"})
     
     @api_v1.post("/users")
-    def v1_create_user(req, res):
+    def v1_create_user(req, res, ctx):
         data = req.json()
         user = test_db.create_user(data)
         res.status(201).json({"version": "v1", "user": user})
@@ -758,7 +758,7 @@ def create_test_app() -> Hypern:
     api_v2 = Router(prefix="/api/v2")
     
     @api_v2.get("/users")
-    def v2_list_users(req, res):
+    def v2_list_users(req, res, ctx):
         users = test_db.get_all_users()
         res.json({
             "version": "v2",
@@ -767,7 +767,7 @@ def create_test_app() -> Hypern:
         })
     
     @api_v2.get("/users/:id")
-    def v2_get_user(req, res):
+    def v2_get_user(req, res, ctx):
         user_id = req.param("id")
         user = test_db.get_user(user_id)
         if user:
@@ -775,9 +775,122 @@ def create_test_app() -> Hypern:
         else:
             res.status(404).json({"error": "User not found"})
     
-    # Mount routers - use the router's prefix
-    app.use(api_v1.prefix, api_v1)
-    app.use(api_v2.prefix, api_v2)
+    # Mount routers - use app.mount() with router's own prefix
+    app.mount(api_v1)
+    app.mount(api_v2)
+    
+    # ========================================================================
+    # Router with Validation (tests Router + @validate_body together)
+    # ========================================================================
+    
+    class RouterSearchSchema(msgspec.Struct):
+        """Schema for router-based search."""
+        q: str
+        page: int = 1
+        limit: int = 20
+        sort: str = "desc"
+    
+    class RouterCreateItemSchema(msgspec.Struct):
+        """Schema for creating an item via router."""
+        name: str
+        price: float
+        category: str = "general"
+    
+    class RouterQuerySchema(msgspec.Struct):
+        """Schema for router query params."""
+        page: int = 1
+        limit: int = 10
+        search: str = ""
+    
+    router_validated = Router(prefix="/router-validated")
+    
+    @router_validated.post("/search")
+    @validate_body(RouterSearchSchema)
+    def router_search(req, res, ctx, body: RouterSearchSchema):
+        res.json({
+            "query": body.q,
+            "page": body.page,
+            "limit": body.limit,
+            "sort": body.sort,
+        })
+    
+    @router_validated.post("/items")
+    @validate_body(RouterCreateItemSchema)
+    def router_create_item(req, res, ctx, body: RouterCreateItemSchema):
+        res.status(201).json({
+            "name": body.name,
+            "price": body.price,
+            "category": body.category,
+        })
+    
+    @router_validated.get("/items")
+    @validate_query(RouterQuerySchema)
+    def router_list_items(req, res, ctx, query: RouterQuerySchema):
+        res.json({
+            "page": query.page,
+            "limit": query.limit,
+            "search": query.search,
+        })
+    
+    @router_validated.post("/items-with-query")
+    @validate(body=RouterCreateItemSchema, query=RouterQuerySchema)
+    def router_create_with_query(req, res, ctx, body: RouterCreateItemSchema, query: RouterQuerySchema):
+        res.status(201).json({
+            "item": {"name": body.name, "price": body.price, "category": body.category},
+            "query": {"page": query.page, "limit": query.limit},
+        })
+    
+    # Mount with explicit prefix
+    app.mount("/router-validated", router_validated)
+    
+    # ========================================================================
+    # Router with OpenAPI decorators (tests Router + @api_tags/@api_doc)
+    # ========================================================================
+    
+    from hypern.openapi import tags, summary, deprecated, operation_id, requires_auth
+    
+    router_docs = Router(prefix="/router-docs")
+    
+    @router_docs.get("/users")
+    @tags("users", "docs-test")
+    @summary("List Users (Router)")
+    def router_docs_list_users(req, res, ctx):
+        """List all users via router with API docs."""
+        res.json({"users": test_db.get_all_users()})
+    
+    @router_docs.get("/users/:id")
+    @tags("users", "docs-test")
+    @summary("Get User (Router)")
+    def router_docs_get_user(req, res, ctx):
+        """Get a user by ID via router with API docs."""
+        user_id = req.param("id")
+        user = test_db.get_user(user_id)
+        if user:
+            res.json(user)
+        else:
+            res.status(404).json({"error": "User not found"})
+    
+    @router_docs.get("/deprecated-endpoint")
+    @deprecated
+    @tags("docs-test")
+    def router_deprecated(req, res, ctx):
+        """This endpoint is deprecated."""
+        res.json({"deprecated": True})
+    
+    @router_docs.post("/create")
+    @tags("users", "docs-test")
+    @summary("Create User (Router)")
+    @validate_body(CreateUserSchema)
+    def router_docs_create_user(req, res, ctx, body: CreateUserSchema):
+        """Create a user with validation and API doc decorators."""
+        user = test_db.create_user({
+            "name": body.name,
+            "email": body.email,
+            "age": body.age,
+        })
+        res.status(201).json(user)
+    
+    app.mount(router_docs)
     
     # ========================================================================
     # Async Handlers (Note: Limited async support - testing sync equivalents)

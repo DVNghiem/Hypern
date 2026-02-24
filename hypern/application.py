@@ -842,14 +842,45 @@ class Hypern:
         else:
             self._middleware.append(target)
     
+    def mount(
+        self,
+        router_or_prefix: Union[str, Router],
+        router: Optional[Router] = None,
+    ) -> 'Hypern':
+        """
+        Mount a router on the application.
+        
+        Example:
+            # Mount using router's own prefix
+            api_v1 = Router(prefix="/api/v1")
+            app.mount(api_v1)
+            
+            # Mount with explicit prefix
+            app.mount("/api/v2", api_v2)
+        """
+        if isinstance(router_or_prefix, Router):
+            # app.mount(router) - use router's own prefix
+            self._mount_router(router_or_prefix.prefix, router_or_prefix)
+        elif isinstance(router_or_prefix, str) and isinstance(router, Router):
+            # app.mount("/prefix", router)
+            self._mount_router(router_or_prefix, router)
+        else:
+            raise TypeError(
+                "Expected mount(router) or mount(prefix, router). "
+                f"Got mount({type(router_or_prefix).__name__}, {type(router).__name__})"
+            )
+        return self
+
     def _mount_router(self, prefix: str, router: Router):
         """Mount a router at a path prefix."""
         self._routers.append((prefix, router))
         
         # Add all routes from the router to the main router
+        # Wrap each handler so it gets ctx injection, error handling, etc.
         for method, path, handler, options in router._routes:
             full_path = prefix + path if prefix else path
-            self.add_route(method, full_path, handler)
+            wrapped = self._wrap_handler(handler)
+            self.add_route(method, full_path, wrapped)
     
     def on_startup(self, handler: Callable) -> Callable:
         """
