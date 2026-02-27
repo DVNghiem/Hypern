@@ -29,6 +29,9 @@ from ._hypern import (
 )
 from .application import Hypern, create_app, hypern
 
+# Dependency Injection - standalone decorator
+from .di import inject
+
 # Background tasks - global executor and utilities
 from .tasks import (
     background,
@@ -165,6 +168,7 @@ __all__ = [
     # Dependency Injection
     "Context",
     "DIContainer",
+    "inject",
     # Background Tasks
     "TaskExecutor",
     "TaskResult",

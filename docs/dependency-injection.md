@@ -86,7 +86,57 @@ app.singleton("user_service", user_service)
 
 ## Injecting Dependencies
 
-### Using the @inject Decorator
+### Using the Standalone @inject Decorator
+
+The recommended way to inject dependencies is the standalone `@inject` decorator, 
+which can be imported and used in any module without referencing the app instance:
+
+```python
+from hypern import inject
+
+@app.get("/config")
+@inject("config")
+def get_config(req, res, ctx, config):
+    res.json(config)
+
+@app.get("/users/:id")
+@inject("user_service")
+async def get_user(req, res, ctx, user_service):
+    user_id = req.param("id")
+    user = await user_service.get_user(user_id)
+    if user:
+        res.json(user)
+    else:
+        res.status(404).json({"error": "User not found"})
+```
+
+### Multiple Injections
+
+You can inject multiple dependencies in a single decorator call:
+
+```python
+from hypern import inject
+
+@app.post("/orders")
+@inject("db_pool", "email", "config")
+async def create_order(req, res, ctx, db_pool, email, config):
+    data = req.json()
+```
+
+Or stack multiple `@inject` decorators (order matches argument order):
+
+```python
+@app.post("/orders")
+@inject("config")
+@inject("email")
+@inject("db_pool")
+async def create_order(req, res, ctx, db_pool, email, config):
+    data = req.json()
+```
+
+### Using @app.inject (legacy)
+
+`@app.inject` still works and delegates to the standalone `@inject` internally:
 
 ```python
 @app.get("/config")
@@ -108,7 +158,32 @@ async def get_user(req, res, ctx, user_service, logger):
         res.status(404).json({"error": "User not found"})
 ```
 
-### Multiple Injections
+### Using Standalone @inject in Separate Modules
+
+The standalone `@inject` decorator avoids circular imports in large apps:
+
+```python
+# services/user_routes.py
+from hypern import inject, Router
+
+router = Router(prefix="/users")
+
+@router.get("/")
+@inject("user_service")
+async def list_users(req, res, ctx, user_service):
+    users = await user_service.get_all()
+    res.json(users)
+
+@router.get("/:id")
+@inject("user_service", "logger")
+async def get_user(req, res, ctx, user_service, logger):
+    user_id = req.param("id")
+    logger.info(f"Fetching user {user_id}")
+    user = await user_service.get_user(user_id)
+    res.json(user)
+```
+
+### Multiple Injections (legacy)
 
 ```python
 @app.post("/orders")

@@ -23,6 +23,7 @@ from hypern import (
     BadRequest, 
     Unauthorized,
     HTTPException,
+    inject,
 )
 from hypern.validation import validate, validate_body, validate_query
 from hypern.middleware import (
@@ -573,19 +574,167 @@ def create_test_app() -> Hypern:
         res.json(config)
     
     @app.get("/di/database")
-    @app.inject("database")
+    @inject("database")
     def get_database_users(req, res, ctx, database):
         users = database.get_all_users()
         res.json({"users": users})
     
     @app.get("/di/factory")
-    @app.inject("request_logger")
+    @inject("request_logger")
     def get_logger(req, res, ctx, request_logger):
         res.json({
             "logger_created": True,
             "has_logs": isinstance(request_logger.get("logs"), list)
         })
     
+    @app.get("/di/multi")
+    @inject("database", "config")
+    def get_multi_inject(req, res, ctx, database, config):
+        users = database.get_all_users()
+        res.json({
+            "user_count": len(users),
+            "app_name": config.get("app_name", "unknown")
+        })
+
+    # ========================================================================
+    # Dependency Injection via Router (standalone @inject + Router)
+    # ========================================================================
+
+    router_di = Router(prefix="/router-di")
+
+    @router_di.get("/config")
+    @inject("config")
+    def router_get_config(req, res, ctx, config):
+        res.json(config)
+
+    @router_di.get("/database")
+    @inject("database")
+    def router_get_database(req, res, ctx, database):
+        users = database.get_all_users()
+        res.json({"users": users})
+
+    @router_di.get("/multi")
+    @inject("database", "config")
+    def router_get_multi(req, res, ctx, database, config):
+        users = database.get_all_users()
+        res.json({
+            "user_count": len(users),
+            "app_name": config.get("app_name", "unknown")
+        })
+
+    @router_di.get("/stacked")
+    @inject("config")
+    @inject("database")
+    def router_get_stacked(req, res, ctx, database, config):
+        users = database.get_all_users()
+        res.json({
+            "stacked": True,
+            "user_count": len(users),
+            "app_name": config.get("app_name", "unknown")
+        })
+
+    app.mount(router_di)
+
+    # ========================================================================
+    # Inject + Validator combinations
+    # ========================================================================
+
+    class DiValidateBodySchema(msgspec.Struct):
+        """Body schema for inject+validate combinations."""
+        name: str
+        value: int = 0
+
+    class DiValidateQuerySchema(msgspec.Struct):
+        """Query schema for inject+validate combinations."""
+        limit: int = 10
+        active: bool = True
+
+    # @inject (outer) + @validate_body (inner)
+    @app.post("/di-validate/body")
+    @inject("config")
+    @validate_body(DiValidateBodySchema)
+    def div_inject_then_body(req, res, ctx, body: DiValidateBodySchema, config):
+        res.json({
+            "name": body.name,
+            "value": body.value,
+            "app_name": config.get("app_name"),
+        })
+
+    # @validate_body (outer) + @inject (inner)  – reversed decorator order
+    @app.post("/di-validate/body-reversed")
+    @validate_body(DiValidateBodySchema)
+    @inject("config")
+    def div_body_then_inject(req, res, ctx, body: DiValidateBodySchema, config):
+        res.json({
+            "name": body.name,
+            "value": body.value,
+            "app_name": config.get("app_name"),
+        })
+
+    # @inject (outer) + @validate_query (inner)
+    @app.get("/di-validate/query")
+    @inject("config")
+    @validate_query(DiValidateQuerySchema)
+    def div_inject_then_query(req, res, ctx, query: DiValidateQuerySchema, config):
+        res.json({
+            "limit": query.limit,
+            "active": query.active,
+            "app_name": config.get("app_name"),
+        })
+
+    # @inject multi + @validate(body+query) combined
+    @app.post("/di-validate/body-query")
+    @inject("database", "config")
+    @validate(body=DiValidateBodySchema, query=DiValidateQuerySchema)
+    def div_inject_body_query(req, res, ctx, body: DiValidateBodySchema, query: DiValidateQuerySchema, database, config):
+        users = database.get_all_users()
+        res.json({
+            "name": body.name,
+            "value": body.value,
+            "limit": query.limit,
+            "active": query.active,
+            "user_count": len(users),
+            "app_name": config.get("app_name"),
+        })
+
+    # Router-level: @inject + @validate_body
+    router_di_validate = Router(prefix="/router-di-validate")
+
+    @router_di_validate.post("/create")
+    @inject("database", "config")
+    @validate_body(DiValidateBodySchema)
+    def router_div_create(req, res, ctx, body: DiValidateBodySchema, database, config):
+        res.status(201).json({
+            "name": body.name,
+            "value": body.value,
+            "debug": config.get("debug"),
+            "has_users": len(database.get_all_users()) > 0,
+        })
+
+    @router_di_validate.get("/search")
+    @inject("config")
+    @validate_query(DiValidateQuerySchema)
+    def router_div_search(req, res, ctx, query: DiValidateQuerySchema, config):
+        res.json({
+            "limit": query.limit,
+            "active": query.active,
+            "app_name": config.get("app_name"),
+        })
+
+    @router_di_validate.post("/combined")
+    @inject("config")
+    @validate(body=DiValidateBodySchema, query=DiValidateQuerySchema)
+    def router_div_combined(req, res, ctx, body: DiValidateBodySchema, query: DiValidateQuerySchema, config):
+        res.status(201).json({
+            "name": body.name,
+            "value": body.value,
+            "limit": query.limit,
+            "active": query.active,
+            "app_name": config.get("app_name"),
+        })
+
+    app.mount(router_di_validate)
+
     # ========================================================================
     # Context Routes
     # ========================================================================
@@ -847,7 +996,7 @@ def create_test_app() -> Hypern:
     # Router with OpenAPI decorators (tests Router + @api_tags/@api_doc)
     # ========================================================================
     
-    from hypern.openapi import tags, summary, deprecated, operation_id, requires_auth
+    from hypern.openapi import tags, summary, deprecated
     
     router_docs = Router(prefix="/router-docs")
     
