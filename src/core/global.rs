@@ -10,6 +10,7 @@ use crate::{
 
 static ASYNCIO: OnceLock<Py<PyModule>> = OnceLock::new();
 static EV_LOOP: OnceLock<Py<PyAny>> = OnceLock::new();
+static BUILTINS: OnceLock<Py<PyModule>> = OnceLock::new();
 // Share single multi-threaded runtime
 static SHARED_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 static CONN_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
@@ -21,6 +22,10 @@ static RESPONSE_POOL: OnceLock<Arc<ResponsePool>> = OnceLock::new();
 
 pub fn get_asyncio(py: Python<'_>) -> &Py<PyModule> {
     ASYNCIO.get_or_init(|| py.import("asyncio").unwrap().into())
+}
+
+pub fn get_builtins(py: Python<'_>) -> &Py<PyModule> {
+    BUILTINS.get_or_init(|| py.import("builtins").unwrap().into())
 }
 
 pub fn get_event_loop(py: Python<'_>) -> &Py<PyAny> {

@@ -1,4 +1,5 @@
 pub mod blocking;
+pub mod blocking_executor;
 pub mod context;
 pub mod global;
 pub mod interpreter;
