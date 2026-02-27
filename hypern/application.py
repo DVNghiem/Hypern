@@ -18,13 +18,14 @@ from hypern.router import Router
 from hypern._hypern import DIContainer, TaskExecutor, TaskResult
 from hypern._hypern import SSEStream, StreamingResponse
 from hypern._hypern import HealthCheck, ReloadConfig, ReloadManager
+from hypern.di import inject as _standalone_inject
 
 from hypern.database import Database as _Database, finalize_db as _finalize_db
 from hypern._hypern import get_db as _get_db
 
 if TYPE_CHECKING:
     from hypern.openapi import OpenAPIGenerator
-    from hypern.websocket import WebSocket, WebSocketRouter
+    from hypern.websocket import WebSocketRouter
     from hypern.scheduler import TaskScheduler
 
 AppType = TypeVar("AppType", bound="Hypern")
@@ -203,9 +204,13 @@ class Hypern:
             self._di.factory(name, factory_fn)
         return self
     
-    def inject(self, name: str) -> Callable:
+    def inject(self, *names: str) -> Callable:
         """
-        Decorator to inject a dependency by name.
+        Decorator to inject dependencies by name.
+        
+        Delegates to the standalone :func:`hypern.inject` decorator so that
+        ``@app.inject("database")`` and ``@inject("database")`` are
+        interchangeable.
         
         Example:
             @app.inject("database")
@@ -213,16 +218,7 @@ class Hypern:
                 users = await database.query("SELECT * FROM users")
                 res.json(users)
         """
-        def decorator(handler: HandlerType) -> HandlerType:
-            @functools.wraps(handler)
-            async def wrapped(req, res, ctx):
-                dep = ctx.get(name) if ctx else None
-                if asyncio.iscoroutinefunction(handler):
-                    await handler(req, res, ctx, dep)
-                else:
-                    handler(req, res, ctx, dep)
-            return wrapped
-        return decorator
+        return _standalone_inject(*names)
     
     def background(
         self, 

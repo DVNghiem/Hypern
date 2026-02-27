@@ -10,7 +10,6 @@ Tests cover:
 """
 
 import httpx
-import pytest
 
 
 class TestSingletonDependencies:
@@ -98,6 +97,29 @@ class TestRequestContext:
 class TestDependencyInjectionIntegration:
     """Test dependency injection integration scenarios."""
     
+    def test_standalone_inject_database(self, client: httpx.Client):
+        """Test standalone @inject decorator works for database."""
+        response = client.get("/di/database")
+        assert response.status_code == 200
+        data = response.json()
+        assert "users" in data
+
+    def test_standalone_inject_factory(self, client: httpx.Client):
+        """Test standalone @inject decorator works for factory deps."""
+        response = client.get("/di/factory")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["logger_created"] is True
+
+    def test_multi_inject(self, client: httpx.Client):
+        """Test @inject with multiple dependency names."""
+        response = client.get("/di/multi")
+        assert response.status_code == 200
+        data = response.json()
+        assert "user_count" in data
+        assert "app_name" in data
+        assert data["app_name"] == "Hypern Test App"
+    
     def test_config_used_in_logic(self, client: httpx.Client):
         """Test config values are used in application logic."""
         response = client.get("/di/config")
@@ -158,3 +180,168 @@ class TestContextIsolation:
         # Both should be small (fresh timers)
         assert elapsed1 < 500
         assert elapsed2 < 500
+
+
+class TestRouterInject:
+    """Test standalone @inject decorator works with Router-mounted routes."""
+
+    def test_router_inject_single_config(self, client: httpx.Client):
+        """Test @inject('config') on a Router route resolves correctly."""
+        response = client.get("/router-di/config")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["app_name"] == "Hypern Test App"
+        assert data["debug"] is True
+
+    def test_router_inject_single_database(self, client: httpx.Client):
+        """Test @inject('database') on a Router route resolves correctly."""
+        response = client.get("/router-di/database")
+        assert response.status_code == 200
+        data = response.json()
+        assert "users" in data
+        assert isinstance(data["users"], list)
+
+    def test_router_inject_multi(self, client: httpx.Client):
+        """Test @inject with multiple names on a Router route."""
+        response = client.get("/router-di/multi")
+        assert response.status_code == 200
+        data = response.json()
+        assert "user_count" in data
+        assert "app_name" in data
+        assert data["app_name"] == "Hypern Test App"
+        assert isinstance(data["user_count"], int)
+
+    def test_router_inject_stacked(self, client: httpx.Client):
+        """Test stacked @inject decorators on a Router route."""
+        response = client.get("/router-di/stacked")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["stacked"] is True
+        assert data["app_name"] == "Hypern Test App"
+        assert isinstance(data["user_count"], int)
+
+
+class TestInjectWithValidator:
+    """Test @inject combined with @validate_body / @validate_query / @validate."""
+
+    # ------------------------------------------------------------------
+    # App-level routes
+    # ------------------------------------------------------------------
+
+    def test_inject_outer_validate_body_inner(self, client: httpx.Client):
+        """@inject outer + @validate_body inner: body then injected dep."""
+        response = client.post(
+            "/di-validate/body",
+            json={"name": "widget", "value": 42},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "widget"
+        assert data["value"] == 42
+        assert data["app_name"] == "Hypern Test App"
+
+    def test_inject_outer_validate_body_inner_invalid(self, client: httpx.Client):
+        """@inject outer + @validate_body inner: validation error still handled."""
+        response = client.post(
+            "/di-validate/body",
+            json={"value": 1},  # missing required field 'name'
+        )
+        assert response.status_code == 400
+
+    def test_validate_body_outer_inject_inner(self, client: httpx.Client):
+        """@validate_body outer + @inject inner (reversed): same argument order."""
+        response = client.post(
+            "/di-validate/body-reversed",
+            json={"name": "gadget", "value": 7},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "gadget"
+        assert data["value"] == 7
+        assert data["app_name"] == "Hypern Test App"
+
+    def test_inject_outer_validate_query_inner(self, client: httpx.Client):
+        """@inject outer + @validate_query inner: query then injected dep."""
+        response = client.get("/di-validate/query", params={"limit": "5", "active": "true"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["limit"] == 5
+        assert data["active"] is True
+        assert data["app_name"] == "Hypern Test App"
+
+    def test_inject_outer_validate_query_defaults(self, client: httpx.Client):
+        """@inject outer + @validate_query inner: query defaults still applied."""
+        response = client.get("/di-validate/query")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["limit"] == 10
+        assert data["active"] is True
+        assert data["app_name"] == "Hypern Test App"
+
+    def test_inject_multi_validate_body_query(self, client: httpx.Client):
+        """@inject multi + @validate(body+query): all args in correct order."""
+        response = client.post(
+            "/di-validate/body-query",
+            params={"limit": "3", "active": "false"},
+            json={"name": "combo", "value": 99},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["name"] == "combo"
+        assert data["value"] == 99
+        assert data["limit"] == 3
+        assert data["active"] is False
+        assert data["app_name"] == "Hypern Test App"
+        assert isinstance(data["user_count"], int)
+
+    # ------------------------------------------------------------------
+    # Router-level routes
+    # ------------------------------------------------------------------
+
+    def test_router_inject_validate_body(self, client: httpx.Client):
+        """Router + @inject + @validate_body: validated body + injected deps."""
+        response = client.post(
+            "/router-di-validate/create",
+            json={"name": "thing", "value": 10},
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["name"] == "thing"
+        assert data["value"] == 10
+        assert data["debug"] is True
+        assert data["has_users"] is True
+
+    def test_router_inject_validate_body_invalid(self, client: httpx.Client):
+        """Router + @inject + @validate_body: validation error still returned."""
+        response = client.post(
+            "/router-di-validate/create",
+            json={"value": 10},  # missing 'name'
+        )
+        assert response.status_code == 400
+
+    def test_router_inject_validate_query(self, client: httpx.Client):
+        """Router + @inject + @validate_query: validated query + injected dep."""
+        response = client.get(
+            "/router-di-validate/search",
+            params={"limit": "20", "active": "false"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["limit"] == 20
+        assert data["active"] is False
+        assert data["app_name"] == "Hypern Test App"
+
+    def test_router_inject_validate_combined(self, client: httpx.Client):
+        """Router + @inject + @validate(body+query): all resolved correctly."""
+        response = client.post(
+            "/router-di-validate/combined",
+            params={"limit": "8"},
+            json={"name": "entry", "value": 5},
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["name"] == "entry"
+        assert data["value"] == 5
+        assert data["limit"] == 8
+        assert data["active"] is True
+        assert data["app_name"] == "Hypern Test App"
