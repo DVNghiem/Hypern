@@ -4,6 +4,7 @@ from ._hypern import (
     TaskExecutor,
     TaskResult,
     TaskStatus,
+    BlockingExecutor,
     SSEEvent,
     SSEStream,
     StreamingResponse,
@@ -36,6 +37,16 @@ from .tasks import (
     get_task,
     get_task_executor,
     set_task_executor,
+)
+
+# Blocking executor — GIL-free parallel execution
+from .blocking import (
+    blocking,
+    blocking_map,
+    blocking_parallel,
+    blocking_run,
+    get_default_executor,
+    set_default_executor,
 )
 
 # Exceptions
@@ -174,6 +185,14 @@ __all__ = [
     "get_task",
     "get_task_executor",
     "set_task_executor",
+    # Blocking Executor
+    "BlockingExecutor",
+    "blocking",
+    "blocking_run",
+    "blocking_map",
+    "blocking_parallel",
+    "get_default_executor",
+    "set_default_executor",
     # Streaming/SSE
     "SSEEvent",
     "SSEStream",

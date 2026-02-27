@@ -43,6 +43,8 @@ pub use crate::core::context::{Context, DIContainer};
 
 pub use crate::core::tasks::{TaskExecutor, TaskResult, TaskStatus};
 
+pub use crate::core::blocking_executor::BlockingExecutor;
+
 pub use crate::http::streaming::{SSEEvent, SSEGenerator, SSEStream, StreamingResponse};
 
 // Realtime exports
@@ -95,6 +97,9 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<TaskExecutor>()?;
     module.add_class::<TaskResult>()?;
     module.add_class::<TaskStatus>()?;
+
+    // Blocking Executor (GIL-free parallel execution)
+    module.add_class::<BlockingExecutor>()?;
 
     // Streaming/SSE
     module.add_class::<SSEEvent>()?;

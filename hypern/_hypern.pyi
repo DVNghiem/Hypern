@@ -156,6 +156,133 @@ class TaskExecutor:
     def completed_count(self) -> int: ...
     def shutdown(self, wait: bool = True) -> None: ...
 
+
+class BlockingExecutor:
+    """
+    High-performance, GIL-releasing thread pool executor implemented in Rust.
+    
+    Runs Python callables on dedicated Rust OS threads. The calling thread
+    releases the GIL while waiting for results, enabling true parallelism
+    for CPU-bound work without GIL contention.
+    
+    Unlike ``concurrent.futures.ThreadPoolExecutor``, worker threads use
+    Rust's crossbeam channels (lock-free) for task dispatch, and the GIL is
+    only held for the brief duration of the Python callable execution.
+    
+    Supports context-manager protocol (``with`` statement) for automatic
+    shutdown.
+    
+    Example::
+    
+        from hypern import BlockingExecutor
+    
+        executor = BlockingExecutor(max_threads=8)
+        result = executor.run_sync(heavy_computation, arg1, arg2)
+    """
+    
+    def __init__(self, max_threads: int = 0, queue_size: int = 0) -> None:
+        """
+        Create a new blocking executor.
+        
+        Args:
+            max_threads: Number of OS worker threads. 0 = auto-detect CPU count.
+            queue_size: Bounded queue depth. 0 = unbounded.
+        """
+        ...
+    
+    def run_sync(self, callable: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """
+        Execute a callable on a pool thread, blocking until done.
+        
+        The calling thread releases the GIL while waiting, so other Python
+        threads and async tasks can progress concurrently.
+        
+        Args:
+            callable: Any Python callable.
+            *args: Positional arguments.
+            **kwargs: Keyword arguments.
+        
+        Returns:
+            The return value of ``callable(*args, **kwargs)``.
+        
+        Raises:
+            RuntimeError: If the pool is shut down or the callable raises.
+        """
+        ...
+    
+    def run_parallel(
+        self,
+        tasks: List[tuple[Callable[..., Any], tuple, Optional[Dict[str, Any]]]]
+    ) -> List[Any]:
+        """
+        Run multiple callables in parallel, returning results in order.
+        
+        Each element is ``(callable, args)`` or ``(callable, args, kwargs)``.
+        The calling thread releases the GIL and waits for all tasks.
+        
+        Args:
+            tasks: List of (callable, args) or (callable, args, kwargs) tuples.
+        
+        Returns:
+            List of results in the same order as input.
+        
+        Raises:
+            RuntimeError: If any task raises an exception.
+        """
+        ...
+    
+    def map(
+        self,
+        callable: Callable[[Any], Any],
+        items: List[Any],
+        chunk_size: int = 0
+    ) -> List[Any]:
+        """
+        Map a callable over items in parallel with automatic chunking.
+        
+        Equivalent to ``[callable(item) for item in items]`` but distributed
+        across all pool threads with the GIL released between chunks.
+        
+        Args:
+            callable: Function taking a single item.
+            items: List of items to process.
+            chunk_size: Items per work unit. 0 = auto-tune based on pool size.
+        
+        Returns:
+            List of results in the same order as items.
+        """
+        ...
+    
+    def active_threads(self) -> int:
+        """Number of currently alive worker threads."""
+        ...
+    
+    def pool_size(self) -> int:
+        """Maximum thread pool size."""
+        ...
+    
+    def pending_tasks(self) -> int:
+        """Number of tasks waiting in the queue."""
+        ...
+    
+    def is_running(self) -> bool:
+        """Whether the executor is still accepting work."""
+        ...
+    
+    def shutdown(self, wait: bool = True, timeout_secs: float = 30.0) -> None:
+        """
+        Shut down the executor.
+        
+        Args:
+            wait: If True, block until pending tasks finish.
+            timeout_secs: Maximum seconds to wait.
+        """
+        ...
+    
+    def __enter__(self) -> "BlockingExecutor": ...
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool: ...
+    def __repr__(self) -> str: ...
+
 class SSEEvent:
     """Server-Sent Event."""
     id: Optional[str]
