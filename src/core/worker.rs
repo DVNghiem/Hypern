@@ -2,7 +2,6 @@ use axum::{body::Body, extract::State, http::Request, response::IntoResponse, Ro
 use pyo3::prelude::*;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tracing::info;
 
 use crate::core::interpreter::http_execute;
 use crate::core::reload::ReloadManager;
@@ -150,8 +149,21 @@ async fn handle_request(State(state): State<AppState>, req: Request<Body>) -> im
     state.reload_manager.health().increment_in_flight();
     let rm = state.reload_manager.clone();
 
+    // Capture method and path for logging before consuming request
+    let method_str = req.method().to_string();
+    let path_str = req.uri().path().to_string();
+    let start = std::time::Instant::now();
+
+    // Log incoming request
+    crate::logging::log_request(&method_str, &path_str, None);
+
     // Execute the actual handler and ensure we decrement on exit
     let response = handle_request_inner(&state, req).await;
+
+    // Log response
+    let status = response.status().as_u16();
+    let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+    crate::logging::log_response(&method_str, &path_str, status, duration_ms, None);
 
     // Decrement in-flight and notify drain if needed
     rm.on_request_complete();
@@ -292,7 +304,6 @@ pub fn run_worker(
         #[cfg(unix)]
         unsafe {
             extern "C" fn handle_signal(sig: libc::c_int) {
-                tracing::info!("Worker received signal {}", sig);
                 LAST_SIGNAL.store(sig, Ordering::SeqCst);
                 SHUTDOWN.store(true, Ordering::SeqCst);
             }
@@ -323,7 +334,7 @@ pub fn run_worker(
         }
 
         let sig = LAST_SIGNAL.load(Ordering::SeqCst);
-        tracing::info!("Worker {} initiating shutdown (signal={})", worker_id, sig);
+        crate::hlog_info!("Worker {} initiating shutdown (signal={})", worker_id, sig);
 
         #[cfg(unix)]
         {
@@ -378,7 +389,7 @@ pub fn run_worker(
     rt.spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(startup_grace)).await;
         rm_startup.health().mark_healthy();
-        info!("Worker {} marked healthy after {}s grace period", worker_id, startup_grace);
+        crate::hlog_info!("Worker {} marked healthy after {}s grace period", worker_id, startup_grace);
     });
 
     rt.spawn(async move {
@@ -395,7 +406,7 @@ pub fn run_worker(
         // Build the Axum router with health probe routes
         let app = build_axum_router(state);
 
-        info!("Axum worker {} started", worker_id);
+        crate::hlog_info!("Axum worker {} started", worker_id);
 
         // Serve with Axum
         axum::serve(listener, app)
@@ -405,15 +416,15 @@ pub fn run_worker(
             .await
             .expect("Server error");
 
-        info!("Worker {} Axum server stopped", worker_id);
+        crate::hlog_info!("Worker {} Axum server stopped", worker_id);
     });
 
-    info!("Worker {} started", worker_id);
+    crate::hlog_info!("Worker {} started", worker_id);
 
     // Keep event loop alive in this worker process until stopped by signal
     let _ = ev_loop.call_method0("run_forever");
 
-    info!("Worker {} stopped", worker_id);
+    crate::hlog_info!("Worker {} stopped", worker_id);
     Ok(())
 }
 

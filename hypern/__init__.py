@@ -24,6 +24,8 @@ from ._hypern import (
     HealthCheck,
     ReloadConfig,
     ReloadManager,
+    # Logging
+    LogConfig,
     # Utils (Rust-accelerated)
     PageInfo,
     paginate,
@@ -281,6 +283,8 @@ __all__ = [
     "HealthCheck",
     "ReloadConfig",
     "ReloadManager",
+    # Logging
+    "LogConfig",
     # Database
     "Database",
     "get_database",

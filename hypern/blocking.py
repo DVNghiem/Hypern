@@ -1,6 +1,4 @@
 """
-High-performance blocking executor — run Python callables on Rust threads.
-
 This module provides :class:`BlockingExecutor`, a Rust-backed thread-pool
 executor that **releases the GIL** while the calling thread waits for results.
 This enables true CPU parallelism for Python code without the overhead of
@@ -41,12 +39,7 @@ from hypern._hypern import BlockingExecutor
 
 T = TypeVar("T")
 
-# ---------------------------------------------------------------------------
-# Module-level default executor (lazy-initialised)
-# ---------------------------------------------------------------------------
-
 _default_executor: Optional[BlockingExecutor] = None
-
 
 def _get_default_executor() -> BlockingExecutor:
     """Return (and lazily create) the module-level default executor."""
@@ -78,11 +71,6 @@ def get_default_executor() -> BlockingExecutor:
     (default: CPU count) for pool size.
     """
     return _get_default_executor()
-
-
-# ---------------------------------------------------------------------------
-# Convenience functions
-# ---------------------------------------------------------------------------
 
 
 def blocking_run(callable: Callable[..., T], *args: Any, **kwargs: Any) -> T:
@@ -146,11 +134,6 @@ def blocking_parallel(
     """
     ex = executor or _get_default_executor()
     return ex.run_parallel(tasks)
-
-
-# ---------------------------------------------------------------------------
-# Decorator
-# ---------------------------------------------------------------------------
 
 
 def blocking(fn: Optional[Callable] = None, *, executor: Optional[BlockingExecutor] = None):

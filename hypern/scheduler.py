@@ -31,24 +31,16 @@ Example:
 
 from __future__ import annotations
 
-import asyncio
 import functools
 import logging
 import math
-import re
 import threading
 import time
-import traceback
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("hypern.scheduler")
-
-
-# ============================================================================
-# Retry Policy
-# ============================================================================
 
 
 class RetryPolicy:
@@ -94,11 +86,6 @@ class RetryPolicy:
         """Calculate the delay before the next retry."""
         delay = self.backoff * (self.backoff_factor ** attempt)
         return min(delay, self.max_delay)
-
-
-# ============================================================================
-# Task Monitoring
-# ============================================================================
 
 
 class TaskMetrics:
@@ -254,11 +241,6 @@ class TaskMonitor:
                 pass
 
 
-# ============================================================================
-# Scheduled Task State
-# ============================================================================
-
-
 class ScheduledTaskState(Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -281,11 +263,6 @@ class ScheduledTaskResult:
     completed_at: Optional[float] = None
     next_run: Optional[float] = None
     duration_ms: float = 0.0
-
-
-# ============================================================================
-# Cron expression parser (minimal)
-# ============================================================================
 
 
 class CronExpression:
@@ -354,11 +331,6 @@ class CronExpression:
         )
 
 
-# ============================================================================
-# Task Scheduler
-# ============================================================================
-
-
 class TaskScheduler:
     """
     Background task scheduler with cron, interval, retry, and monitoring.
@@ -400,10 +372,6 @@ class TaskScheduler:
         with self._lock:
             self._task_counter += 1
             return f"sched-{self._task_counter}"
-
-    # ------------------------------------------------------------------
-    # Registration decorators
-    # ------------------------------------------------------------------
 
     def cron(self, expression: str, retry: Optional[RetryPolicy] = None, name: Optional[str] = None) -> Callable:
         """
@@ -482,10 +450,6 @@ class TaskScheduler:
             return wrapper
         return decorator
 
-    # ------------------------------------------------------------------
-    # Execution helpers
-    # ------------------------------------------------------------------
-
     def _execute_with_retry(self, func: Callable, args: tuple, policy: RetryPolicy, task_name: str) -> ScheduledTaskResult:
         """Execute a function with retry policy and return a result."""
         task_id = self._next_id()
@@ -535,10 +499,6 @@ class TaskScheduler:
         with self._lock:
             self._results[task_id] = result
         return result
-
-    # ------------------------------------------------------------------
-    # Scheduler loop
-    # ------------------------------------------------------------------
 
     def start(self) -> None:
         """Start the scheduler in a background daemon thread."""
@@ -607,10 +567,6 @@ class TaskScheduler:
             # Sleep for ~1 second before checking again
             time.sleep(1.0)
 
-    # ------------------------------------------------------------------
-    # Query
-    # ------------------------------------------------------------------
-
     def get_result(self, task_id: str) -> Optional[ScheduledTaskResult]:
         """Get the result of a scheduled task by ID."""
         with self._lock:
@@ -624,11 +580,6 @@ class TaskScheduler:
     def get_metrics(self) -> Dict[str, Any]:
         """Get a snapshot of task metrics."""
         return self.monitor.metrics.snapshot()
-
-
-# ============================================================================
-# Convenience decorator
-# ============================================================================
 
 
 def periodic(seconds: float, retry: Optional[RetryPolicy] = None) -> Callable:

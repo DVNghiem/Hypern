@@ -1,6 +1,5 @@
 use pyo3::prelude::*;
 use std::sync::Arc;
-use tracing::info;
 
 use crate::core::reload::ReloadManager;
 use crate::middleware::MiddlewareChain;
@@ -44,6 +43,11 @@ pub fn spawn_workers(
                 0 => {
                     // Child process - use Axum worker
                     use crate::core::worker::run_worker;
+                    use crate::logging::LogQueue;
+
+                    // Re-initialize the log queue for this child process
+                    // (the parent's consumer thread doesn't survive fork)
+                    LogQueue::reinit_after_fork();
 
                     // Each child gets its own ReloadManager instance
                     let child_reload = ReloadManager::new(reload_manager.config().clone());
@@ -67,7 +71,7 @@ pub fn spawn_workers(
                 child_pid => {
                     // Parent process
                     child_pids.push(child_pid);
-                    info!(
+                    crate::hlog_info!(
                         "Spawned Axum worker {} with PID {}",
                         worker_id + 1,
                         child_pid
@@ -91,7 +95,7 @@ pub fn wait_for_workers(pids: &[libc::pid_t]) {
         let remaining = timeout.saturating_sub(start.elapsed());
 
         if remaining.is_zero() {
-            tracing::warn!("Timeout waiting for worker {}, force killing", pid);
+            crate::hlog_warn!("Timeout waiting for worker {}, force killing", pid);
             unsafe {
                 libc::kill(pid, libc::SIGKILL);
                 let mut status: libc::c_int = 0;
@@ -118,7 +122,7 @@ pub fn wait_for_workers(pids: &[libc::pid_t]) {
             }
 
             if !waited {
-                tracing::warn!("Worker {} did not exit gracefully, force killing", pid);
+                crate::hlog_warn!("Worker {} did not exit gracefully, force killing", pid);
                 unsafe {
                     libc::kill(pid, libc::SIGKILL);
                     let mut status: libc::c_int = 0;
@@ -157,7 +161,7 @@ pub fn spawn_workers(
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
 
-    info!(
+    crate::hlog_info!(
         "Starting {} thread-based workers (non-Unix mode)",
         num_workers
     );
@@ -212,7 +216,7 @@ pub fn spawn_workers(
                     let listener = TokioListener::from_std(std_listener)
                         .expect("Failed to create Tokio listener");
 
-                    info!("Thread worker {} listening", worker_id);
+                    crate::hlog_info!("Thread worker {} listening", worker_id);
 
                     // Build Axum router using the standard AppState path
                     let state = crate::core::worker::AppState {
@@ -229,7 +233,7 @@ pub fn spawn_workers(
                     tokio::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_secs(startup_grace)).await;
                         rm_startup.health().mark_healthy();
-                        info!("Thread worker {} marked healthy", worker_id);
+                        crate::hlog_info!("Thread worker {} marked healthy", worker_id);
                     });
 
                     // Serve with connection limits
@@ -238,18 +242,18 @@ pub fn spawn_workers(
                         tokio::signal::ctrl_c()
                             .await
                             .expect("Failed to install Ctrl+C handler");
-                        info!("Worker {} received shutdown signal", worker_id);
+                        crate::hlog_info!("Worker {} received shutdown signal", worker_id);
                     });
 
                     if let Err(e) = server.await {
-                        tracing::error!("Worker {} server error: {}", worker_id, e);
+                        crate::hlog_error!("Worker {} server error: {}", worker_id, e);
                     }
                 });
             })
             .expect("Failed to spawn worker thread");
 
         handles.push(handle);
-        info!("Spawned thread worker {} (thread-based)", worker_id + 1);
+        crate::hlog_info!("Spawned thread worker {} (thread-based)", worker_id + 1);
     }
 
     handles
@@ -268,5 +272,5 @@ pub fn wait_for_workers(handles: Vec<std::thread::JoinHandle<()>>) {
 pub fn terminate_workers(_handles: &[std::thread::JoinHandle<()>]) {
     // Threads don't support external termination in the same way as processes
     // The graceful shutdown will be handled by the Ctrl+C handler
-    info!("Requesting graceful shutdown of thread workers");
+    crate::hlog_info!("Requesting graceful shutdown of thread workers");
 }

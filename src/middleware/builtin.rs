@@ -559,23 +559,13 @@ impl RustMiddleware for LogMiddleware {
             let method = ctx.method.as_str();
             let request_id = &ctx.request_id;
 
-            // Use tracing for structured logging
-            tracing::info!(
-                request_id = %request_id,
-                method = %method,
-                path = %path,
-                "Incoming request"
-            );
+            // Use the new log queue for structured logging
+            crate::logging::log_request(method, &path, Some(request_id));
 
             if self.config.log_headers {
                 let headers = ctx.headers.read();
                 for (key, value) in headers.iter() {
-                    tracing::debug!(
-                        request_id = %request_id,
-                        header_name = %key,
-                        header_value = %value,
-                        "Request header"
-                    );
+                    crate::hlog_debug!("[{}] Header: {}={}", request_id, key, value);
                 }
             }
 
@@ -619,10 +609,10 @@ impl RustMiddleware for LogAfterMiddleware {
             let duration = ctx.elapsed();
             let request_id = &ctx.request_id;
 
-            tracing::info!(
-                request_id = %request_id,
-                duration_ms = duration.as_millis(),
-                "Request completed"
+            crate::hlog_info!(
+                "[{}] Request completed in {}ms",
+                request_id,
+                duration.as_millis()
             );
 
             MiddlewareResult::Continue()

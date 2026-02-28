@@ -1,5 +1,3 @@
-//! High-performance blocking executor for offloading Python work to Rust threads.
-//!
 //! This module provides `BlockingExecutor` — a thread-pool-backed executor that
 //! runs Python callables on dedicated Rust OS threads with the GIL released during
 //! wait/scheduling. This gives Python programs true parallelism for CPU-bound work
@@ -37,10 +35,6 @@ enum WorkResult {
     Ok(Py<PyAny>),
     Err(String),
 }
-
-// ───────────────────────────────────────────────────────────────────────────
-// BlockingExecutor — the user-facing PyO3 class
-// ───────────────────────────────────────────────────────────────────────────
 
 /// A high-performance, GIL-releasing thread pool executor.
 ///
@@ -426,10 +420,6 @@ impl BlockingExecutor {
         Ok(false)
     }
 }
-
-// ───────────────────────────────────────────────────────────────────────────
-// Worker loop — runs on each pool thread
-// ───────────────────────────────────────────────────────────────────────────
 
 /// The main loop executed by each worker thread.
 ///

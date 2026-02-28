@@ -3,11 +3,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{watch, Notify};
-use tracing::{info, warn};
-
-// ---------------------------------------------------------------------------
-// Health status
-// ---------------------------------------------------------------------------
 
 /// Health status levels (mapped to HTTP codes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,10 +48,6 @@ impl HealthStatus {
         matches!(self, Self::Healthy)
     }
 }
-
-// ---------------------------------------------------------------------------
-// HealthCheck – thread-safe, lock-free health state
-// ---------------------------------------------------------------------------
 
 /// Shared health state used by workers and the parent process.
 #[derive(Clone)]
@@ -183,10 +174,6 @@ impl HealthCheck {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ReloadManager – orchestrates graceful / hot reload
-// ---------------------------------------------------------------------------
-
 /// Configuration for the reload manager.
 #[derive(Debug, Clone)]
 pub struct ReloadConfig {
@@ -290,21 +277,19 @@ impl ReloadManager {
     // -- signalling --
 
     pub fn signal_graceful_reload(&self) {
-        info!("Signalling graceful reload");
+        crate::hlog_info!("Signalling graceful reload");
         let _ = self.inner.signal_tx.send(ReloadSignal::Graceful);
     }
 
     pub fn signal_hot_reload(&self) {
-        info!("Signalling hot reload");
+        crate::hlog_info!("Signalling hot reload");
         let _ = self.inner.signal_tx.send(ReloadSignal::Hot);
     }
 
     pub fn signal_shutdown(&self) {
-        info!("Signalling shutdown");
+        crate::hlog_info!("Signalling shutdown");
         let _ = self.inner.signal_tx.send(ReloadSignal::Shutdown);
     }
-
-    // -- drain --
 
     /// Begin draining: stop accepting new requests and wait for in-flight to finish.
     pub fn start_drain(&self) {
@@ -314,7 +299,7 @@ impl ReloadManager {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
-            info!("Starting connection drain");
+            crate::hlog_info!("Starting connection drain");
             self.inner.health.mark_draining();
         }
     }
@@ -327,7 +312,7 @@ impl ReloadManager {
     pub fn on_request_complete(&self) {
         let remaining = self.inner.health.decrement_in_flight();
         if self.is_draining() && remaining == 0 {
-            info!("All in-flight requests drained");
+            crate::hlog_info!("All in-flight requests drained");
             self.inner.drain_complete.notify_waiters();
         }
     }
@@ -342,12 +327,12 @@ impl ReloadManager {
 
         tokio::select! {
             _ = self.inner.drain_complete.notified() => {
-                info!("Drain completed successfully");
+                crate::hlog_info!("Drain completed successfully");
                 true
             }
             _ = tokio::time::sleep(timeout) => {
                 let remaining = self.inner.health.in_flight();
-                warn!("Drain timeout reached with {} requests still in-flight", remaining);
+                crate::hlog_warn!("Drain timeout reached with {} requests still in-flight", remaining);
                 false
             }
         }
@@ -358,13 +343,9 @@ impl ReloadManager {
         self.inner.draining.store(false, Ordering::Release);
         self.inner.health.set_status(HealthStatus::Healthy);
         let _ = self.inner.signal_tx.send(ReloadSignal::None);
-        info!("Reload cycle complete, status reset to healthy");
+        crate::hlog_info!("Reload cycle complete, status reset to healthy");
     }
 }
-
-// ---------------------------------------------------------------------------
-// PyO3 wrappers
-// ---------------------------------------------------------------------------
 
 /// Python-facing health check / probe object.
 #[pyclass(name = "HealthCheck", from_py_object)]
