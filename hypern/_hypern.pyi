@@ -49,6 +49,7 @@ class Server:
     def start(self, host: str, port: int, num_processes: int, workers_threads: int, max_blocking_threads: int, max_connections: int) -> None: ...
     def enable_http2(self) -> None: ...
     def set_reload_config(self, config: "ReloadConfig") -> None: ...
+    def set_log_config(self, config: "LogConfig") -> None: ...
     def get_reload_manager(self) -> Optional["ReloadManager"]: ...
     def get_health_check(self) -> Optional["HealthCheck"]: ...
     def graceful_reload(self) -> None: ...
@@ -436,6 +437,50 @@ class BasicAuthMiddleware:
         realm: str = "Restricted",
         users: Optional[Dict[str, str]] = None
     ) -> None: ...
+
+
+class LogConfig:
+    """
+    Configuration for the Rust-level logging system.
+    
+    Controls log level, request/response logging, queue size, and path exclusions.
+    Uses a high-performance lock-free log queue.
+    """
+    
+    def __init__(
+        self,
+        level: str = "info",
+        log_request: bool = True,
+        log_response: bool = True,
+        queue_size: int = 10000,
+        skip_paths: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Create a new log configuration.
+        
+        Args:
+            level: Minimum log level - "trace", "debug", "info", "warn", "error", "off"
+            log_request: Enable logging of incoming requests
+            log_response: Enable logging of outgoing responses with status and duration
+            queue_size: Internal bounded log queue capacity
+            skip_paths: Paths to exclude from request/response logging
+        """
+        ...
+    
+    @staticmethod
+    def disabled() -> "LogConfig":
+        """Disable all logging."""
+        ...
+    
+    @staticmethod
+    def errors_only() -> "LogConfig":
+        """Enable only error-level logging."""
+        ...
+    
+    @staticmethod
+    def verbose() -> "LogConfig":
+        """Enable verbose debug logging with request/response."""
+        ...
 
 
 class HealthCheck:

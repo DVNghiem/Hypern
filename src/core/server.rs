@@ -1,8 +1,10 @@
 use crate::core::multiprocess::{spawn_workers, terminate_workers, wait_for_workers};
 use crate::core::reload::{PyHealthCheck, PyReloadConfig, PyReloadManager, ReloadConfig, ReloadManager};
+use crate::logging::{LogConfig, LogQueue, PyLogConfig};
 use crate::middleware::MiddlewareChain;
 use crate::routing::router::Router;
 use crate::socket::SocketHeld;
+use crate::{hlog_info, hlog_warn};
 use pyo3::prelude::*;
 use std::sync::Arc;
 
@@ -13,6 +15,7 @@ pub struct Server {
     rust_middleware: Arc<MiddlewareChain>,
     reload_config: ReloadConfig,
     reload_manager: Option<ReloadManager>,
+    log_config: LogConfig,
 }
 
 #[pymethods]
@@ -25,7 +28,13 @@ impl Server {
             rust_middleware: Arc::new(MiddlewareChain::new()),
             reload_config: ReloadConfig::default(),
             reload_manager: None,
+            log_config: LogConfig::default(),
         }
+    }
+
+    /// Configure logging behavior.
+    pub fn set_log_config(&mut self, config: PyLogConfig) {
+        self.log_config = config.inner;
     }
 
     pub fn set_router(&mut self, router: Router) {
@@ -114,14 +123,8 @@ impl Server {
         max_blocking_threads: usize,
         max_connections: usize,
     ) -> PyResult<()> {
-        // Setup tracing
-        tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "info,hypern=debug".into()),
-            )
-            .with_thread_ids(true)
-            .init();
+        // Initialize the log queue
+        LogQueue::init(self.log_config.clone());
 
         // Collect handlers before fork
         let raw_socket = SocketHeld::new(host.clone(), port)?;
@@ -151,7 +154,7 @@ impl Server {
             reload_manager.clone(),
         );
 
-        println!("All {} workers started", pids.len());
+        hlog_info!("All {} workers started", pids.len());
 
         // Setup signal handling in parent process
         #[cfg(unix)]
@@ -164,7 +167,6 @@ impl Server {
 
             unsafe {
                 extern "C" fn handle_signal(sig: libc::c_int) {
-                    tracing::info!("Parent process received signal {}", sig);
                     LAST_SIGNAL.store(sig, Ordering::SeqCst);
                     match sig {
                         libc::SIGUSR1 => GRACEFUL_RELOAD.store(true, Ordering::SeqCst),
@@ -194,7 +196,7 @@ impl Server {
             loop {
                 // Graceful reload: SIGUSR1
                 if GRACEFUL_RELOAD.compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire).is_ok() {
-                    println!("Received SIGUSR1: graceful reload – draining workers...");
+                    hlog_info!("Received SIGUSR1: graceful reload – draining workers...");
                     reload_manager.signal_graceful_reload();
 
                     // Send SIGUSR1 to all workers so they start draining
@@ -230,7 +232,7 @@ impl Server {
                     );
 
                     self.reload_manager = Some(new_rm.clone());
-                    println!("Graceful reload complete – {} new workers started", new_pids.len());
+                    hlog_info!("Graceful reload complete – {} new workers started", new_pids.len());
 
                     // Update pids for subsequent loops (we can't reassign pids since it's
                     // borrowed; just continue looping with old pids gone – workers were waited on)
@@ -243,7 +245,7 @@ impl Server {
 
                 // Hot reload: SIGUSR2 – kill immediately, restart
                 if HOT_RELOAD.compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire).is_ok() {
-                    println!("Received SIGUSR2: hot reload – killing workers...");
+                    hlog_info!("Received SIGUSR2: hot reload – killing workers...");
                     reload_manager.signal_hot_reload();
 
                     // Immediately kill workers
@@ -272,14 +274,14 @@ impl Server {
                     );
 
                     self.reload_manager = Some(new_rm.clone());
-                    println!("Hot reload complete – {} new workers started", new_pids.len());
+                    hlog_info!("Hot reload complete – {} new workers started", new_pids.len());
                     new_rm.reset_after_reload();
                     wait_for_workers(&new_pids);
                     break;
                 }
 
                 if SHUTDOWN.load(Ordering::SeqCst) {
-                    println!("Received shutdown signal, stopping workers...");
+                    hlog_info!("Received shutdown signal, stopping workers...");
                     // Send SIGUSR1 to workers for brief drain before termination
                     for &pid in &pids {
                         unsafe { libc::kill(pid, libc::SIGUSR1); }
@@ -296,7 +298,7 @@ impl Server {
                     let pid = libc::waitpid(-1, &mut status, libc::WNOHANG);
                     if pid > 0 {
                         // A worker exited, shutdown all workers
-                        println!("Worker {} exited, shutting down...", pid);
+                        hlog_warn!("Worker {} exited, shutting down...", pid);
                         terminate_workers(&pids);
                         break;
                     }

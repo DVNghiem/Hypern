@@ -46,12 +46,6 @@ import base64
 import json
 from typing import Any, Callable, Dict, List, Optional, Set
 
-
-# ============================================================================
-# JWT Authentication
-# ============================================================================
-
-
 class JWTAuth:
     """
     JSON Web Token (JWT) authentication handler.
@@ -107,10 +101,6 @@ class JWTAuth:
         # Token blacklist for revocation
         self._blacklist: Set[str] = set()
 
-    # ------------------------------------------------------------------
-    # Encoding helpers
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _b64url_encode(data: bytes) -> str:
         """Base64url encode without padding."""
@@ -123,10 +113,6 @@ class JWTAuth:
         if padding != 4:
             s += "=" * padding
         return base64.urlsafe_b64decode(s)
-
-    # ------------------------------------------------------------------
-    # Token lifecycle
-    # ------------------------------------------------------------------
 
     def encode(self, payload: Dict[str, Any], expiry_seconds: Optional[int] = None) -> str:
         """
@@ -262,10 +248,6 @@ class JWTAuth:
         for key in ("iat", "exp", "nbf"):
             payload.pop(key, None)
         return self.encode(payload, expiry_seconds)
-
-    # ------------------------------------------------------------------
-    # Middleware / decorator
-    # ------------------------------------------------------------------
 
     def _extract_token(self, req) -> Optional[str]:
         """Extract the JWT from the request header."""
@@ -420,11 +402,6 @@ class JWTError(Exception):
         super().__init__(message)
 
 
-# ============================================================================
-# API Key Authentication
-# ============================================================================
-
-
 class APIKeyAuth:
     """
     API Key authentication handler.
@@ -560,11 +537,6 @@ class APIKeyAuth:
         return sync_wrapper
 
 
-# ============================================================================
-# Role-Based Access Control (RBAC)
-# ============================================================================
-
-
 class RBACPolicy:
     """
     Role-Based Access Control policy manager.
@@ -655,10 +627,6 @@ class RBACPolicy:
         """Check if the user's roles grant all required permissions."""
         user_perms = self.get_all_permissions(user_roles)
         return set(permissions) <= user_perms
-
-    # ------------------------------------------------------------------
-    # Decorators
-    # ------------------------------------------------------------------
 
     def requires_role(self, *roles: str, match_all: bool = False) -> Callable:
         """
@@ -774,11 +742,6 @@ class RBACPolicy:
         if isinstance(auth_user, dict):
             return auth_user.get("roles", [])
         return getattr(auth_user, "roles", [])
-
-
-# ============================================================================
-# Standalone decorators (convenience)
-# ============================================================================
 
 
 def requires_role(*roles: str, match_all: bool = False) -> Callable:

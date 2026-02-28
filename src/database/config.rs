@@ -5,7 +5,7 @@ use sqlx::{
 };
 use std::collections::HashMap;
 use std::time::Duration;
-use tracing::log::LevelFilter;
+use log::LevelFilter;
 
 #[derive(Debug, Clone, Default)]
 #[pyclass(from_py_object)]

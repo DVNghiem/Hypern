@@ -38,11 +38,6 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 
-# ============================================================================
-# WebSocket state
-# ============================================================================
-
-
 class WebSocketState(enum.Enum):
     """Connection state machine."""
     CONNECTING = "connecting"
@@ -63,11 +58,6 @@ class WebSocketDisconnect(Exception):
 class WebSocketError(Exception):
     """General WebSocket error."""
     pass
-
-
-# ============================================================================
-# WebSocket message types
-# ============================================================================
 
 
 class WebSocketMessage:
@@ -94,11 +84,6 @@ class WebSocketMessage:
     def __repr__(self) -> str:
         preview = str(self.data)[:60]
         return f"WebSocketMessage(type={self.type!r}, data={preview!r})"
-
-
-# ============================================================================
-# WebSocket connection
-# ============================================================================
 
 
 class WebSocket:
@@ -139,10 +124,6 @@ class WebSocket:
         self._send_queue: asyncio.Queue[Union[WebSocketMessage, None]] = asyncio.Queue()
         self._close_code: int = 1000
         self._close_reason: str = ""
-
-    # ------------------------------------------------------------------
-    # Connection lifecycle
-    # ------------------------------------------------------------------
 
     async def accept(
         self,
@@ -186,10 +167,6 @@ class WebSocket:
     def is_connected(self) -> bool:
         return self.state == WebSocketState.CONNECTED
 
-    # ------------------------------------------------------------------
-    # Sending
-    # ------------------------------------------------------------------
-
     async def send(self, message: WebSocketMessage) -> None:
         """Send a :class:`WebSocketMessage`."""
         self._assert_connected("send")
@@ -206,10 +183,6 @@ class WebSocket:
     async def send_json(self, data: Any) -> None:
         """Send a JSON-serialised text message."""
         await self.send_text(json.dumps(data, separators=(",", ":")))
-
-    # ------------------------------------------------------------------
-    # Receiving
-    # ------------------------------------------------------------------
 
     async def receive(self, timeout: Optional[float] = None) -> WebSocketMessage:
         """
@@ -255,10 +228,6 @@ class WebSocket:
         text = await self.receive_text(timeout)
         return json.loads(text)
 
-    # ------------------------------------------------------------------
-    # Transport helpers (called by the Rust bridge)
-    # ------------------------------------------------------------------
-
     def feed_message(self, msg_type: str, data: Union[str, bytes]) -> None:
         """
         Push a message from the transport layer into the receive queue.
@@ -281,10 +250,6 @@ class WebSocket:
         """
         return await self._send_queue.get()
 
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
-
     def _assert_connected(self, action: str) -> None:
         if self.state != WebSocketState.CONNECTED:
             raise WebSocketError(
@@ -293,11 +258,6 @@ class WebSocket:
 
     def __repr__(self) -> str:
         return f"<WebSocket id={self.id!r} state={self.state.value!r}>"
-
-
-# ============================================================================
-# WebSocket Room (pub/sub)
-# ============================================================================
 
 
 class WebSocketRoom:
@@ -379,11 +339,6 @@ class WebSocketRoom:
     def get_connections(self) -> List[WebSocket]:
         """Get all active connections."""
         return [ws for ws in self._connections.values() if ws.is_connected]
-
-
-# ============================================================================
-# WebSocket Route Registry
-# ============================================================================
 
 
 class WebSocketRoute:

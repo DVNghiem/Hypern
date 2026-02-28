@@ -79,12 +79,6 @@ from ._hypern import (
     SSEEvent,
 )
 
-
-# ============================================================================
-# Channel Manager wrapper with async helpers
-# ============================================================================
-
-
 class ChannelManager:
     """
     High-performance channel/topic manager for pub/sub messaging.
@@ -197,11 +191,6 @@ class ChannelManager:
         return repr(self._inner)
 
 
-# ============================================================================
-# Presence Tracker wrapper
-# ============================================================================
-
-
 class PresenceTracker:
     """
     Track connected clients' presence across channels.
@@ -303,11 +292,6 @@ class PresenceTracker:
         return repr(self._inner)
 
 
-# ============================================================================
-# Broadcast wrapper
-# ============================================================================
-
-
 class RealtimeBroadcast:
     """
     Backpressure-aware broadcast system.
@@ -398,11 +382,6 @@ class RealtimeBroadcast:
 
     def __repr__(self) -> str:
         return repr(self._inner)
-
-
-# ============================================================================
-# Heartbeat Monitor wrapper with async loop
-# ============================================================================
 
 
 class HeartbeatMonitor:
@@ -499,11 +478,6 @@ class HeartbeatMonitor:
             id=id,
             retry=self.config.sse_retry_ms,
         )
-
-
-# ============================================================================
-# Convenience: RealtimeHub combines all components
-# ============================================================================
 
 
 class RealtimeHub:

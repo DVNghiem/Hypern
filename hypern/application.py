@@ -18,6 +18,7 @@ from hypern.router import Router
 from hypern._hypern import DIContainer, TaskExecutor, TaskResult
 from hypern._hypern import SSEStream, StreamingResponse
 from hypern._hypern import HealthCheck, ReloadConfig, ReloadManager
+from hypern._hypern import LogConfig
 from hypern.di import inject as _standalone_inject
 
 from hypern.database import Database as _Database, finalize_db as _finalize_db
@@ -69,6 +70,7 @@ class Hypern:
         debug: bool = False,
         task_workers: int = 4,
         task_queue_size: int = 1000,
+        log_config: Optional[LogConfig] = None,
     ) -> None:
         # Core routing
         self._router = RustRouter(path="/")
@@ -124,6 +126,9 @@ class Hypern:
         # Reload / health configuration
         self._reload_config: Optional[ReloadConfig] = None
         self._reload_manager: Optional[ReloadManager] = None
+        
+        # Logging configuration
+        self._log_config: Optional[LogConfig] = log_config
         
         if routes is not None:
             self._router.extend_route(routes)
@@ -367,10 +372,6 @@ class Hypern:
         """Access the WebSocket router."""
         return self._ws_router
     
-    # ------------------------------------------------------------------
-    # Task Scheduler
-    # ------------------------------------------------------------------
-    
     @property
     def scheduler(self) -> 'TaskScheduler':
         """
@@ -392,9 +393,53 @@ class Hypern:
             self._scheduler = TaskScheduler()
         return self._scheduler
     
-    # ------------------------------------------------------------------
-    # Zero-Downtime Reload / Health Probes
-    # ------------------------------------------------------------------
+    def setup_logging(
+        self,
+        level: str = "info",
+        log_request: bool = True,
+        log_response: bool = True,
+        queue_size: int = 10_000,
+        skip_paths: Optional[List[str]] = None,
+    ) -> 'Hypern':
+        """
+        Configure logging behavior from the Rust layer.
+        
+        Uses a high-performance lock-free log queue implemented in Rust.
+        Request/response logging can be independently enabled or disabled.
+        
+        Args:
+            level: Minimum log level - "trace", "debug", "info", "warn", "error", "off"
+            log_request: Log incoming requests (method, path) (default: True)
+            log_response: Log outgoing responses (status, duration) (default: True)
+            queue_size: Internal log queue capacity (default: 10000)
+            skip_paths: Paths to exclude from request/response logging
+        
+        Example:
+            # Default: info level with request/response logging
+            app.setup_logging()
+            
+            # Verbose debug logging
+            app.setup_logging(level="debug")
+            
+            # Disable request/response logging (only app-level logs)
+            app.setup_logging(log_request=False, log_response=False)
+            
+            # Production: errors only, no request/response noise
+            app.setup_logging(level="error", log_request=False, log_response=False)
+            
+            # Disable all logging
+            app.setup_logging(level="off")
+        """
+        kwargs = {
+            "level": level,
+            "log_request": log_request,
+            "log_response": log_response,
+            "queue_size": queue_size,
+        }
+        if skip_paths is not None:
+            kwargs["skip_paths"] = skip_paths
+        self._log_config = LogConfig(**kwargs)
+        return self
     
     def setup_reload(
         self,
@@ -1162,6 +1207,13 @@ class Hypern:
             else:
                 # Default: enable health probes
                 server.set_reload_config(ReloadConfig())
+            
+            # Configure logging
+            if self._log_config is not None:
+                server.set_log_config(self._log_config)
+            else:
+                # Default: info level with request/response logging
+                server.set_log_config(LogConfig())
             
             # Register Rust middleware
             for mw in self._middleware:

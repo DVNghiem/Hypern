@@ -23,6 +23,7 @@ pub mod core;
 pub mod database;
 pub mod fast_path;
 pub mod http;
+pub mod logging;
 pub mod memory;
 pub mod middleware;
 pub mod realtime;
@@ -55,6 +56,7 @@ pub use crate::realtime::channel::{ChannelManager, ChannelStats, Subscriber, Top
 pub use crate::realtime::heartbeat::{HeartbeatConfig, HeartbeatMonitor, HeartbeatStats};
 pub use crate::realtime::presence::{PresenceDiff, PresenceInfo, PresenceTracker};
 pub use crate::core::reload::{PyHealthCheck, PyReloadConfig, PyReloadManager};
+pub use crate::logging::PyLogConfig;
 
 pub use crate::middleware::{
     PyBasicAuthMiddleware, PyCompressionMiddleware, PyCorsMiddleware, PyLogMiddleware,
@@ -144,6 +146,9 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyRequestIdMiddleware>()?;
     module.add_class::<PyLogMiddleware>()?;
     module.add_class::<PyBasicAuthMiddleware>()?;
+
+    // Logging
+    module.add_class::<PyLogConfig>()?;
 
     // Database
     module.add_class::<ConnectionPool>()?;

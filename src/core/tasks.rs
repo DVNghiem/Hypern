@@ -5,7 +5,6 @@ use std::time::Duration;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use dashmap::DashMap;
 use pyo3::prelude::*;
-use tracing::info;
 
 /// Task status
 #[pyclass(from_py_object)]
@@ -235,7 +234,7 @@ fn task_worker(
     results: Arc<DashMap<String, TaskResult>>,
     running: Arc<AtomicBool>,
 ) {
-    info!("Background task worker {} started", worker_id);
+    crate::hlog_info!("Background task worker {} started", worker_id);
 
     while running.load(Ordering::SeqCst) {
         match receiver.recv_timeout(Duration::from_millis(100)) {
@@ -326,7 +325,7 @@ fn task_worker(
         }
     }
 
-    info!("Background task worker {} stopped", worker_id);
+    crate::hlog_info!("Background task worker {} stopped", worker_id);
 }
 
 /// Async task runner for Tokio-based background tasks

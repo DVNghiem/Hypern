@@ -8,7 +8,6 @@ use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use pyo3::IntoPyObjectExt;
 use std::sync::OnceLock;
-use tracing::warn;
 
 static HANDLER_REGISTRY: OnceLock<DashMap<u64, (Py<PyAny>, bool)>> = OnceLock::new();
 
@@ -49,7 +48,7 @@ pub async fn http_execute(route_hash: u64, request: Request) -> axum::response::
     let is_async = match get_handler_info(route_hash) {
         Some(is_async) => is_async,
         None => {
-            warn!("No handler found for hash: {}", route_hash);
+            crate::hlog_warn!("No handler found for hash: {}", route_hash);
             response_slot.set_status(404);
             response_slot.set_body(b"Not Found".to_vec());
             return response_slot.into_response();
