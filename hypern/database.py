@@ -1,4 +1,6 @@
 from __future__ import annotations
+from typing import Protocol, runtime_checkable
+from collections import OrderedDict
 
 from typing import Any, Dict, List, Optional, Union
 from contextlib import contextmanager
@@ -8,6 +10,7 @@ from hypern._hypern import (
     PoolConfig as _PoolConfig,
     PoolStatus as _PoolStatus,
     DbSession as _DbSession,
+    AnyPool as _AnyPool,
     get_db as _get_db,
     finalize_db as _finalize_db,
     finalize_db_all as _finalize_db_all,
@@ -21,10 +24,17 @@ class Database:
     Provides a convenient API for configuring and accessing multiple database connection pools.
     Configuration is stored and initialization is deferred until first use (lazy initialization).
     This allows the database to work correctly with fork-based multiprocessing.
+    
+    Supported DSN schemes:
+    
+    - ``postgresql://`` / ``postgres://`` — Uses the high-performance deadpool-postgres backend
+    - ``mysql://`` — Uses the sqlx Any driver
+    - ``sqlite://`` — Uses the sqlx Any driver
     """
     
     _databases: Dict[str, Dict[str, Any]] = {}
     _initialized_pools: Dict[str, bool] = {}
+    _any_pools: Dict[str, "_AnyPool"] = {}
     
     @classmethod
     def configure(
@@ -47,39 +57,27 @@ class Database:
         initializing its own connection pools.
         
         Args:
-            url: PostgreSQL connection URL (postgresql://user:pass@host:port/database)
+            url: Database connection URL. Supported schemes:
+                - ``postgresql://user:pass@host:port/database`` (or ``postgres://``)
+                - ``mysql://user:pass@host:port/database``
+                - ``sqlite:///path/to/db.sqlite`` (or ``sqlite::memory:``)
             max_size: Maximum number of connections in the pool (default: 16)
-            min_idle: Minimum idle connections to maintain (default: None)
-            connect_timeout_secs: Connection timeout in seconds (default: 30)
-            idle_timeout_secs: Idle connection timeout in seconds (default: None)
-            max_lifetime_secs: Maximum connection lifetime in seconds (default: None)
-            test_before_acquire: If True, test connections before acquiring them (re-ping pool) (default: False)
-            keepalive_secs: TCP keepalive interval in seconds (default: None, disabled)
+            min_idle: Minimum idle connections to maintain (default: None, PostgreSQL only)
+            connect_timeout_secs: Connection timeout in seconds (default: 30, PostgreSQL only)
+            idle_timeout_secs: Idle connection timeout in seconds (default: None, PostgreSQL only)
+            max_lifetime_secs: Maximum connection lifetime in seconds (default: None, PostgreSQL only)
+            test_before_acquire: If True, test connections before acquiring them (default: False, PostgreSQL only)
+            keepalive_secs: TCP keepalive interval in seconds (default: None, PostgreSQL only)
             alias: Database alias for identification (default: "default")
         
         Raises:
             RuntimeError: If database with this alias is already configured
-        
-        Example:
-            Database.configure(
-                url="postgresql://user:pass@localhost:5432/mydb",
-                max_size=20,
-                connect_timeout_secs=10,
-                test_before_acquire=True,  # Verify connections before use
-                keepalive_secs=60,         # Send TCP keepalive every 60 seconds
-                alias="default"
-            )
-            
-            Database.configure(
-                url="postgresql://user:pass@localhost:5432/analytics",
-                max_size=5,
-                alias="analytics"
-            )
         """
         if alias in cls._databases:
             raise RuntimeError(f"Database with alias '{alias}' already configured. Call Database.close('{alias}') first to reconfigure.")
         
-        # Store config for lazy initialization (after fork)
+        driver = _detect_driver(url)
+        
         cls._databases[alias] = {
             'url': url,
             'max_size': max_size,
@@ -90,6 +88,7 @@ class Database:
             'test_before_acquire': test_before_acquire,
             'keepalive_secs': keepalive_secs,
             'alias': alias,
+            'driver': driver,
         }
         cls._initialized_pools[alias] = False
     
@@ -102,18 +101,25 @@ class Database:
             raise RuntimeError(f"Database '{alias}' not configured. Call Database.configure() first.")
         
         config_data = cls._databases[alias]
-        config = _PoolConfig(
-            url=config_data['url'],
-            max_size=config_data['max_size'],
-            min_idle=config_data['min_idle'],
-            connect_timeout_secs=config_data['connect_timeout_secs'],
-            idle_timeout_secs=config_data['idle_timeout_secs'],
-            max_lifetime_secs=config_data['max_lifetime_secs'],
-            test_before_acquire=config_data['test_before_acquire'],
-            keepalive_secs=config_data['keepalive_secs'],
-        )
+        driver = config_data.get('driver', 'postgres')
         
-        _ConnectionPool.initialize_with_alias(config, alias)
+        if driver == 'postgres':
+            config = _PoolConfig(
+                url=config_data['url'],
+                max_size=config_data['max_size'],
+                min_idle=config_data['min_idle'],
+                connect_timeout_secs=config_data['connect_timeout_secs'],
+                idle_timeout_secs=config_data['idle_timeout_secs'],
+                max_lifetime_secs=config_data['max_lifetime_secs'],
+                test_before_acquire=config_data['test_before_acquire'],
+                keepalive_secs=config_data['keepalive_secs'],
+            )
+            _ConnectionPool.initialize_with_alias(config, alias)
+        else:
+            # MySQL / SQLite via sqlx AnyPool
+            pool = _AnyPool(config_data['url'], config_data['max_size'])
+            cls._any_pools[alias] = pool
+        
         cls._initialized_pools[alias] = True
     
     @classmethod
@@ -141,18 +147,21 @@ class Database:
         
         Args:
             alias: Database alias to close. If None, closes all databases.
-        
-        Note: After calling this, you must call configure() again before using the database.
         """
         if alias is None:
-            # Close all databases
             _ConnectionPool.close_all()
+            for p in cls._any_pools.values():
+                p.close()
+            cls._any_pools.clear()
             cls._databases.clear()
             cls._initialized_pools.clear()
         else:
-            # Close specific database
+            if alias in cls._any_pools:
+                cls._any_pools.pop(alias).close()
             if alias in cls._databases:
-                _ConnectionPool.close_alias(alias)
+                driver = cls._databases[alias].get('driver', 'postgres')
+                if driver == 'postgres':
+                    _ConnectionPool.close_alias(alias)
                 del cls._databases[alias]
                 cls._initialized_pools.pop(alias, None)
 
@@ -367,36 +376,28 @@ class DbSession:
         return f"DbSession(request_id='{self.request_id}', state='{self.state}')"
 
 
-def db(ctx_or_request_id: Union[str, Any], alias: str = "default") -> DbSession:
+def db(ctx_or_request_id: Union[str, Any], alias: str = "default") -> Union["DbSession", "AnySession"]:
     """
     Get a database session for the current request with the specified alias.
     
-    This is the primary way to access the database in request handlers.
-    Each request gets exactly one connection from the pool per alias.
+    For PostgreSQL databases, returns a ``DbSession``.
+    For MySQL/SQLite databases, returns an ``AnySession``.
     
     Args:
-        ctx_or_request_id: Either a Context object with request_id attribute,
-                          or a string request ID directly
+        ctx_or_request_id: Either a Context object or a string request ID
         alias: Database alias to use (default: "default")
     
     Returns:
-        DbSession for the request
-    
-    Example:
-        @app.get("/users")
-        def get_users(req, res, ctx):
-            # Default database
-            session = db(ctx)
-            users = session.query("SELECT * FROM users")
-            
-            # Analytics database
-            analytics_session = db(ctx, alias="analytics")
-            logs = analytics_session.query("SELECT * FROM logs")
-            
-            res.json({"users": users, "logs": logs})
+        DbSession (PostgreSQL) or AnySession (MySQL/SQLite)
     """
-    # Ensure pool is initialized (lazy initialization after fork)
     Database._ensure_initialized(alias)
+    
+    config = Database._databases.get(alias, {})
+    driver = config.get('driver', 'postgres')
+    
+    if driver != 'postgres':
+        pool = Database._any_pools[alias]
+        return AnySession(pool)
     
     if isinstance(ctx_or_request_id, str):
         request_id = ctx_or_request_id
@@ -431,9 +432,169 @@ def finalize_db(ctx_or_request_id: Union[str, Any], alias: Optional[str] = None)
         _finalize_db(request_id, alias)
 
 
+
+def _detect_driver(url: str) -> str:
+    """Detect the database driver from the URL scheme."""
+    lower = url.lower()
+    if lower.startswith(("postgresql://", "postgres://")):
+        return "postgres"
+    if lower.startswith("mysql://"):
+        return "mysql"
+    if lower.startswith("sqlite:"):
+        return "sqlite"
+    raise ValueError(
+        f"Unsupported database URL scheme: {url!r}. "
+        "Supported: postgresql://, mysql://, sqlite://"
+    )
+
+
+class AnySession:
+    """
+    Database session for MySQL and SQLite databases (via sqlx Any driver).
+    
+    Provides a similar API to ``DbSession`` but backed by sqlx's ``AnyPool``.
+    """
+
+    def __init__(self, pool: "_AnyPool"):
+        self._pool = pool
+
+    def query(
+        self,
+        sql: str,
+        params: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Execute a SELECT query and return results as a list of dicts."""
+        return self._pool.query(sql, params)
+
+    def query_one(
+        self,
+        sql: str,
+        params: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Execute a SELECT query and return a single result."""
+        return self._pool.query_one(sql, params)
+
+    def execute(
+        self,
+        sql: str,
+        params: Optional[List[str]] = None,
+    ) -> int:
+        """Execute an INSERT/UPDATE/DELETE and return rows affected."""
+        return self._pool.execute(sql, params)
+
+    def __repr__(self) -> str:
+        return f"AnySession({self._pool!r})"
+
+
+@runtime_checkable
+class TenantResolver(Protocol):
+    """Protocol for resolving a tenant identifier from a request."""
+
+    async def resolve(self, request: Any) -> str:
+        """Return a tenant identifier (e.g. subdomain, JWT claim)."""
+        ...
+
+
+class MultiTenantDatabase:
+    """
+    Multi-tenant database routing with lazy pool-per-tenant.
+
+    Each resolved tenant gets its own connection pool, initialised on first access.
+    Pools are bounded by *max_tenants*; the least-recently-used pool is evicted
+    when the limit is exceeded (connections are closed on eviction).
+
+    Args:
+        resolver: An object implementing the ``TenantResolver`` protocol.
+        dsn_template: A DSN with ``{tenant}`` placeholder, e.g.
+            ``"postgresql://user:pass@host:5432/{tenant}"``
+        max_tenants: Maximum number of tenant pools to keep alive.
+        pool_max_size: ``max_size`` passed to each tenant pool.
+
+    Example::
+
+        class SubdomainResolver:
+            async def resolve(self, request) -> str:
+                host = request.headers.get("host", "")
+                return host.split(".")[0]
+
+        mt = MultiTenantDatabase(
+            resolver=SubdomainResolver(),
+            dsn_template="postgresql://user:pass@localhost:5432/{tenant}",
+            max_tenants=50,
+        )
+
+        @app.get("/data")
+        async def get_data(req, res, ctx):
+            session = await mt.session(req, ctx)
+            rows = session.query("SELECT * FROM items")
+            res.json(rows)
+    """
+
+    def __init__(
+        self,
+        resolver: TenantResolver,
+        dsn_template: str,
+        max_tenants: int = 100,
+        pool_max_size: int = 8,
+    ) -> None:
+        if "{tenant}" not in dsn_template:
+            raise ValueError("dsn_template must contain '{tenant}' placeholder")
+
+        self._resolver = resolver
+        self._dsn_template = dsn_template
+        self._max_tenants = max_tenants
+        self._pool_max_size = pool_max_size
+        # OrderedDict is used as an LRU cache (move_to_end on access)
+        self._tenants: OrderedDict[str, bool] = OrderedDict()
+
+    def _ensure_tenant(self, tenant: str) -> None:
+        """Configure + initialise the pool for *tenant* if not already done."""
+        if tenant in self._tenants:
+            # Mark as recently used
+            self._tenants.move_to_end(tenant)
+            return
+
+        # Evict LRU tenant if at capacity
+        while len(self._tenants) >= self._max_tenants:
+            evicted, _ = self._tenants.popitem(last=False)
+            alias = f"_mt_{evicted}"
+            Database.close(alias)
+
+        alias = f"_mt_{tenant}"
+        dsn = self._dsn_template.replace("{tenant}", tenant)
+        Database.configure(url=dsn, max_size=self._pool_max_size, alias=alias)
+        Database._ensure_initialized(alias)
+        self._tenants[tenant] = True
+
+    async def session(self, request: Any, ctx_or_request_id: Any) -> "DbSession":
+        """
+        Resolve the tenant from *request* and return a ``DbSession``.
+
+        Args:
+            request: The incoming request object (passed to the resolver).
+            ctx_or_request_id: A Context object or request-id string.
+
+        Returns:
+            A ``DbSession`` connected to the resolved tenant's database.
+        """
+        tenant = await self._resolver.resolve(request)
+        self._ensure_tenant(tenant)
+        alias = f"_mt_{tenant}"
+        return db(ctx_or_request_id, alias=alias)
+
+    def close_all(self) -> None:
+        """Close all tenant pools."""
+        for tenant in list(self._tenants):
+            alias = f"_mt_{tenant}"
+            Database.close(alias)
+        self._tenants.clear()
+
 __all__ = [
     "Database",
     "DbSession",
+    "AnySession",
     "db",
     "finalize_db",
+    "TenantResolver",
+    "MultiTenantDatabase",
 ]

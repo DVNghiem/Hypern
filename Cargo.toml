@@ -12,7 +12,9 @@ crate-type = ["cdylib", "staticlib"]
 pyo3 = { version = "0.28.2", features = ["extension-module", "generate-import-lib"] }
 
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "net", "sync", "time", "signal", "macros"] }
+tokio-stream = "0.1"
 futures-core = "0.3.32"
+futures-util = "0.3"
 socket2 = "0.6.2"
 
 # Axum as the main web framework (built on hyper + tower)
@@ -51,7 +53,7 @@ log = "0.4.29"
 # Smart String optimization
 smartstring = "1.0.1"
 
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "json"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "mysql", "sqlite", "any", "chrono", "json"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 
 # PostgreSQL async connection pool
@@ -66,6 +68,22 @@ rand = "0.10.0"
 base64 = "0.22"
 sha2 = "0.10"
 hmac = "0.12"
+
+# JWT RS256/ES256 support
+rsa = "0.9"
+p256 = { version = "0.13", features = ["ecdsa"] }
+signature = "2"
+
+# Async HTTP client
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip"] }
+
+# Redis
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+deadpool-redis = "0.18"
+
+# gRPC
+tonic = "0.12"
+prost = "0.13"
 
 [target.'cfg(not(any(target_env = "musl", target_os = "freebsd", target_os = "openbsd", target_os = "windows")))'.dependencies]
 tikv-jemallocator = { version = "0.6.1", default-features = false, features = ["disable_initial_exec_tls"] }

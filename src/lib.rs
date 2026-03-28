@@ -19,15 +19,19 @@ pub use crate::core::runtime;
 pub use crate::core::socket;
 
 // Core performance modules
+pub mod client;
 pub mod core;
 pub mod database;
 pub mod fast_path;
+pub mod grpc;
 pub mod http;
 pub mod logging;
 pub mod memory;
 pub mod middleware;
 pub mod realtime;
+pub mod redis;
 pub mod routing;
+pub mod telemetry;
 pub mod utils;
 
 // Re-exports for backward compatibility
@@ -46,7 +50,17 @@ pub use crate::core::tasks::{TaskExecutor, TaskResult, TaskStatus};
 
 pub use crate::core::blocking_executor::BlockingExecutor;
 
+pub use crate::client::{ClientResponse, HttpClient};
+
+pub use crate::telemetry::MetricsRegistry;
+
+pub use crate::redis::RedisPool;
+
+pub use crate::grpc::{GrpcConfig, GrpcServer};
+
 pub use crate::http::streaming::{SSEEvent, SSEGenerator, SSEStream, StreamingResponse};
+
+pub use crate::http::websocket::{RustWebSocket, WsMessage, WsMessageType};
 
 // Realtime exports
 pub use crate::realtime::broadcast::{
@@ -59,14 +73,15 @@ pub use crate::core::reload::{PyHealthCheck, PyReloadConfig, PyReloadManager};
 pub use crate::logging::PyLogConfig;
 
 pub use crate::middleware::{
-    PyBasicAuthMiddleware, PyCompressionMiddleware, PyCorsMiddleware, PyLogMiddleware,
-    PyRateLimitMiddleware, PyRequestIdMiddleware, PySecurityHeadersMiddleware, PyTimeoutMiddleware,
+    PyBasicAuthMiddleware, PyCacheMiddleware, PyCircuitBreakerMiddleware,
+    PyCompressionMiddleware, PyCorsMiddleware, PyLogMiddleware, PyRateLimitMiddleware,
+    PyRequestIdMiddleware, PySecurityHeadersMiddleware, PyTimeoutMiddleware,
 };
 
 // Database exports
 pub use crate::database::{
-    finalize_db, finalize_db_all, get_db, ConnectionPool, DbSession, PoolConfig, PoolStatus,
-    RowStream,
+    finalize_db, finalize_db_all, get_db, AnyPool, ConnectionPool, DbSession, PoolConfig,
+    PoolStatus, RowStream,
 };
 
 // Re-exports for internal use
@@ -103,11 +118,30 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     // Blocking Executor (GIL-free parallel execution)
     module.add_class::<BlockingExecutor>()?;
 
+    // HTTP Client
+    module.add_class::<HttpClient>()?;
+    module.add_class::<ClientResponse>()?;
+
+    // Telemetry / Metrics
+    module.add_class::<MetricsRegistry>()?;
+
+    // Redis
+    module.add_class::<RedisPool>()?;
+
+    // gRPC
+    module.add_class::<GrpcConfig>()?;
+    module.add_class::<GrpcServer>()?;
+
     // Streaming/SSE
     module.add_class::<SSEEvent>()?;
     module.add_class::<SSEStream>()?;
     module.add_class::<SSEGenerator>()?;
     module.add_class::<StreamingResponse>()?;
+
+    // WebSocket (Rust-backed)
+    module.add_class::<RustWebSocket>()?;
+    module.add_class::<WsMessage>()?;
+    module.add_class::<WsMessageType>()?;
 
     // Realtime: Channel/Topic
     module.add_class::<ChannelManager>()?;
@@ -146,9 +180,14 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyRequestIdMiddleware>()?;
     module.add_class::<PyLogMiddleware>()?;
     module.add_class::<PyBasicAuthMiddleware>()?;
+    module.add_class::<PyCircuitBreakerMiddleware>()?;
+    module.add_class::<PyCacheMiddleware>()?;
 
     // Logging
     module.add_class::<PyLogConfig>()?;
+
+    // Static file handler
+    module.add_class::<StaticFileHandler>()?;
 
     // Database
     module.add_class::<ConnectionPool>()?;
@@ -156,6 +195,7 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PoolStatus>()?;
     module.add_class::<DbSession>()?;
     module.add_class::<RowStream>()?;
+    module.add_class::<AnyPool>()?;
     module.add_function(wrap_pyfunction!(get_db, module)?)?;
     module.add_function(wrap_pyfunction!(finalize_db, module)?)?;
     module.add_function(wrap_pyfunction!(finalize_db_all, module)?)?;

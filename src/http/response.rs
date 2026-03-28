@@ -1,11 +1,15 @@
 use axum::body::Body;
 use axum::http::header::SERVER;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
+use bytes::Bytes;
+use futures_util::StreamExt;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use smallvec::SmallVec;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 
 type SmallString = smartstring::SmartString<smartstring::LazyCompact>;
 
@@ -27,17 +31,27 @@ pub mod content_types {
     pub const PDF: &str = "application/pdf";
 }
 
+/// Body kind for supporting both buffered and streaming responses
+pub enum BodyKind {
+    /// Traditional buffered body
+    Buffered(Vec<u8>),
+    /// Streaming body via mpsc channel (for SSE, chunked transfer, etc.)
+    Streaming(mpsc::Receiver<Bytes>),
+}
+
 pub struct ResponseSlot {
     /// HTTP status code
     status: AtomicU16,
     /// Response headers (small vector optimization for common case)
     headers: parking_lot::RwLock<SmallVec<[(SmallString, SmallString); 8]>>,
-    /// Response body
-    body: parking_lot::RwLock<Vec<u8>>,
+    /// Response body (supports both buffered and streaming)
+    body: parking_lot::RwLock<BodyKind>,
     /// Completion flag
     ready: AtomicBool,
     /// Whether response has been sent
     sent: AtomicBool,
+    /// Whether this is a streaming response
+    is_streaming: AtomicBool,
 }
 
 impl ResponseSlot {
@@ -45,9 +59,10 @@ impl ResponseSlot {
         Arc::new(Self {
             status: AtomicU16::new(200),
             headers: parking_lot::RwLock::new(SmallVec::new()),
-            body: parking_lot::RwLock::new(Vec::with_capacity(8192)),
+            body: parking_lot::RwLock::new(BodyKind::Buffered(Vec::with_capacity(8192))),
             ready: AtomicBool::new(false),
             sent: AtomicBool::new(false),
+            is_streaming: AtomicBool::new(false),
         })
     }
 
@@ -94,19 +109,36 @@ impl ResponseSlot {
     }
 
     pub fn set_body(&self, body: Vec<u8>) {
-        *self.body.write() = body;
+        *self.body.write() = BodyKind::Buffered(body);
     }
 
     pub fn set_body_str(&self, body: String) {
-        *self.body.write() = body.into_bytes();
+        *self.body.write() = BodyKind::Buffered(body.into_bytes());
     }
 
     pub fn append_body(&self, data: &[u8]) {
-        self.body.write().extend_from_slice(data);
+        let mut guard = self.body.write();
+        if let BodyKind::Buffered(ref mut buf) = *guard {
+            buf.extend_from_slice(data);
+        }
     }
 
     pub fn get_body_len(&self) -> usize {
-        self.body.read().len()
+        match &*self.body.read() {
+            BodyKind::Buffered(buf) => buf.len(),
+            BodyKind::Streaming(_) => 0,
+        }
+    }
+
+    /// Set the body to a streaming receiver for chunked transfer
+    pub fn set_streaming_body(&self, receiver: mpsc::Receiver<Bytes>) {
+        *self.body.write() = BodyKind::Streaming(receiver);
+        self.is_streaming.store(true, Ordering::Release);
+    }
+
+    /// Check if this is a streaming response
+    pub fn is_streaming(&self) -> bool {
+        self.is_streaming.load(Ordering::Acquire)
     }
 
     #[inline]
@@ -131,6 +163,7 @@ impl ResponseSlot {
 
     pub fn into_response(self: Arc<Self>) -> axum::response::Response {
         let status = self.status.load(Ordering::Acquire);
+        let _is_streaming = self.is_streaming.load(Ordering::Acquire);
         let headers = self.headers.read();
 
         let mut header_map = HeaderMap::with_capacity(headers.len() + 2);
@@ -146,18 +179,33 @@ impl ResponseSlot {
             .entry(SERVER)
             .or_insert(HeaderValue::from_static("Hypern"));
 
-        // Take body data from the lock to avoid clone when possible
-        let body_data = std::mem::take(&mut *self.body.write());
-        let body_len = body_data.len();
-
-        // Set Content-Length explicitly for better client compatibility
-        header_map.insert(
-            axum::http::header::CONTENT_LENGTH,
-            HeaderValue::from(body_len),
+        // Take body from the lock
+        let body_kind = std::mem::replace(
+            &mut *self.body.write(),
+            BodyKind::Buffered(Vec::new()),
         );
 
-        // Move body data directly into response - zero-copy
-        let http_body = body_data.into();
+        let http_body = match body_kind {
+            BodyKind::Buffered(body_data) => {
+                let body_len = body_data.len();
+                // Set Content-Length explicitly for buffered responses
+                header_map.insert(
+                    axum::http::header::CONTENT_LENGTH,
+                    HeaderValue::from(body_len),
+                );
+                Body::from(body_data)
+            }
+            BodyKind::Streaming(receiver) => {
+                // For streaming responses, use chunked transfer encoding
+                header_map.insert(
+                    axum::http::header::TRANSFER_ENCODING,
+                    HeaderValue::from_static("chunked"),
+                );
+                header_map.remove(axum::http::header::CONTENT_LENGTH);
+                let stream = ReceiverStream::new(receiver);
+                Body::from_stream(stream.map(|b| Ok::<_, std::io::Error>(b)))
+            }
+        };
 
         let mut res = axum::response::Response::new(http_body);
         *res.status_mut() =
@@ -172,9 +220,10 @@ impl Default for ResponseSlot {
         Self {
             status: AtomicU16::new(200),
             headers: parking_lot::RwLock::new(SmallVec::new()),
-            body: parking_lot::RwLock::new(Vec::with_capacity(4096)),
+            body: parking_lot::RwLock::new(BodyKind::Buffered(Vec::with_capacity(4096))),
             ready: AtomicBool::new(false),
             sent: AtomicBool::new(false),
+            is_streaming: AtomicBool::new(false),
         }
     }
 }
@@ -483,21 +532,10 @@ impl Response {
     /// This method consumes events from a Python generator one at a time,
     /// providing memory-efficient streaming without buffering all events.
     ///
-    /// Usage:
-    /// ```python
-    /// def event_generator():
-    ///     for i in range(1000):
-    ///         yield SSEEvent(f"Event {i}", event="counter")
-    ///
-    /// res.sse_stream(event_generator())
-    /// ```
-    ///
-    /// The generator can yield:
-    /// - SSEEvent objects
-    /// - Dictionaries with 'data', 'event', 'id', 'retry' keys
-    /// - Strings (will be wrapped as simple data events)
-    /// - Any object with a 'data' attribute
-    pub fn sse_stream<'py>(
+    /// Note: This collects all events into memory. For true streaming,
+    /// use `sse_stream_live()` instead.
+    #[pyo3(name = "sse_collect")]
+    pub fn sse_collect<'py>(
         pyself: PyRef<'py, Self>,
         generator: &Bound<'_, pyo3::PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
@@ -524,6 +562,86 @@ impl Response {
             .slot
             .add_header("X-Accel-Buffering".to_string(), "no".to_string());
         pyself.slot.set_body(body);
+        pyself.slot.mark_ready();
+        Ok(pyself)
+    }
+
+    /// True streaming SSE: creates an mpsc channel, spawns a Tokio task that
+    /// iterates the Python generator and sends each formatted event through
+    /// the channel. The response body streams events as they are produced.
+    ///
+    /// Usage:
+    /// ```python
+    /// def event_generator():
+    ///     for i in range(1000):
+    ///         yield SSEEvent(f"Event {i}", event="counter")
+    ///
+    /// res.sse_stream(event_generator())
+    /// ```
+    pub fn sse_stream<'py>(
+        pyself: PyRef<'py, Self>,
+        generator: &Bound<'_, pyo3::PyAny>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        let (tx, rx) = mpsc::channel::<Bytes>(128);
+
+        // Collect generator items eagerly while we hold the GIL
+        let mut event_bytes_list: Vec<Bytes> = Vec::new();
+        let py_iter = generator.try_iter()?;
+        for item in py_iter {
+            let item = item?;
+            let formatted = if let Ok(event) = item.extract::<crate::http::streaming::SSEEvent>() {
+                Bytes::from(event.format().into_bytes())
+            } else if let Ok(s) = item.extract::<String>() {
+                let event = crate::http::streaming::SSEEvent::data(s);
+                Bytes::from(event.format().into_bytes())
+            } else if let Ok(dict) = item.cast::<pyo3::types::PyDict>() {
+                let data = dict.get_item("data")?
+                    .map(|v| v.extract::<String>())
+                    .transpose()?
+                    .unwrap_or_default();
+                let event_type = dict.get_item("event")?
+                    .map(|v| v.extract::<String>())
+                    .transpose()?;
+                let id = dict.get_item("id")?
+                    .map(|v| v.extract::<String>())
+                    .transpose()?;
+                let retry = dict.get_item("retry")?
+                    .map(|v| v.extract::<u64>())
+                    .transpose()?;
+                let event = crate::http::streaming::SSEEvent {
+                    id, event: event_type, data, retry,
+                };
+                Bytes::from(event.format().into_bytes())
+            } else {
+                let data_str = item.str()?.to_string();
+                let event = crate::http::streaming::SSEEvent::data(data_str);
+                Bytes::from(event.format().into_bytes())
+            };
+            event_bytes_list.push(formatted);
+        }
+
+        // Spawn a task to send events through the channel
+        tokio::spawn(async move {
+            for event_bytes in event_bytes_list {
+                if tx.send(event_bytes).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        pyself
+            .slot
+            .add_header("Content-Type".to_string(), "text/event-stream".to_string());
+        pyself
+            .slot
+            .add_header("Cache-Control".to_string(), "no-cache".to_string());
+        pyself
+            .slot
+            .add_header("Connection".to_string(), "keep-alive".to_string());
+        pyself
+            .slot
+            .add_header("X-Accel-Buffering".to_string(), "no".to_string());
+        pyself.slot.set_streaming_body(rx);
         pyself.slot.mark_ready();
         Ok(pyself)
     }

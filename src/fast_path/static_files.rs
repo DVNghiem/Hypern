@@ -3,6 +3,7 @@
 use ahash::AHashMap;
 use memmap2::Mmap;
 use parking_lot::RwLock;
+use pyo3::prelude::*;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,11 +23,20 @@ impl CachedFile {
 }
 
 /// Static file handler with memory-mapped caching
+#[pyclass]
 pub struct StaticFileHandler {
     root_path: PathBuf,
     cache: RwLock<AHashMap<String, Arc<CachedFile>>>,
     max_cache_size: usize,
     max_file_size: usize,
+    /// URL prefix for this handler
+    prefix: String,
+    /// Index file name (default: "index.html")
+    index_file: String,
+    /// SPA fallback mode: serve index.html for any path that doesn't match a file
+    spa_mode: bool,
+    /// Cache-Control max-age in seconds
+    cache_max_age: Option<u32>,
 }
 
 impl StaticFileHandler {
@@ -36,12 +46,31 @@ impl StaticFileHandler {
             cache: RwLock::new(AHashMap::new()),
             max_cache_size: 1000,
             max_file_size: 50 * 1024 * 1024, // 50MB max
+            prefix: "/static".to_string(),
+            index_file: "index.html".to_string(),
+            spa_mode: false,
+            cache_max_age: None,
         }
     }
 
     pub fn with_limits(mut self, max_cache_size: usize, max_file_size: usize) -> Self {
         self.max_cache_size = max_cache_size;
         self.max_file_size = max_file_size;
+        self
+    }
+
+    pub fn with_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.prefix = prefix.into();
+        self
+    }
+
+    pub fn with_spa(mut self, spa: bool) -> Self {
+        self.spa_mode = spa;
+        self
+    }
+
+    pub fn with_cache_max_age(mut self, seconds: u32) -> Self {
+        self.cache_max_age = Some(seconds);
         self
     }
 
@@ -182,3 +211,107 @@ impl std::fmt::Display for StaticFileError {
 }
 
 impl std::error::Error for StaticFileError {}
+
+#[pymethods]
+impl StaticFileHandler {
+    /// Create a new static file handler
+    ///
+    /// Args:
+    ///     directory: Path to the directory containing static files
+    ///     prefix: URL prefix for static files (default: "/static")
+    ///     index: Index file name (default: "index.html")
+    ///     spa: Enable SPA fallback mode (default: false)
+    ///     cache_max_age: Cache-Control max-age in seconds (optional)
+    #[new]
+    #[pyo3(signature = (directory, prefix="/static", index="index.html", spa=false, cache_max_age=None))]
+    pub fn py_new(
+        directory: &str,
+        prefix: &str,
+        index: &str,
+        spa: bool,
+        cache_max_age: Option<u32>,
+    ) -> PyResult<Self> {
+        let root = PathBuf::from(directory);
+        if !root.exists() || !root.is_dir() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Directory does not exist: {}",
+                directory
+            )));
+        }
+        Ok(Self {
+            root_path: root,
+            cache: RwLock::new(AHashMap::new()),
+            max_cache_size: 1000,
+            max_file_size: 50 * 1024 * 1024,
+            prefix: prefix.to_string(),
+            index_file: index.to_string(),
+            spa_mode: spa,
+            cache_max_age,
+        })
+    }
+
+    /// Serve a file by path, returns (body_bytes, content_type, etag, status_code)
+    #[pyo3(signature = (path, if_none_match=None))]
+    pub fn serve_file(
+        &self,
+        path: &str,
+        if_none_match: Option<&str>,
+    ) -> PyResult<(Vec<u8>, String, String, u16)> {
+        // Strip prefix from path
+        let file_path = path.strip_prefix(&self.prefix).unwrap_or(path);
+        let file_path = file_path.trim_start_matches('/');
+
+        // If path is empty, try index
+        let file_path = if file_path.is_empty() {
+            &self.index_file
+        } else {
+            file_path
+        };
+
+        match self.serve(file_path) {
+            Ok(cached) => {
+                // Check If-None-Match for conditional requests
+                if let Some(inm) = if_none_match {
+                    if inm == cached.etag {
+                        return Ok((Vec::new(), cached.content_type.clone(), cached.etag.clone(), 304));
+                    }
+                }
+                Ok((cached.as_bytes().to_vec(), cached.content_type.clone(), cached.etag.clone(), 200))
+            }
+            Err(StaticFileError::NotFound) if self.spa_mode => {
+                // SPA fallback: serve index.html
+                match self.serve(&self.index_file) {
+                    Ok(cached) => Ok((cached.as_bytes().to_vec(), cached.content_type.clone(), cached.etag.clone(), 200)),
+                    Err(_) => Err(pyo3::exceptions::PyFileNotFoundError::new_err("index.html not found")),
+                }
+            }
+            Err(e) => Err(pyo3::exceptions::PyFileNotFoundError::new_err(e.to_string())),
+        }
+    }
+
+    /// Get the URL prefix
+    #[getter]
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
+
+    /// Get the root directory path
+    #[getter]
+    pub fn directory(&self) -> String {
+        self.root_path.to_string_lossy().to_string()
+    }
+
+    /// Clear the file cache
+    pub fn clear_cache_py(&self) {
+        self.clear_cache();
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "StaticFileHandler(directory='{}', prefix='{}', spa={})",
+            self.root_path.display(),
+            self.prefix,
+            self.spa_mode
+        )
+    }
+}

@@ -241,6 +241,11 @@ impl Router {
         ))
     }
 
+    /// Get route info as a list of dicts for CLI/introspection
+    pub fn get_routes_info_py(&self) -> Vec<HashMap<String, String>> {
+        self.get_routes_info()
+    }
+
     // Find most specific matching route for a path
     pub fn find_matching_route(
         &self,
@@ -283,5 +288,31 @@ impl Router {
 
     pub fn routes_count(&self) -> usize {
         self.routes.len()
+    }
+
+    /// Get route info as a list of dicts for the `hypern routes` CLI command
+    pub fn get_routes_info(&self) -> Vec<HashMap<String, String>> {
+        self.routes
+            .iter()
+            .map(|r| {
+                let mut info = HashMap::new();
+                info.insert("method".to_string(), r.method.clone());
+                info.insert("path".to_string(), self.get_full_path(&r.path));
+                info.insert(
+                    "handler".to_string(),
+                    Python::attach(|py| {
+                        r.function
+                            .bind(py)
+                            .getattr("__name__")
+                            .map(|n| n.to_string())
+                            .unwrap_or_else(|_| "unknown".to_string())
+                    }),
+                );
+                if let Some(ref doc) = r.doc {
+                    info.insert("doc".to_string(), doc.clone());
+                }
+                info
+            })
+            .collect()
     }
 }

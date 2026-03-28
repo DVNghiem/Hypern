@@ -19,10 +19,16 @@ from hypern import Hypern
 from config import get_config
 from adapters.inbound.api.health_controller import health_router
 from adapters.inbound.api.example_controller import example_router
+from adapters.outbound.persistence.in_memory_example_repository import InMemoryExampleRepository
+from core.services.example_service import ExampleService
 
 config = get_config()
 
 app = Hypern(debug=config.DEBUG)
+
+# Wire dependencies (Ports & Adapters)
+repository = InMemoryExampleRepository()
+app.singleton("use_case", ExampleService(repository))
 
 # Mount adapters
 app.use("/", health_router)
@@ -131,21 +137,24 @@ class ExampleService(ExampleUseCase):
     files["adapters/inbound/api/example_controller.py"] = '''\
 """Example API adapter – drives the application via inbound port."""
 
-from hypern import Router, Request, Response
+from hypern import Router, Request, Response, inject
 
 example_router = Router(prefix="/examples")
 
 
 @example_router.get("/")
-async def list_examples(request: Request) -> Response:
-    # TODO: inject ExampleUseCase via DI
-    return Response(status_code=200, description=[])
+@inject("use_case")
+async def list_examples(request: Request, response: Response, ctx, use_case) -> Response:
+    items = await use_case.get_all()
+    return Response(status_code=200, description=items)
 
 
 @example_router.post("/")
-async def create_example(request: Request) -> Response:
-    # TODO: inject ExampleUseCase via DI
-    return Response(status_code=201, description={"created": True})
+@inject("use_case")
+async def create_example(request: Request, response: Response, ctx, use_case) -> Response:
+    data = request.json()
+    result = await use_case.create(name=data.get("name", ""), description=data.get("description", ""))
+    return Response(status_code=201, description=result)
 '''
 
     # ── Adapters – Outbound ──────────────────────────────────────

@@ -6,6 +6,41 @@ import sys
 from .scaffolding import NewCommand
 from .run import RunCommand
 
+# ANSI colours for HTTP methods
+_METHOD_COLORS = {
+    "GET": "\033[92m",      # green
+    "POST": "\033[93m",     # yellow
+    "PUT": "\033[94m",      # blue
+    "DELETE": "\033[91m",   # red
+    "PATCH": "\033[95m",    # magenta
+    "HEAD": "\033[96m",     # cyan
+    "OPTIONS": "\033[90m",  # grey
+}
+_RESET = "\033[0m"
+
+
+def _print_routes_table(routes: list):
+    """Pretty-print routes as a table."""
+    if not routes:
+        print("No routes registered.")
+        return
+
+    # Column widths
+    mw = max(len(r.get("method", "")) for r in routes)
+    pw = max(len(r.get("path", "")) for r in routes)
+    mw = max(mw, 6)
+    pw = max(pw, 4)
+
+    header = f"{'METHOD':<{mw}}  {'PATH':<{pw}}  HANDLER"
+    print(header)
+    print("-" * len(header))
+    for r in routes:
+        method = r.get("method", "")
+        path = r.get("path", "")
+        handler = r.get("handler", "")
+        color = _METHOD_COLORS.get(method, "")
+        print(f"{color}{method:<{mw}}{_RESET}  {path:<{pw}}  {handler}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -81,6 +116,21 @@ Architecture patterns:
     run_parser.add_argument("--reload", action="store_true", help="Enable auto-reload on file changes")
     run_parser.add_argument("--debug", action="store_true", help="Enable debug mode")
 
+    # --- hypern routes ---
+    routes_parser = subparsers.add_parser("routes", help="List all registered routes")
+    routes_parser.add_argument(
+        "--app",
+        "-a",
+        default=None,
+        help="Application instance path (e.g. myapp.app:app). Auto-discovers if omitted.",
+    )
+    routes_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output routes as JSON",
+    )
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -93,6 +143,15 @@ Architecture patterns:
     elif args.command == "run":
         cmd = RunCommand()
         cmd.execute(args)
+    elif args.command == "routes":
+        from .run import resolve_app
+        app_instance = resolve_app(args.app)
+        routes = app_instance.get_routes()
+        if args.json_output:
+            import json
+            print(json.dumps(routes, indent=2))
+        else:
+            _print_routes_table(routes)
     else:
         parser.print_help()
         sys.exit(1)

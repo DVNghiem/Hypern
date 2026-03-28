@@ -92,14 +92,56 @@ short_token = jwt.encode({"sub": "1"}, expiry_seconds=300)  # 5 minutes
 
 | Parameter        | Default          | Description                          |
 |------------------|------------------|--------------------------------------|
-| `secret`         | *(required)*     | HMAC-SHA256 signing key              |
-| `algorithm`      | `"HS256"`        | Signing algorithm                    |
+| `secret`         | *(required for HS256)* | HMAC-SHA256 signing key         |
+| `algorithm`      | `"HS256"`        | Signing algorithm (`HS256`, `RS256`, `ES256`) |
 | `expiry_seconds` | `3600`           | Token lifetime in seconds            |
 | `issuer`         | `None`           | Expected `iss` claim                 |
 | `audience`       | `None`           | Expected `aud` claim                 |
 | `header_name`    | `"Authorization"`| HTTP header to read token from       |
 | `header_prefix`  | `"Bearer"`       | Required prefix before the token     |
 | `auto_error`     | `True`           | Auto-respond 401 on failure          |
+| `private_key_pem`| `None`           | PEM private key (RS256/ES256, for signing) |
+| `public_key_pem` | `None`           | PEM public key (RS256/ES256, for verification) |
+
+### Asymmetric Algorithms (RS256 / ES256)
+
+For production deployments that need asymmetric signing, Hypern supports **RS256** (RSA + SHA-256) and **ES256** (ECDSA P-256 + SHA-256). Signing and verification are performed in Rust for maximum performance.
+
+#### RS256 Example
+
+```python
+from hypern import JWTAuth
+
+jwt = JWTAuth(
+    algorithm="RS256",
+    private_key_pem=open("private.pem").read(),  # RSA private key
+    public_key_pem=open("public.pem").read(),     # RSA public key
+    expiry_seconds=3600,
+)
+
+token = jwt.encode({"sub": "user-1", "roles": ["admin"]})
+payload = jwt.decode(token)  # verified with public key
+```
+
+#### ES256 Example
+
+```python
+jwt = JWTAuth(
+    algorithm="ES256",
+    private_key_pem=open("ec_private.pem").read(),  # EC P-256 private key
+    public_key_pem=open("ec_public.pem").read(),     # EC P-256 public key
+)
+
+token = jwt.encode({"sub": "user-2"})
+payload = jwt.decode(token)
+```
+
+#### Key Notes
+
+- **RS256/ES256 require** at least one of `private_key_pem` or `public_key_pem`.
+- Use `private_key_pem` for signing (encode). Use `public_key_pem` for verification (decode).
+- A verify-only service can be configured with only `public_key_pem` (it won't be able to sign).
+- Keys must be PEM-encoded. Pass the key string directly — no file path.
 
 ---
 

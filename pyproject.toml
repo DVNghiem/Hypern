@@ -39,6 +39,9 @@ dependencies=[
     "veloxloop (>=0.2.0,<0.3.0)",
 ]
 
+[project.optional-dependencies]
+graphql = ["strawberry-graphql[cli]>=0.235.0"]
+
 [project.scripts]
 hypern = "hypern.cli:main"
 

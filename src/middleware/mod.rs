@@ -12,10 +12,11 @@ pub use chain::{
 
 // Re-export built-in middleware
 pub use builtin::{
-    BasicAuthMiddleware, CompressionMiddleware, CorsConfig, CorsMiddleware, LogAfterMiddleware,
-    LogConfig, LogLevel, LogMiddleware, MethodMiddleware, PathMiddleware, RateLimitAlgorithm,
-    RateLimitConfig, RateLimitMiddleware, RequestIdMiddleware, SecurityHeadersConfig,
-    SecurityHeadersMiddleware, TimeoutMiddleware,
+    BasicAuthMiddleware, CacheConfig, CacheMiddleware, CircuitBreakerConfig,
+    CircuitBreakerMiddleware, CircuitState, CompressionMiddleware, CorsConfig, CorsMiddleware,
+    LogAfterMiddleware, LogConfig, LogLevel, LogMiddleware, MethodMiddleware, PathMiddleware,
+    RateLimitAlgorithm, RateLimitConfig, RateLimitMiddleware, RequestIdMiddleware,
+    SecurityHeadersConfig, SecurityHeadersMiddleware, TimeoutMiddleware,
 };
 
 /// Convert a MiddlewareResponse to a hyper Response - optimized
@@ -441,5 +442,135 @@ impl PyBasicAuthMiddleware {
 
     fn __repr__(&self) -> String {
         "BasicAuthMiddleware(...)".to_string()
+    }
+}
+
+/// Python-accessible circuit breaker middleware
+///
+/// Protects against cascading failures by opening the circuit after
+/// repeated failures, short-circuiting with 503 until the timeout elapses.
+#[pyclass(name = "CircuitBreakerMiddleware", from_py_object)]
+#[derive(Clone)]
+pub struct PyCircuitBreakerMiddleware {
+    pub(crate) inner: Arc<CircuitBreakerMiddleware>,
+}
+
+#[pymethods]
+impl PyCircuitBreakerMiddleware {
+    /// Create a circuit breaker middleware
+    ///
+    /// Args:
+    ///     failure_threshold: Failures before opening (default: 5)
+    ///     success_threshold: Successes in half-open to close (default: 2)
+    ///     timeout_secs: Seconds circuit stays open (default: 30)
+    ///     paths: Paths to protect (empty = all)
+    #[new]
+    #[pyo3(signature = (
+        failure_threshold = 5,
+        success_threshold = 2,
+        timeout_secs = 30,
+        paths = None
+    ))]
+    pub fn new(
+        failure_threshold: u32,
+        success_threshold: u32,
+        timeout_secs: u64,
+        paths: Option<Vec<String>>,
+    ) -> Self {
+        let mut config =
+            CircuitBreakerConfig::new(failure_threshold, success_threshold, timeout_secs);
+        if let Some(p) = paths {
+            config.paths = p;
+        }
+        Self {
+            inner: Arc::new(CircuitBreakerMiddleware::new(config)),
+        }
+    }
+
+    /// Record a success for the given path
+    pub fn record_success(&self, path: &str) {
+        self.inner.record_success(path);
+    }
+
+    /// Record a failure for the given path
+    pub fn record_failure(&self, path: &str) {
+        self.inner.record_failure(path);
+    }
+
+    /// Get the current circuit state for a path ("closed", "open", "half_open")
+    pub fn get_state(&self, path: &str) -> String {
+        match self.inner.get_state(path) {
+            CircuitState::Closed => "closed".to_string(),
+            CircuitState::Open => "open".to_string(),
+            CircuitState::HalfOpen => "half_open".to_string(),
+        }
+    }
+
+    /// Get the failure count for a path
+    pub fn get_failure_count(&self, path: &str) -> u64 {
+        self.inner.get_failure_count(path)
+    }
+
+    fn __repr__(&self) -> String {
+        "CircuitBreakerMiddleware(...)".to_string()
+    }
+}
+
+// ─── Python wrapper: CacheMiddleware ─────────────────────────────
+
+#[pyclass(name = "CacheMiddleware", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyCacheMiddleware {
+    inner: Arc<CacheMiddleware>,
+}
+
+#[pymethods]
+impl PyCacheMiddleware {
+    /// Create a cache middleware
+    ///
+    /// Args:
+    ///     ttl_seconds: Cache TTL in seconds (default: 60)
+    ///     cache_control_respect: Respect Cache-Control headers (default: True)
+    ///     max_cache_size: Maximum cached entries (default: 10000)
+    ///     paths: Paths to cache (empty = all GET requests)
+    #[new]
+    #[pyo3(signature = (
+        ttl_seconds = 60,
+        cache_control_respect = true,
+        max_cache_size = 10000,
+        paths = None
+    ))]
+    pub fn new(
+        ttl_seconds: u64,
+        cache_control_respect: bool,
+        max_cache_size: usize,
+        paths: Option<Vec<String>>,
+    ) -> Self {
+        let mut config = CacheConfig::new(ttl_seconds);
+        config.cache_control_respect = cache_control_respect;
+        config.max_cache_size = max_cache_size;
+        if let Some(p) = paths {
+            config.paths = p;
+        }
+        Self {
+            inner: Arc::new(CacheMiddleware::new(config)),
+        }
+    }
+
+    /// Invalidate a cache entry by route and params
+    pub fn invalidate(&self, route: &str, params: &str) {
+        self.inner.invalidate(route, params);
+    }
+
+    /// Clear all cache entries
+    pub fn clear(&self) {
+        self.inner.clear();
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CacheMiddleware(ttl={}s, max_size={})",
+            self.inner.config.ttl_seconds, self.inner.config.max_cache_size
+        )
     }
 }

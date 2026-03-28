@@ -16,6 +16,8 @@ All middleware is implemented in Rust:
 | `RequestIdMiddleware` | Unique request ID generation/tracking |
 | `LogMiddleware` | Request/response logging |
 | `BasicAuthMiddleware` | HTTP Basic Authentication |
+| `CircuitBreakerMiddleware` | Circuit breaker for cascading failure protection |
+| `CacheMiddleware` | Response caching for GET requests |
 
 ## Quick Start
 
@@ -1033,4 +1035,96 @@ The `MiddlewareContext` object provides these methods for modifying requests:
 - **Persistent**: Changes persist through the entire request lifecycle
 - **Query string sync**: When using `set_query()`, remember that the query string itself isn't automatically rebuilt. Use `set_query_string()` if you need to replace the entire query string
 - **Body encoding**: When modifying the body with `set_body_str()`, ensure proper encoding (UTF-8 is recommended)
+
+## Circuit Breaker Middleware
+
+Protects against cascading failures by opening the circuit after repeated failures, returning 503 until the timeout elapses.
+
+### Basic Usage
+
+```python
+from hypern.middleware import CircuitBreakerMiddleware
+
+cb = CircuitBreakerMiddleware(
+    failure_threshold=5,     # failures before opening (default: 5)
+    success_threshold=2,     # successes in half-open to close (default: 2)
+    timeout_secs=30,         # seconds circuit stays open (default: 30)
+    paths=["/api/external"]  # paths to protect (empty = all)
+)
+app.add_middleware(cb)
+```
+
+### Circuit States
+
+| State | Behavior |
+|-------|----------|
+| **Closed** | Requests pass through normally. Failure count is tracked. |
+| **Open** | Requests are immediately rejected with `503 Service Unavailable` and a `Retry-After` header. |
+| **Half-Open** | After the timeout elapses, a limited number of requests are allowed through. If they succeed, the circuit closes; if they fail, it opens again. |
+
+### Programmatic Control
+
+```python
+# Record outcomes from your handler or after-middleware
+cb.record_success("/api/external")
+cb.record_failure("/api/external")
+
+# Inspect state
+state = cb.get_state("/api/external")   # "closed", "open", or "half_open"
+count = cb.get_failure_count("/api/external")
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `failure_threshold` | `int` | `5` | Consecutive failures before opening the circuit |
+| `success_threshold` | `int` | `2` | Successes in half-open state required to close |
+| `timeout_secs` | `int` | `30` | Seconds the circuit stays open before half-open |
+| `paths` | `list[str]` | `[]` | Paths to protect (empty = all paths) |
+
+## Cache Middleware
+
+High-performance response caching for GET requests backed by the Rust `JsonResponseCache` engine.
+
+### Basic Usage
+
+```python
+from hypern.middleware import CacheMiddleware
+
+cache = CacheMiddleware(
+    ttl_seconds=60,              # cache TTL (default: 60)
+    cache_control_respect=True,  # honour Cache-Control headers (default: True)
+    max_cache_size=10000,        # max cached entries (default: 10000)
+    paths=["/api/products"]      # paths to cache (empty = all GET)
+)
+app.add_middleware(cache)
+```
+
+### How It Works
+
+1. Only **GET** requests are cached.
+2. If `paths` is set, only matching path prefixes are cached.
+3. If `cache_control_respect` is enabled, requests with `Cache-Control: no-store` or `no-cache` bypass the cache.
+4. On a **cache hit**, the response is returned immediately with an `X-Cache: HIT` header.
+5. On a **cache miss**, the request continues to the handler with `X-Cache: MISS` set in middleware state.
+
+### Cache Invalidation
+
+```python
+# Invalidate a specific entry
+cache.invalidate("/api/products", "page=1&limit=10")
+
+# Clear the entire cache
+cache.clear()
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `ttl_seconds` | `int` | `60` | Cache time-to-live in seconds |
+| `cache_control_respect` | `bool` | `True` | Respect `Cache-Control` request headers |
+| `max_cache_size` | `int` | `10000` | Maximum number of cached entries |
+| `paths` | `list[str]` | `[]` | Path prefixes to cache (empty = all GET requests) |
 

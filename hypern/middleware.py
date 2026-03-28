@@ -12,6 +12,8 @@ from hypern._hypern import (
     RequestIdMiddleware,
     LogMiddleware,
     BasicAuthMiddleware,
+    CircuitBreakerMiddleware,
+    CacheMiddleware,
 )
 
 class MiddlewareStack:
@@ -104,6 +106,8 @@ __all__ = [
     'RequestIdMiddleware',
     'LogMiddleware',
     'BasicAuthMiddleware',
+    'CircuitBreakerMiddleware',
+    'CacheMiddleware',
     
     # Utilities
     'MiddlewareStack',

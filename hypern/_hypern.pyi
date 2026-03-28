@@ -438,6 +438,41 @@ class BasicAuthMiddleware:
         users: Optional[Dict[str, str]] = None
     ) -> None: ...
 
+class CircuitBreakerMiddleware:
+    """
+    Circuit breaker middleware for fault tolerance.
+    
+    Implements the circuit breaker pattern to prevent cascading failures.
+    """
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        success_threshold: int = 2,
+        timeout_secs: int = 30,
+        paths: Optional[List[str]] = None
+    ) -> None: ...
+    
+    def record_success(self, path: str) -> None: ...
+    def record_failure(self, path: str) -> None: ...
+    def get_stats(self, path: str) -> Dict[str, Any]: ...
+    def get_failure_count(self, path: str) -> int: ...
+
+
+class CacheMiddleware:
+    """
+    Caching middleware for GET requests.
+    """
+
+    def __init__(
+        self,
+        ttl_seconds: int = 60,
+        cache_control_respect: bool = True,
+        max_cache_size: int = 10000,
+        paths: Optional[List[str]] = None
+    ) -> None: ...
+
+    def invalidate(self, route: str, params: str) -> None: ...
+    def clear(self) -> None: ...
 
 class LogConfig:
     """
@@ -772,6 +807,14 @@ def finalize_db_all(request_id: str) -> None:
     """
     ...
 
+class AnyPool:
+    """Generic connection pool interface for multiple database types."""
+    
+    def __init__(self, url: str, max_connections: int = 16) -> None: ...
+    def query(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]: ...
+    def query_one(self, sql: str, params: Optional[List[Any]] = None) -> Dict[str, Any]: ...
+    def execute(self, sql: str, params: Optional[List[Any]] = None) -> int: ...
+    def close(self) -> None: ...
 
 # ============================================================================
 # Realtime: Channel / Topic
@@ -1187,3 +1230,37 @@ def ms_to_sec(ms: int) -> int:
 def sec_to_ms(sec: int) -> int:
     """Convert seconds to milliseconds."""
     ...
+
+# ------------------------------- GRPC Helpers --------------------------------
+class GrpcConfig:
+    """Configuration for gRPC clients and servers."""
+    host: str
+    port: int
+
+    def __init__(self, host: str = "0.0.0.0", port: int = 50051) -> None: ...
+
+
+class GrpcServer:
+    """gRPC server implementation."""
+    
+    def __init__(self, config: Optional[GrpcConfig] = None) -> None: ...
+    def address(self) -> str: ...
+    def is_running(self) -> bool: ...
+
+
+
+
+# -------------------- RedisPool (Experimental) --------------------
+
+class RedisPool:
+
+    """Redis connection pool with async support."""
+
+    def __init__(self, url: str, pool_size: int = 16) -> None: ...
+    def get(self, key: str) -> Optional[str]: ...
+    def set(self, key: str, value: str) -> None: ...
+    def delete(self, key: str) -> int: ...
+    def expire(self, key: str, seconds: int) -> bool: ...
+    def incr(self, key: str) -> int: ...
+    def publish(self, channel: str, message: str) -> int: ...
+    def ping(self) -> bool: ...

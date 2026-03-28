@@ -8,16 +8,11 @@ use tokio_postgres::NoTls;
 
 static GLOBAL_POOLS: OnceLock<RwLock<HashMap<String, Pool>>> = OnceLock::new();
 
-static DB_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-
+/// Get the shared application runtime for database operations.
+/// This merges the DB runtime into the global runtime to avoid
+/// resource contention from having two separate runtimes.
 pub fn get_db_runtime() -> &'static tokio::runtime::Runtime {
-    DB_RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(4)
-            .enable_all()
-            .build()
-            .expect("Failed to create database runtime")
-    })
+    crate::core::global::get_runtime()
 }
 
 fn get_pools() -> &'static RwLock<HashMap<String, Pool>> {

@@ -275,6 +275,12 @@ impl DatabaseContextInner {
                 contexts.remove(&self.request_id);
             }
         }
+
+        // Periodic shrink: if the map capacity is 4x larger than its length, shrink
+        if contexts.capacity() > 0 && contexts.len() < contexts.capacity() / 4 {
+            contexts.shrink_to_fit();
+        }
+
         Ok(())
     }
 }

@@ -168,6 +168,167 @@ pub fn fast_hash_bytes(data: &[u8]) -> u64 {
     xxhash_rust::xxh3::xxh3_64(data)
 }
 
+// ─────────────────────────── JWT RS256 / ES256 ───────────────────────────── //
+
+/// Sign a JWT payload with RS256 (RSA PKCS#1 v1.5 + SHA-256).
+///
+/// Args:
+///     payload_json: A JSON-encoded string of the JWT claims.
+///     pem_key: The PEM-encoded RSA **private** key.
+///
+/// Returns the compact JWS string ``header.payload.signature``.
+#[pyfunction]
+pub fn jwt_sign_rs256(payload_json: &str, pem_key: &[u8]) -> PyResult<String> {
+    use base64::Engine;
+    use rsa::pkcs8::DecodePrivateKey;
+    use rsa::pkcs1v15::SigningKey;
+    use sha2::Sha256;
+    use signature::SignatureEncoding;
+
+    let header = r#"{"alg":"RS256","typ":"JWT"}"#;
+    let b64url = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let header_b64 = b64url.encode(header.as_bytes());
+    let payload_b64 = b64url.encode(payload_json.as_bytes());
+    let signing_input = format!("{}.{}", header_b64, payload_b64);
+
+    let pem_str = std::str::from_utf8(pem_key)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid PEM encoding: {}", e)))?;
+
+    let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(pem_str)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid RSA private key: {}", e)))?;
+
+    let signing_key = SigningKey::<Sha256>::new_unprefixed(private_key);
+    let sig: rsa::pkcs1v15::Signature = signature::Signer::sign(&signing_key, signing_input.as_bytes());
+
+    let sig_b64 = b64url.encode(sig.to_bytes());
+    Ok(format!("{}.{}", signing_input, sig_b64))
+}
+
+/// Verify a JWT token signed with RS256 and return the payload JSON.
+///
+/// Args:
+///     token: The compact JWS string.
+///     pem_key: The PEM-encoded RSA **public** key.
+///
+/// Returns the decoded payload JSON string.
+#[pyfunction]
+pub fn jwt_verify_rs256(token: &str, pem_key: &[u8]) -> PyResult<String> {
+    use base64::Engine;
+    use rsa::pkcs8::DecodePublicKey;
+    use rsa::pkcs1v15::VerifyingKey;
+    use sha2::Sha256;
+    use signature::Verifier;
+
+    let b64url = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let parts: Vec<&str> = token.splitn(3, '.').collect();
+    if parts.len() != 3 {
+        return Err(pyo3::exceptions::PyValueError::new_err("Invalid JWT format"));
+    }
+
+    let signing_input = format!("{}.{}", parts[0], parts[1]);
+
+    let pem_str = std::str::from_utf8(pem_key)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid PEM encoding: {}", e)))?;
+
+    let public_key = rsa::RsaPublicKey::from_public_key_pem(pem_str)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid RSA public key: {}", e)))?;
+
+    let verifying_key = VerifyingKey::<Sha256>::new_unprefixed(public_key);
+    let sig_bytes = b64url.decode(parts[2])
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid signature encoding: {}", e)))?;
+
+    let signature = rsa::pkcs1v15::Signature::try_from(sig_bytes.as_slice())
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid signature: {}", e)))?;
+
+    verifying_key.verify(signing_input.as_bytes(), &signature)
+        .map_err(|_| pyo3::exceptions::PyValueError::new_err("JWT signature verification failed"))?;
+
+    let payload_bytes = b64url.decode(parts[1])
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid payload encoding: {}", e)))?;
+
+    String::from_utf8(payload_bytes)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid payload UTF-8: {}", e)))
+}
+
+/// Sign a JWT payload with ES256 (ECDSA P-256 + SHA-256).
+///
+/// Args:
+///     payload_json: A JSON-encoded string of the JWT claims.
+///     pem_key: The PEM-encoded EC **private** key (PKCS#8 or SEC1).
+///
+/// Returns the compact JWS string ``header.payload.signature``.
+#[pyfunction]
+pub fn jwt_sign_es256(payload_json: &str, pem_key: &[u8]) -> PyResult<String> {
+    use base64::Engine;
+    use p256::ecdsa::{SigningKey as EcSigningKey, Signature as EcSignature};
+    use p256::pkcs8::DecodePrivateKey;
+
+    let header = r#"{"alg":"ES256","typ":"JWT"}"#;
+    let b64url = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let header_b64 = b64url.encode(header.as_bytes());
+    let payload_b64 = b64url.encode(payload_json.as_bytes());
+    let signing_input = format!("{}.{}", header_b64, payload_b64);
+
+    let pem_str = std::str::from_utf8(pem_key)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid PEM encoding: {}", e)))?;
+
+    let sk = EcSigningKey::from_pkcs8_pem(pem_str)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid EC private key: {}", e)))?;
+
+    let sig: EcSignature = signature::Signer::sign(&sk, signing_input.as_bytes());
+    let sig_b64 = b64url.encode(sig.to_bytes());
+
+    Ok(format!("{}.{}", signing_input, sig_b64))
+}
+
+/// Verify a JWT token signed with ES256 and return the payload JSON.
+///
+/// Args:
+///     token: The compact JWS string.
+///     pem_key: The PEM-encoded EC **public** key.
+///
+/// Returns the decoded payload JSON string.
+#[pyfunction]
+pub fn jwt_verify_es256(token: &str, pem_key: &[u8]) -> PyResult<String> {
+    use base64::Engine;
+    use p256::ecdsa::{VerifyingKey as EcVerifyingKey, Signature as EcSignature};
+    use p256::pkcs8::DecodePublicKey;
+    use signature::Verifier;
+
+    let b64url = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let parts: Vec<&str> = token.splitn(3, '.').collect();
+    if parts.len() != 3 {
+        return Err(pyo3::exceptions::PyValueError::new_err("Invalid JWT format"));
+    }
+
+    let signing_input = format!("{}.{}", parts[0], parts[1]);
+
+    let pem_str = std::str::from_utf8(pem_key)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid PEM encoding: {}", e)))?;
+
+    let vk = EcVerifyingKey::from_public_key_pem(pem_str)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid EC public key: {}", e)))?;
+
+    let sig_bytes = b64url.decode(parts[2])
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid signature encoding: {}", e)))?;
+
+    let sig = EcSignature::from_slice(&sig_bytes)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid signature: {}", e)))?;
+
+    vk.verify(signing_input.as_bytes(), &sig)
+        .map_err(|_| pyo3::exceptions::PyValueError::new_err("JWT signature verification failed"))?;
+
+    let payload_bytes = b64url.decode(parts[1])
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid payload encoding: {}", e)))?;
+
+    String::from_utf8(payload_bytes)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid payload UTF-8: {}", e)))
+}
+
 // ───────────────────────── internal helpers ──────────────────────────────── //
 
 #[inline]
@@ -199,5 +360,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(uuid_v7, m)?)?;
     m.add_function(wrap_pyfunction!(fast_hash, m)?)?;
     m.add_function(wrap_pyfunction!(fast_hash_bytes, m)?)?;
+    m.add_function(wrap_pyfunction!(jwt_sign_rs256, m)?)?;
+    m.add_function(wrap_pyfunction!(jwt_verify_rs256, m)?)?;
+    m.add_function(wrap_pyfunction!(jwt_sign_es256, m)?)?;
+    m.add_function(wrap_pyfunction!(jwt_verify_es256, m)?)?;
     Ok(())
 }

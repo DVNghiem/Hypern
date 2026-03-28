@@ -80,7 +80,7 @@ class JWTAuth:
 
     def __init__(
         self,
-        secret: str,
+        secret: str = "",
         algorithm: str = "HS256",
         expiry_seconds: int = 3600,
         issuer: Optional[str] = None,
@@ -88,15 +88,32 @@ class JWTAuth:
         header_name: str = "Authorization",
         header_prefix: str = "Bearer",
         auto_error: bool = True,
+        private_key_pem: Optional[str] = None,
+        public_key_pem: Optional[str] = None,
     ):
         self.secret = secret
-        self.algorithm = algorithm
+        self.algorithm = algorithm.upper()
         self.expiry_seconds = expiry_seconds
         self.issuer = issuer
         self.audience = audience
         self.header_name = header_name
         self.header_prefix = header_prefix
         self.auto_error = auto_error
+
+        # Asymmetric key material (RS256 / ES256)
+        self._private_key_pem: Optional[bytes] = (
+            private_key_pem.encode() if isinstance(private_key_pem, str) else private_key_pem
+        )
+        self._public_key_pem: Optional[bytes] = (
+            public_key_pem.encode() if isinstance(public_key_pem, str) else public_key_pem
+        )
+
+        if self.algorithm in ("RS256", "ES256"):
+            if self._private_key_pem is None and self._public_key_pem is None:
+                raise ValueError(
+                    f"{self.algorithm} requires at least one of "
+                    "private_key_pem or public_key_pem"
+                )
 
         # Token blacklist for revocation
         self._blacklist: Set[str] = set()
@@ -146,13 +163,23 @@ class JWTAuth:
         header_b64 = self._b64url_encode(json.dumps(header, separators=(",", ":")).encode())
         payload_b64 = self._b64url_encode(json.dumps(claims, separators=(",", ":")).encode())
 
-        signing_input = f"{header_b64}.{payload_b64}"
-        signature = hmac.new(
-            self.secret.encode(), signing_input.encode(), hashlib.sha256
-        ).digest()
-        signature_b64 = self._b64url_encode(signature)
-
-        return f"{signing_input}.{signature_b64}"
+        if self.algorithm == "HS256":
+            signing_input = f"{header_b64}.{payload_b64}"
+            signature = hmac.new(
+                self.secret.encode(), signing_input.encode(), hashlib.sha256
+            ).digest()
+            signature_b64 = self._b64url_encode(signature)
+            return f"{signing_input}.{signature_b64}"
+        elif self.algorithm == "RS256":
+            from hypern._hypern import jwt_sign_rs256
+            payload_json = json.dumps(claims, separators=(",", ":"))
+            return jwt_sign_rs256(payload_json, self._private_key_pem)
+        elif self.algorithm == "ES256":
+            from hypern._hypern import jwt_sign_es256
+            payload_json = json.dumps(claims, separators=(",", ":"))
+            return jwt_sign_es256(payload_json, self._private_key_pem)
+        else:
+            raise JWTError(f"Unsupported algorithm: {self.algorithm}")
 
     def decode(self, token: str) -> Dict[str, Any]:
         """
@@ -177,21 +204,38 @@ class JWTAuth:
 
         header_b64, payload_b64, signature_b64 = parts
 
-        # Verify signature
-        signing_input = f"{header_b64}.{payload_b64}"
-        expected_sig = hmac.new(
-            self.secret.encode(), signing_input.encode(), hashlib.sha256
-        ).digest()
-        actual_sig = self._b64url_decode(signature_b64)
+        if self.algorithm == "HS256":
+            # Verify signature
+            signing_input = f"{header_b64}.{payload_b64}"
+            expected_sig = hmac.new(
+                self.secret.encode(), signing_input.encode(), hashlib.sha256
+            ).digest()
+            actual_sig = self._b64url_decode(signature_b64)
 
-        if not hmac.compare_digest(expected_sig, actual_sig):
-            raise JWTError("Invalid signature")
+            if not hmac.compare_digest(expected_sig, actual_sig):
+                raise JWTError("Invalid signature")
 
-        # Decode payload
-        try:
-            payload = json.loads(self._b64url_decode(payload_b64))
-        except (json.JSONDecodeError, Exception) as e:
-            raise JWTError(f"Invalid payload: {e}")
+            # Decode payload
+            try:
+                payload = json.loads(self._b64url_decode(payload_b64))
+            except (json.JSONDecodeError, Exception) as e:
+                raise JWTError(f"Invalid payload: {e}")
+        elif self.algorithm == "RS256":
+            from hypern._hypern import jwt_verify_rs256
+            try:
+                payload_json = jwt_verify_rs256(token, self._public_key_pem or self._private_key_pem)
+                payload = json.loads(payload_json)
+            except Exception as e:
+                raise JWTError(f"RS256 verification failed: {e}")
+        elif self.algorithm == "ES256":
+            from hypern._hypern import jwt_verify_es256
+            try:
+                payload_json = jwt_verify_es256(token, self._public_key_pem or self._private_key_pem)
+                payload = json.loads(payload_json)
+            except Exception as e:
+                raise JWTError(f"ES256 verification failed: {e}")
+        else:
+            raise JWTError(f"Unsupported algorithm: {self.algorithm}")
 
         # Check blacklist
         jti = payload.get("jti", token[:32])

@@ -1,15 +1,17 @@
 # Database Module
 
-The Hypern framework provides a powerful, request-scoped database layer for PostgreSQL with connection pooling, automatic transaction management, multi-database support with aliases, and seamless Python-Rust interop.
+The Hypern framework provides a powerful, request-scoped database layer with connection pooling, automatic transaction management, multi-database support with aliases, and seamless Python-Rust interop. PostgreSQL, MySQL, and SQLite are all supported.
 
 ## Features
 
 - **Connection Pooling**: Efficient connection reuse with configurable pool sizes
 - **Multi-Database Support**: Configure and access multiple databases with aliases
+- **Multi-Driver Support**: PostgreSQL (primary), MySQL, and SQLite via sqlx
 - **Request-Scoped Sessions**: Each HTTP request gets exactly one database connection per alias
 - **Automatic Transaction Management**: Auto-commit/rollback at request end
 - **Type-Safe Parameter Binding**: Secure parameterized queries with automatic type conversion
 - **Full PostgreSQL Type Support**: Integers, floats, decimals, strings, JSON, dates, times, timestamps, booleans, and binary data
+- **Multi-Tenant Routing**: Per-tenant database pools with LRU eviction
 
 ## Quick Start
 
@@ -47,7 +49,31 @@ async def startup():
         max_size=3,
         alias="logging"
     )
+
+    # MySQL database
+    Database.configure(
+        url="mysql://user:password@localhost:3306/mydb",
+        max_size=10,
+        alias="mysql_db"
+    )
+
+    # SQLite database
+    Database.configure(
+        url="sqlite:///path/to/data.db",
+        max_size=4,
+        alias="sqlite_db"
+    )
 ```
+
+The driver is auto-detected from the URL prefix:
+
+| Prefix | Driver | Backend |
+|--------|--------|---------|
+| `postgresql://` or `postgres://` | deadpool-postgres (Rust) | PostgreSQL |
+| `mysql://` | sqlx Any (Rust) | MySQL / MariaDB |
+| `sqlite://` | sqlx Any (Rust) | SQLite |
+
+> **Note:** PostgreSQL uses the full-featured `DbSession` with transactions, prepared statements, and all PostgreSQL types. MySQL and SQLite use the lighter `AnySession` which supports `query`, `query_one`, and `execute`.
 
 ### Basic Usage
 
@@ -651,3 +677,84 @@ def get_stats(req, res, ctx):
 if __name__ == "__main__":
     app.run()
 ```
+
+## MySQL & SQLite (AnySession)
+
+When using MySQL or SQLite, `db(ctx)` returns an `AnySession` instead of `DbSession`. The API is intentionally simple:
+
+```python
+@app.get("/items")
+async def list_items(req, res, ctx):
+    session = db(ctx, alias="mysql_db")
+
+    rows = await session.query("SELECT id, name FROM items WHERE active = ?", [True])
+    res.json(rows)  # list of dicts
+
+    row = await session.query_one("SELECT COUNT(*) as cnt FROM items", [])
+    res.json({"count": row["cnt"]})
+
+    affected = await session.execute("UPDATE items SET active = ? WHERE id = ?", [False, 42])
+    res.json({"updated": affected})
+```
+
+### AnySession API
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `query(sql, params)` | `list[dict]` | Execute query, return all rows as dicts |
+| `query_one(sql, params)` | `dict` | Execute query, return first row |
+| `execute(sql, params)` | `int` | Execute statement, return rows affected |
+
+> **Parameter placeholders:** Use `?` for MySQL/SQLite (positional), `$1` for PostgreSQL.
+
+## Multi-Tenant Database Routing
+
+For SaaS applications that need a separate database per tenant, use `MultiTenantDatabase`:
+
+```python
+from hypern.database import MultiTenantDatabase, TenantResolver
+
+class HeaderTenantResolver(TenantResolver):
+    """Resolve tenant ID from the X-Tenant-ID header."""
+    async def resolve(self, request) -> str:
+        tenant = request.headers.get("X-Tenant-ID", "")
+        if not tenant:
+            raise ValueError("Missing X-Tenant-ID header")
+        return tenant
+
+mt = MultiTenantDatabase(
+    resolver=HeaderTenantResolver(),
+    dsn_template="postgresql://user:pass@localhost:5432/tenant_{tenant}",
+    max_size=8,
+    max_tenants=100,  # LRU eviction after 100 pools
+)
+```
+
+### Using in Handlers
+
+```python
+@app.get("/projects")
+async def list_projects(req, res, ctx):
+    session = await mt.session(req, ctx)
+    rows = await session.query("SELECT * FROM projects")
+    res.json(rows)
+```
+
+### How It Works
+
+1. On each request, `resolver.resolve(request)` extracts the tenant identifier.
+2. A connection pool is lazily created for that tenant using the `dsn_template` (with `{tenant}` replaced).
+3. Pools are registered as `Database` aliases with a `_mt_` prefix.
+4. When pool count exceeds `max_tenants`, the least-recently-used pool is evicted and closed.
+
+### TenantResolver Protocol
+
+```python
+from typing import Protocol, runtime_checkable
+
+@runtime_checkable
+class TenantResolver(Protocol):
+    async def resolve(self, request) -> str: ...
+```
+
+Implement this protocol to extract tenant IDs from any source — headers, subdomains, JWT claims, path segments, etc.

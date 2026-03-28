@@ -1096,3 +1096,346 @@ impl<M: RustMiddleware> RustMiddleware for MethodMiddleware<M> {
         self.inner.execute(ctx)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Circuit Breaker
+// ---------------------------------------------------------------------------
+
+/// Circuit breaker states
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CircuitState {
+    Closed,
+    Open,
+    HalfOpen,
+}
+
+/// Configuration for the circuit breaker
+#[derive(Clone)]
+pub struct CircuitBreakerConfig {
+    /// Number of consecutive failures before opening the circuit
+    pub failure_threshold: u32,
+    /// Number of successes in half-open state required to close the circuit
+    pub success_threshold: u32,
+    /// How long the circuit stays open before transitioning to half-open
+    pub timeout: Duration,
+    /// Paths to apply circuit breaking to (empty = all paths)
+    pub paths: Vec<String>,
+}
+
+impl Default for CircuitBreakerConfig {
+    fn default() -> Self {
+        Self {
+            failure_threshold: 5,
+            success_threshold: 2,
+            timeout: Duration::from_secs(30),
+            paths: Vec::new(),
+        }
+    }
+}
+
+impl CircuitBreakerConfig {
+    pub fn new(failure_threshold: u32, success_threshold: u32, timeout_secs: u64) -> Self {
+        Self {
+            failure_threshold,
+            success_threshold,
+            timeout: Duration::from_secs(timeout_secs),
+            paths: Vec::new(),
+        }
+    }
+}
+
+/// Per-route circuit breaker state
+struct CircuitBreakerState {
+    state: RwLock<CircuitState>,
+    failure_count: AtomicU64,
+    success_count: AtomicU64,
+    last_failure_at: RwLock<Option<Instant>>,
+}
+
+impl CircuitBreakerState {
+    fn new() -> Self {
+        Self {
+            state: RwLock::new(CircuitState::Closed),
+            failure_count: AtomicU64::new(0),
+            success_count: AtomicU64::new(0),
+            last_failure_at: RwLock::new(None),
+        }
+    }
+}
+
+/// Circuit breaker middleware — protects against cascading failures
+pub struct CircuitBreakerMiddleware {
+    config: CircuitBreakerConfig,
+    circuits: DashMap<String, Arc<CircuitBreakerState>>,
+}
+
+impl CircuitBreakerMiddleware {
+    pub fn new(config: CircuitBreakerConfig) -> Self {
+        Self {
+            config,
+            circuits: DashMap::new(),
+        }
+    }
+
+    fn get_circuit(&self, path: &str) -> Arc<CircuitBreakerState> {
+        self.circuits
+            .entry(path.to_string())
+            .or_insert_with(|| Arc::new(CircuitBreakerState::new()))
+            .clone()
+    }
+
+    /// Record a successful request (called by after-middleware)
+    pub fn record_success(&self, path: &str) {
+        if let Some(cb) = self.circuits.get(path) {
+            let mut state = cb.state.write();
+            match *state {
+                CircuitState::HalfOpen => {
+                    let sc = cb.success_count.fetch_add(1, Ordering::SeqCst) + 1;
+                    if sc >= self.config.success_threshold as u64 {
+                        *state = CircuitState::Closed;
+                        cb.failure_count.store(0, Ordering::SeqCst);
+                        cb.success_count.store(0, Ordering::SeqCst);
+                    }
+                }
+                CircuitState::Closed => {
+                    // Reset failure count on success
+                    cb.failure_count.store(0, Ordering::SeqCst);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Record a failed request
+    pub fn record_failure(&self, path: &str) {
+        let cb = self.get_circuit(path);
+        let mut state = cb.state.write();
+        match *state {
+            CircuitState::Closed => {
+                let fc = cb.failure_count.fetch_add(1, Ordering::SeqCst) + 1;
+                if fc >= self.config.failure_threshold as u64 {
+                    *state = CircuitState::Open;
+                    *cb.last_failure_at.write() = Some(Instant::now());
+                }
+            }
+            CircuitState::HalfOpen => {
+                // Any failure in half-open → back to open
+                *state = CircuitState::Open;
+                *cb.last_failure_at.write() = Some(Instant::now());
+                cb.success_count.store(0, Ordering::SeqCst);
+            }
+            _ => {
+                *cb.last_failure_at.write() = Some(Instant::now());
+            }
+        }
+    }
+
+    /// Get the current state for a route
+    pub fn get_state(&self, path: &str) -> CircuitState {
+        self.circuits
+            .get(path)
+            .map(|cb| *cb.state.read())
+            .unwrap_or(CircuitState::Closed)
+    }
+
+    /// Get failure count for a route
+    pub fn get_failure_count(&self, path: &str) -> u64 {
+        self.circuits
+            .get(path)
+            .map(|cb| cb.failure_count.load(Ordering::SeqCst))
+            .unwrap_or(0)
+    }
+}
+
+impl RustMiddleware for CircuitBreakerMiddleware {
+    fn name(&self) -> &'static str {
+        "circuit_breaker"
+    }
+
+    fn execute<'a>(
+        &'a self,
+        ctx: &'a MiddlewareContext,
+    ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
+        Box::pin(async move {
+            let path = ctx.get_path();
+
+            // If paths configured, only apply to those
+            if !self.config.paths.is_empty()
+                && !self.config.paths.iter().any(|p| path.starts_with(p))
+            {
+                return MiddlewareResult::Continue();
+            }
+
+            let cb = self.get_circuit(&path);
+            let mut state = cb.state.write();
+
+            match *state {
+                CircuitState::Open => {
+                    // Check if timeout has elapsed → transition to half-open
+                    let should_half_open = cb
+                        .last_failure_at
+                        .read()
+                        .map(|t| t.elapsed() >= self.config.timeout)
+                        .unwrap_or(false);
+
+                    if should_half_open {
+                        *state = CircuitState::HalfOpen;
+                        cb.success_count.store(0, Ordering::SeqCst);
+                        drop(state);
+                        // Allow the request through in half-open state
+                        ctx.set_state(
+                            "circuit_breaker_state",
+                            StateValue::String("half_open".to_string()),
+                        );
+                        MiddlewareResult::Continue()
+                    } else {
+                        drop(state);
+                        MiddlewareResult::Response(
+                            MiddlewareResponse::service_unavailable(
+                                "Service temporarily unavailable (circuit open)",
+                            )
+                            .with_header("Retry-After", self.config.timeout.as_secs().to_string()),
+                        )
+                    }
+                }
+                CircuitState::HalfOpen => {
+                    drop(state);
+                    ctx.set_state(
+                        "circuit_breaker_state",
+                        StateValue::String("half_open".to_string()),
+                    );
+                    MiddlewareResult::Continue()
+                }
+                CircuitState::Closed => {
+                    drop(state);
+                    ctx.set_state(
+                        "circuit_breaker_state",
+                        StateValue::String("closed".to_string()),
+                    );
+                    MiddlewareResult::Continue()
+                }
+            }
+        })
+    }
+}
+
+// ─── Cache Middleware ─────────────────────────────────────────────
+
+/// Configuration for response caching middleware
+#[derive(Clone)]
+pub struct CacheConfig {
+    /// Default TTL in seconds
+    pub ttl_seconds: u64,
+    /// Respect Cache-Control request headers (no-store, no-cache)
+    pub cache_control_respect: bool,
+    /// Maximum number of cached entries
+    pub max_cache_size: usize,
+    /// Paths to cache (empty = all GET requests)
+    pub paths: Vec<String>,
+}
+
+impl CacheConfig {
+    pub fn new(ttl_seconds: u64) -> Self {
+        Self {
+            ttl_seconds,
+            cache_control_respect: true,
+            max_cache_size: 10000,
+            paths: Vec::new(),
+        }
+    }
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self::new(60)
+    }
+}
+
+/// Response caching middleware using JsonResponseCache
+pub struct CacheMiddleware {
+    pub config: CacheConfig,
+    cache: crate::fast_path::json_cache::JsonResponseCache,
+}
+
+impl CacheMiddleware {
+    pub fn new(config: CacheConfig) -> Self {
+        let cache = crate::fast_path::json_cache::JsonResponseCache::new(
+            config.max_cache_size,
+            Duration::from_secs(config.ttl_seconds),
+        );
+        Self { config, cache }
+    }
+
+    /// Invalidate a specific cache entry by route + query params
+    pub fn invalidate(&self, route: &str, params: &str) {
+        let key = crate::fast_path::json_cache::JsonResponseCache::compute_key_hash(route, params);
+        self.cache.invalidate(key);
+    }
+
+    /// Clear all cached entries
+    pub fn clear(&self) {
+        self.cache.clear();
+    }
+}
+
+impl RustMiddleware for CacheMiddleware {
+    fn name(&self) -> &'static str {
+        "cache"
+    }
+
+    fn execute<'a>(
+        &'a self,
+        ctx: &'a MiddlewareContext,
+    ) -> Pin<Box<dyn Future<Output = MiddlewareResult> + Send + 'a>> {
+        Box::pin(async move {
+            // Only cache GET requests
+            if ctx.method != HttpMethod::GET {
+                return MiddlewareResult::Continue();
+            }
+
+            let path = ctx.get_path();
+            let query = ctx.get_query_string();
+
+            // If paths configured, only cache those
+            if !self.config.paths.is_empty()
+                && !self.config.paths.iter().any(|p| path.starts_with(p))
+            {
+                return MiddlewareResult::Continue();
+            }
+
+            // Respect Cache-Control from request
+            if self.config.cache_control_respect {
+                let cache_control = ctx
+                    .get_header("cache-control")
+                    .unwrap_or_default()
+                    .to_lowercase();
+                if cache_control.contains("no-store") || cache_control.contains("no-cache") {
+                    ctx.set_state("x-cache", StateValue::String("BYPASS".to_string()));
+                    return MiddlewareResult::Continue();
+                }
+            }
+
+            let key_hash = crate::fast_path::json_cache::JsonResponseCache::compute_key_hash(
+                &path, &query,
+            );
+
+            // Check cache for a hit
+            if let Some(cached_bytes) = self.cache.get(key_hash) {
+                let resp = MiddlewareResponse::new(200)
+                    .with_body(cached_bytes.to_vec())
+                    .with_header("Content-Type", "application/json; charset=utf-8")
+                    .with_header("X-Cache", "HIT");
+                return MiddlewareResult::Response(resp);
+            }
+
+            // Cache miss — mark for downstream to populate
+            ctx.set_state("x-cache", StateValue::String("MISS".to_string()));
+            ctx.set_state(
+                "cache_key_hash",
+                StateValue::String(key_hash.to_string()),
+            );
+
+            MiddlewareResult::Continue()
+        })
+    }
+}

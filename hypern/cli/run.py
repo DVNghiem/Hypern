@@ -5,6 +5,28 @@ import os
 import sys
 
 
+def resolve_app(app_path=None):
+    """Resolve a Hypern app instance from a path or by auto-discovery.
+    
+    Used by both ``hypern run`` and ``hypern routes``.
+    """
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
+
+    cmd = RunCommand()
+    if app_path:
+        return cmd._import_app(app_path)
+    app = cmd._discover_app()
+    if app is None:
+        print(
+            "\033[91mError:\033[0m Could not find a Hypern application instance.\n"
+            "Specify one with --app module:attribute (e.g. --app app:app)"
+        )
+        sys.exit(1)
+    return app
+
+
 class RunCommand:
     """Handles the `hypern run` CLI command."""
 

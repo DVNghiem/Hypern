@@ -4,3 +4,4 @@ pub mod multipart;
 pub mod request;
 pub mod response;
 pub mod streaming;
+pub mod websocket;

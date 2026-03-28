@@ -31,6 +31,11 @@ nav:
       - Zero-Downtime Reloads: zero-downtime.md
       - File Uploads: file-uploads.md
       - Error Handling: error-handling.md
+      - HTTP Client: http-client.md
+      - Metrics: metrics.md
+      - Redis: redis.md
+      - GraphQL: graphql.md
+      - gRPC: grpc.md
       - Utilities: utils.md
   - Best Practices: best-practices.md
   - Advanced:

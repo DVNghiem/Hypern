@@ -606,6 +606,19 @@ class Hypern:
         
         route = RustRoute(path=endpoint, function=handler, method=method.upper())
         self._router.add_route(route=route)
+    
+    def get_routes(self) -> list:
+        """
+        Return a list of all registered routes.
+        
+        Each route is a dict with keys: method, path, handler, doc.
+        
+        Example:
+            routes = app.get_routes()
+            for r in routes:
+                print(f"{r['method']} {r['path']} -> {r['handler']}")
+        """
+        return self._router.get_routes_info_py()
         
         # Register with OpenAPI if enabled
         # Note: OpenAPI registration happens during spec generation
