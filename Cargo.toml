@@ -9,7 +9,7 @@ name = "hypern"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-pyo3 = { version = "0.28.2", features = ["extension-module", "generate-import-lib"] }
+pyo3 = { version = "0.29.0", features = ["extension-module", "generate-import-lib"] }
 
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "net", "sync", "time", "signal", "macros"] }
 tokio-stream = "0.1"
