@@ -27,7 +27,9 @@ pub fn now_sec() -> i64 {
 /// Current UTC time as an ISO 8601 string (``2026-02-23T14:30:00.000Z``).
 #[pyfunction]
 pub fn now_iso() -> String {
-    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+    chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string()
 }
 
 // ────────────────────────── formatting / parsing ─────────────────────────── //

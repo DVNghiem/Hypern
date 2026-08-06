@@ -28,9 +28,8 @@ impl DatabaseTransaction {
     fn execute(&self, py: Python<'_>, query: &str, params: Vec<Py<PyAny>>) -> PyResult<u64> {
         let transaction = self.transaction.clone();
         let operations = self.operations.clone();
-        let result = get_db_runtime().block_on(async move {
-            operations.execute(py, transaction, query, params).await
-        })?;
+        let result = get_db_runtime()
+            .block_on(async move { operations.execute(py, transaction, query, params).await })?;
         Ok(result)
     }
 
@@ -42,9 +41,8 @@ impl DatabaseTransaction {
     ) -> Result<Vec<Py<PyAny>>, PyErr> {
         let transaction = self.transaction.clone();
         let operations = self.operations.clone();
-        let result = get_db_runtime().block_on(async move {
-            operations.fetch_all(py, transaction, query, params).await
-        })?;
+        let result = get_db_runtime()
+            .block_on(async move { operations.fetch_all(py, transaction, query, params).await })?;
         Ok(result)
     }
 

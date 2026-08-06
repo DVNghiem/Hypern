@@ -39,8 +39,7 @@ impl Gauge {
     }
 
     fn set(&self, v: f64) {
-        self.value
-            .store(v.to_bits(), Ordering::Relaxed);
+        self.value.store(v.to_bits(), Ordering::Relaxed);
     }
 
     fn inc(&self) {
@@ -216,8 +215,7 @@ impl MetricsRegistry {
 
     /// Set help text for a metric
     pub fn set_help(&self, name: &str, help: &str) {
-        self.help_texts
-            .insert(name.to_string(), help.to_string());
+        self.help_texts.insert(name.to_string(), help.to_string());
     }
 
     /// Render all metrics in Prometheus text exposition format

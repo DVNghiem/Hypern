@@ -1,4 +1,4 @@
-use crossbeam_channel::{bounded, Sender, Receiver};
+use crossbeam_channel::{bounded, Receiver, Sender};
 use parking_lot::RwLock;
 use pyo3::prelude::*;
 use std::fmt;
@@ -46,11 +46,11 @@ impl LogLevel {
 
     fn color_code(&self) -> &'static str {
         match self {
-            Self::Trace => "\x1b[90m",   // gray
-            Self::Debug => "\x1b[36m",   // cyan
-            Self::Info => "\x1b[32m",    // green
-            Self::Warn => "\x1b[33m",    // yellow
-            Self::Error => "\x1b[31m",   // red
+            Self::Trace => "\x1b[90m", // gray
+            Self::Debug => "\x1b[36m", // cyan
+            Self::Info => "\x1b[32m",  // green
+            Self::Warn => "\x1b[33m",  // yellow
+            Self::Error => "\x1b[31m", // red
             Self::Off => "",
         }
     }
@@ -110,11 +110,7 @@ impl LogEntry {
         self
     }
 
-    pub fn request(
-        method: &str,
-        path: &str,
-        request_id: Option<&str>,
-    ) -> Self {
+    pub fn request(method: &str, path: &str, request_id: Option<&str>) -> Self {
         Self {
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -183,11 +179,11 @@ impl LogEntry {
             let dur = self.duration_ms.unwrap_or(0.0);
             let rid = self.request_id.as_deref().unwrap_or("-");
             let status_color = match status {
-                200..=299 => "\x1b[32m",  // green
-                300..=399 => "\x1b[36m",  // cyan
-                400..=499 => "\x1b[33m",  // yellow
-                500..=599 => "\x1b[31m",  // red
-                _ => "\x1b[37m",          // white
+                200..=299 => "\x1b[32m", // green
+                300..=399 => "\x1b[36m", // cyan
+                400..=499 => "\x1b[33m", // yellow
+                500..=599 => "\x1b[31m", // red
+                _ => "\x1b[37m",         // white
             };
             return format!(
                 "{dim}{ts}{reset} {color}{:<5}{reset} \x1b[35m<--{reset} {method} {path} {status_color}{status}{reset} {dim}{dur:.2}ms{reset} {dim}[{rid}]{reset}",
@@ -218,7 +214,9 @@ fn format_timestamp(ts: f64) -> String {
     use chrono::{DateTime, TimeZone, Utc};
     let secs = ts as i64;
     let micros = ((ts - secs as f64) * 1_000_000.0) as u32;
-    let dt: DateTime<Utc> = Utc.timestamp_opt(secs, micros * 1_000).single()
+    let dt: DateTime<Utc> = Utc
+        .timestamp_opt(secs, micros * 1_000)
+        .single()
         .unwrap_or_else(Utc::now);
     // e.g. 2026-02-27T02:17:25.113520+00:00
     dt.format("%Y-%m-%dT%H:%M:%S%.6f+00:00").to_string()
@@ -411,7 +409,13 @@ pub fn log_response(
             return;
         }
     }
-    log_entry(LogEntry::response(method, path, status, duration_ms, request_id));
+    log_entry(LogEntry::response(
+        method,
+        path,
+        status,
+        duration_ms,
+        request_id,
+    ));
 }
 
 /// Consumer thread: drains the queue and writes to stderr.

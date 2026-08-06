@@ -299,7 +299,9 @@ impl DatabaseOperations {
         let mut chunks: Vec<Vec<Py<PyAny>>> = Vec::new();
         let mut current_chunk: Vec<Py<PyAny>> = Vec::new();
 
-        while let Some(row_result) = std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await {
+        while let Some(row_result) =
+            std::future::poll_fn(|cx| Pin::new(&mut stream).poll_next(cx)).await
+        {
             match row_result {
                 Ok(row) => {
                     let row_data: Py<PyAny> = ParameterBinder.bind_result(py, &row)?;

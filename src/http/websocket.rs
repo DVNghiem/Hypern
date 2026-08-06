@@ -3,11 +3,11 @@
 //! Provides `RustWebSocket` pyclass that wraps Axum's WebSocket with
 //! send/receive methods exposed to Python.
 
-use pyo3::prelude::*;
 use pyo3::exceptions::{PyConnectionError, PyValueError};
+use pyo3::prelude::*;
 
-use std::sync::Arc;
 use parking_lot::Mutex;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 /// Message types for WebSocket communication.

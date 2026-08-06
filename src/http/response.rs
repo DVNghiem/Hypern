@@ -180,10 +180,7 @@ impl ResponseSlot {
             .or_insert(HeaderValue::from_static("Hypern"));
 
         // Take body from the lock
-        let body_kind = std::mem::replace(
-            &mut *self.body.write(),
-            BodyKind::Buffered(Vec::new()),
-        );
+        let body_kind = std::mem::replace(&mut *self.body.write(), BodyKind::Buffered(Vec::new()));
 
         let http_body = match body_kind {
             BodyKind::Buffered(body_data) => {
@@ -595,21 +592,28 @@ impl Response {
                 let event = crate::http::streaming::SSEEvent::data(s);
                 Bytes::from(event.format().into_bytes())
             } else if let Ok(dict) = item.cast::<pyo3::types::PyDict>() {
-                let data = dict.get_item("data")?
+                let data = dict
+                    .get_item("data")?
                     .map(|v| v.extract::<String>())
                     .transpose()?
                     .unwrap_or_default();
-                let event_type = dict.get_item("event")?
+                let event_type = dict
+                    .get_item("event")?
                     .map(|v| v.extract::<String>())
                     .transpose()?;
-                let id = dict.get_item("id")?
+                let id = dict
+                    .get_item("id")?
                     .map(|v| v.extract::<String>())
                     .transpose()?;
-                let retry = dict.get_item("retry")?
+                let retry = dict
+                    .get_item("retry")?
                     .map(|v| v.extract::<u64>())
                     .transpose()?;
                 let event = crate::http::streaming::SSEEvent {
-                    id, event: event_type, data, retry,
+                    id,
+                    event: event_type,
+                    data,
+                    retry,
                 };
                 Bytes::from(event.format().into_bytes())
             } else {

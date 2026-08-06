@@ -414,10 +414,7 @@ impl MiddlewareContext {
 
     /// Get user ID if authenticated
     pub fn user_id(&self) -> Option<String> {
-        self.state
-            .read()
-            .as_ref()
-            .and_then(|s| s.user_id.clone())
+        self.state.read().as_ref().and_then(|s| s.user_id.clone())
     }
 
     /// Check if user has a role
@@ -484,9 +481,7 @@ impl MiddlewareContext {
             let parsed: HashMap<String, String> = if qs.is_empty() {
                 HashMap::new()
             } else {
-                form_urlencoded::parse(qs.as_bytes())
-                    .into_owned()
-                    .collect()
+                form_urlencoded::parse(qs.as_bytes()).into_owned().collect()
             };
             *qp = Some(parsed);
         }

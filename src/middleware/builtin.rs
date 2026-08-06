@@ -1415,9 +1415,8 @@ impl RustMiddleware for CacheMiddleware {
                 }
             }
 
-            let key_hash = crate::fast_path::json_cache::JsonResponseCache::compute_key_hash(
-                &path, &query,
-            );
+            let key_hash =
+                crate::fast_path::json_cache::JsonResponseCache::compute_key_hash(&path, &query);
 
             // Check cache for a hit
             if let Some(cached_bytes) = self.cache.get(key_hash) {
@@ -1430,10 +1429,7 @@ impl RustMiddleware for CacheMiddleware {
 
             // Cache miss — mark for downstream to populate
             ctx.set_state("x-cache", StateValue::String("MISS".to_string()));
-            ctx.set_state(
-                "cache_key_hash",
-                StateValue::String(key_hash.to_string()),
-            );
+            ctx.set_state("cache_key_hash", StateValue::String(key_hash.to_string()));
 
             MiddlewareResult::Continue()
         })

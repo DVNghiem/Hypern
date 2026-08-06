@@ -142,11 +142,7 @@ impl PresenceTracker {
         client_id: &str,
         metadata: Option<HashMap<String, String>>,
     ) -> PresenceInfo {
-        let info = PresenceInfo::new(
-            client_id.to_string(),
-            channel.to_string(),
-            metadata,
-        );
+        let info = PresenceInfo::new(client_id.to_string(), channel.to_string(), metadata);
 
         // Add to channel
         self.channels

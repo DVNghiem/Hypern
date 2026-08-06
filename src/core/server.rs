@@ -1,5 +1,7 @@
 use crate::core::multiprocess::{spawn_workers, terminate_workers, wait_for_workers};
-use crate::core::reload::{PyHealthCheck, PyReloadConfig, PyReloadManager, ReloadConfig, ReloadManager};
+use crate::core::reload::{
+    PyHealthCheck, PyReloadConfig, PyReloadManager, ReloadConfig, ReloadManager,
+};
 use crate::logging::{LogConfig, LogQueue, PyLogConfig};
 use crate::middleware::MiddlewareChain;
 use crate::routing::router::Router;
@@ -52,9 +54,9 @@ impl Server {
 
     /// Get the reload manager (created on start, available after start is called).
     pub fn get_reload_manager(&self) -> Option<PyReloadManager> {
-        self.reload_manager.as_ref().map(|rm| PyReloadManager {
-            inner: rm.clone(),
-        })
+        self.reload_manager
+            .as_ref()
+            .map(|rm| PyReloadManager { inner: rm.clone() })
     }
 
     /// Get the health check (created on start).
@@ -195,13 +197,18 @@ impl Server {
             // Wait for signal or worker exit
             loop {
                 // Graceful reload: SIGUSR1
-                if GRACEFUL_RELOAD.compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                if GRACEFUL_RELOAD
+                    .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
                     hlog_info!("Received SIGUSR1: graceful reload – draining workers...");
                     reload_manager.signal_graceful_reload();
 
                     // Send SIGUSR1 to all workers so they start draining
                     for &pid in &pids {
-                        unsafe { libc::kill(pid, libc::SIGUSR1); }
+                        unsafe {
+                            libc::kill(pid, libc::SIGUSR1);
+                        }
                     }
 
                     // Wait for drain timeout, then SIGTERM workers
@@ -215,7 +222,10 @@ impl Server {
                     // Respawn workers
                     let new_rm = ReloadManager::new(self.reload_config.clone());
                     let new_handlers: Vec<(u64, Py<PyAny>)> = Python::attach(|py| {
-                        self.router.iter().map(|r| (r.handler_hash(), r.function.clone_ref(py))).collect()
+                        self.router
+                            .iter()
+                            .map(|r| (r.handler_hash(), r.function.clone_ref(py)))
+                            .collect()
                     });
                     let new_socket = SocketHeld::new(host.clone(), port)?;
                     let new_pids = spawn_workers(
@@ -232,7 +242,10 @@ impl Server {
                     );
 
                     self.reload_manager = Some(new_rm.clone());
-                    hlog_info!("Graceful reload complete – {} new workers started", new_pids.len());
+                    hlog_info!(
+                        "Graceful reload complete – {} new workers started",
+                        new_pids.len()
+                    );
 
                     // Update pids for subsequent loops (we can't reassign pids since it's
                     // borrowed; just continue looping with old pids gone – workers were waited on)
@@ -244,20 +257,28 @@ impl Server {
                 }
 
                 // Hot reload: SIGUSR2 – kill immediately, restart
-                if HOT_RELOAD.compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                if HOT_RELOAD
+                    .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
                     hlog_info!("Received SIGUSR2: hot reload – killing workers...");
                     reload_manager.signal_hot_reload();
 
                     // Immediately kill workers
                     for &pid in &pids {
-                        unsafe { libc::kill(pid, libc::SIGKILL); }
+                        unsafe {
+                            libc::kill(pid, libc::SIGKILL);
+                        }
                     }
                     wait_for_workers(&pids);
 
                     // Respawn workers
                     let new_rm = ReloadManager::new(self.reload_config.clone());
                     let new_handlers: Vec<(u64, Py<PyAny>)> = Python::attach(|py| {
-                        self.router.iter().map(|r| (r.handler_hash(), r.function.clone_ref(py))).collect()
+                        self.router
+                            .iter()
+                            .map(|r| (r.handler_hash(), r.function.clone_ref(py)))
+                            .collect()
                     });
                     let new_socket = SocketHeld::new(host.clone(), port)?;
                     let new_pids = spawn_workers(
@@ -274,7 +295,10 @@ impl Server {
                     );
 
                     self.reload_manager = Some(new_rm.clone());
-                    hlog_info!("Hot reload complete – {} new workers started", new_pids.len());
+                    hlog_info!(
+                        "Hot reload complete – {} new workers started",
+                        new_pids.len()
+                    );
                     new_rm.reset_after_reload();
                     wait_for_workers(&new_pids);
                     break;
@@ -284,7 +308,9 @@ impl Server {
                     hlog_info!("Received shutdown signal, stopping workers...");
                     // Send SIGUSR1 to workers for brief drain before termination
                     for &pid in &pids {
-                        unsafe { libc::kill(pid, libc::SIGUSR1); }
+                        unsafe {
+                            libc::kill(pid, libc::SIGUSR1);
+                        }
                     }
                     // Brief grace period for in-flight requests
                     std::thread::sleep(std::time::Duration::from_secs(2));

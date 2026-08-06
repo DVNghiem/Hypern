@@ -33,7 +33,11 @@ impl ChannelStats {
     fn __repr__(&self) -> String {
         format!(
             "ChannelStats(name={:?}, subscribers={}, total_msgs={}, dropped={}, metadata={:?})",
-            self.name, self.subscriber_count, self.total_messages, self.dropped_messages, self.metadata
+            self.name,
+            self.subscriber_count,
+            self.total_messages,
+            self.dropped_messages,
+            self.metadata
         )
     }
 }

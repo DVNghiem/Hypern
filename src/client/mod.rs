@@ -67,11 +67,7 @@ impl HttpClient {
     ///     max_connections: Max idle connections per host (default: 20)
     #[new]
     #[pyo3(signature = (base_url = None, timeout = 30, max_connections = 20))]
-    pub fn new(
-        base_url: Option<String>,
-        timeout: u64,
-        max_connections: usize,
-    ) -> PyResult<Self> {
+    pub fn new(base_url: Option<String>, timeout: u64, max_connections: usize) -> PyResult<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .pool_max_idle_per_host(max_connections)

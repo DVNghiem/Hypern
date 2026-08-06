@@ -273,19 +273,38 @@ impl StaticFileHandler {
                 // Check If-None-Match for conditional requests
                 if let Some(inm) = if_none_match {
                     if inm == cached.etag {
-                        return Ok((Vec::new(), cached.content_type.clone(), cached.etag.clone(), 304));
+                        return Ok((
+                            Vec::new(),
+                            cached.content_type.clone(),
+                            cached.etag.clone(),
+                            304,
+                        ));
                     }
                 }
-                Ok((cached.as_bytes().to_vec(), cached.content_type.clone(), cached.etag.clone(), 200))
+                Ok((
+                    cached.as_bytes().to_vec(),
+                    cached.content_type.clone(),
+                    cached.etag.clone(),
+                    200,
+                ))
             }
             Err(StaticFileError::NotFound) if self.spa_mode => {
                 // SPA fallback: serve index.html
                 match self.serve(&self.index_file) {
-                    Ok(cached) => Ok((cached.as_bytes().to_vec(), cached.content_type.clone(), cached.etag.clone(), 200)),
-                    Err(_) => Err(pyo3::exceptions::PyFileNotFoundError::new_err("index.html not found")),
+                    Ok(cached) => Ok((
+                        cached.as_bytes().to_vec(),
+                        cached.content_type.clone(),
+                        cached.etag.clone(),
+                        200,
+                    )),
+                    Err(_) => Err(pyo3::exceptions::PyFileNotFoundError::new_err(
+                        "index.html not found",
+                    )),
                 }
             }
-            Err(e) => Err(pyo3::exceptions::PyFileNotFoundError::new_err(e.to_string())),
+            Err(e) => Err(pyo3::exceptions::PyFileNotFoundError::new_err(
+                e.to_string(),
+            )),
         }
     }
 

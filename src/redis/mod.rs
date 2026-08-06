@@ -160,9 +160,6 @@ impl RedisPool {
     }
 
     fn __repr__(&self) -> String {
-        format!(
-            "RedisPool(max_size={})",
-            self.pool.status().max_size
-        )
+        format!("RedisPool(max_size={})", self.pool.status().max_size)
     }
 }

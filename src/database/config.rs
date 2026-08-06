@@ -1,3 +1,4 @@
+use log::LevelFilter;
 use pyo3::prelude::*;
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -5,7 +6,6 @@ use sqlx::{
 };
 use std::collections::HashMap;
 use std::time::Duration;
-use log::LevelFilter;
 
 #[derive(Debug, Clone, Default)]
 #[pyclass(from_py_object)]

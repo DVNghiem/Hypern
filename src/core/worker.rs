@@ -96,7 +96,8 @@ fn health_liveness(rm: ReloadManager) -> impl IntoResponse {
     let code = rm.health().liveness_code();
     let body = rm.health().to_json();
     (
-        axum::http::StatusCode::from_u16(code).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        axum::http::StatusCode::from_u16(code)
+            .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         body,
     )
@@ -106,7 +107,8 @@ fn health_readiness(rm: ReloadManager) -> impl IntoResponse {
     let code = rm.health().readiness_code();
     let body = rm.health().to_json();
     (
-        axum::http::StatusCode::from_u16(code).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        axum::http::StatusCode::from_u16(code)
+            .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         body,
     )
@@ -116,17 +118,23 @@ fn health_startup(rm: ReloadManager) -> impl IntoResponse {
     let code = rm.health().startup_code();
     let body = rm.health().to_json();
     (
-        axum::http::StatusCode::from_u16(code).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        axum::http::StatusCode::from_u16(code)
+            .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         body,
     )
 }
 
 fn health_status(rm: ReloadManager) -> impl IntoResponse {
-    let code = if rm.health().status().is_live() { 200u16 } else { 503u16 };
+    let code = if rm.health().status().is_live() {
+        200u16
+    } else {
+        503u16
+    };
     let body = rm.health().to_json();
     (
-        axum::http::StatusCode::from_u16(code).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        axum::http::StatusCode::from_u16(code)
+            .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         body,
     )
@@ -141,7 +149,9 @@ async fn handle_request(State(state): State<AppState>, req: Request<Body>) -> im
             .header("Content-Type", "application/json")
             .header("Connection", "close")
             .header("Retry-After", "5")
-            .body(Body::from(r#"{"error":"service_draining","message":"Server is reloading, please retry"}"#))
+            .body(Body::from(
+                r#"{"error":"service_draining","message":"Server is reloading, please retry"}"#,
+            ))
             .unwrap();
     }
 
@@ -389,7 +399,11 @@ pub fn run_worker(
     rt.spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(startup_grace)).await;
         rm_startup.health().mark_healthy();
-        crate::hlog_info!("Worker {} marked healthy after {}s grace period", worker_id, startup_grace);
+        crate::hlog_info!(
+            "Worker {} marked healthy after {}s grace period",
+            worker_id,
+            startup_grace
+        );
     });
 
     rt.spawn(async move {

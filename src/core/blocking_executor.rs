@@ -287,11 +287,7 @@ impl BlockingExecutor {
             let args = unsafe {
                 let tuple_ptr = pyo3::ffi::PyTuple_New(2);
                 pyo3::ffi::PyTuple_SetItem(tuple_ptr, 0, callable_ref.into_ptr());
-                pyo3::ffi::PyTuple_SetItem(
-                    tuple_ptr,
-                    1,
-                    chunk_list.into_any().into_ptr(),
-                );
+                pyo3::ffi::PyTuple_SetItem(tuple_ptr, 1, chunk_list.into_any().into_ptr());
                 Bound::from_owned_ptr(py, tuple_ptr)
                     .cast_into_unchecked::<PyTuple>()
                     .unbind()

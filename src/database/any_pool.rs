@@ -145,9 +145,12 @@ impl AnyPool {
 }
 
 /// Convert a sqlx `AnyRow` to a Python dict.
-fn any_row_to_dict<'py>(py: Python<'py>, row: &sqlx::any::AnyRow) -> PyResult<pyo3::Bound<'py, PyDict>> {
-    use sqlx::Row;
+fn any_row_to_dict<'py>(
+    py: Python<'py>,
+    row: &sqlx::any::AnyRow,
+) -> PyResult<pyo3::Bound<'py, PyDict>> {
     use sqlx::Column;
+    use sqlx::Row;
     use sqlx::TypeInfo;
 
     let dict = PyDict::new(py);
@@ -184,8 +187,7 @@ fn any_row_to_dict<'py>(py: Python<'py>, row: &sqlx::any::AnyRow) -> PyResult<py
                     None => py.None(),
                 }
             }
-            "BLOB" | "BYTEA" | "BINARY" | "VARBINARY" | "TINYBLOB" | "MEDIUMBLOB"
-            | "LONGBLOB" => {
+            "BLOB" | "BYTEA" | "BINARY" | "VARBINARY" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" => {
                 let v: Option<Vec<u8>> = row.try_get(i).ok();
                 match v {
                     Some(b) => b.into_pyobject(py)?.into_any().unbind(),

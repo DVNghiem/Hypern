@@ -280,12 +280,7 @@ impl RealtimeBroadcast {
     /// Send a message to a broadcast channel
     /// Returns number of receivers, or raises on error if policy is Error
     #[pyo3(signature = (name, message, message_id=None))]
-    pub fn send(
-        &self,
-        name: &str,
-        message: &str,
-        message_id: Option<&str>,
-    ) -> PyResult<usize> {
+    pub fn send(&self, name: &str, message: &str, message_id: Option<&str>) -> PyResult<usize> {
         let channel = self.channels.get(name).ok_or_else(|| {
             pyo3::exceptions::PyKeyError::new_err(format!(
                 "Broadcast channel '{}' does not exist",
