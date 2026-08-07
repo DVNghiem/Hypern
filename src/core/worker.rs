@@ -1,7 +1,9 @@
+use axum::body::HttpBody;
 use axum::{body::Body, extract::State, http::Request, response::IntoResponse, Router};
 use pyo3::prelude::*;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use xxhash_rust::xxh3::xxh3_64;
 
 use crate::core::interpreter::http_execute;
 use crate::core::reload::ReloadManager;
@@ -160,30 +162,79 @@ async fn handle_request(State(state): State<AppState>, req: Request<Body>) -> im
     let rm = state.reload_manager.clone();
 
     // Capture method and path for logging before consuming request
+    // Generate request_id upfront using xxh3_64 (same pattern as MiddlewareContext)
+    let id_seed = format!("{}{}", req.uri().path(), req.method());
+    let request_id = req
+        .headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or(s).trim().to_string())
+        .unwrap_or_else(|| format!("{:016x}", xxh3_64(id_seed.as_bytes())));
+    
     let method_str = req.method().to_string();
     let path_str = req.uri().path().to_string();
+    let body_size = req.body().size_hint().upper().unwrap_or(0);
     let start = std::time::Instant::now();
+
+    // Extract client_ip and user_agent before consuming req
+    let client_ip = req
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or(s).trim().to_string())
+        .unwrap_or_else(|| "-".to_string());
+
+    let user_agent = req
+        .headers()
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-");
 
     // Log incoming request
     log::info!(
-        "Incoming request: {} {}",
+        "Incoming request {} {} {} {} user-agent: {}, content-length: {} bytes",
         method_str,
-        path_str
+        path_str,
+        request_id,
+        client_ip,
+        user_agent,
+        body_size
     );
 
     // Execute the actual handler and ensure we decrement on exit
-    let response = handle_request_inner(&state, req).await;
+    let response = handle_request_inner(&state, req, request_id.clone()).await;
 
     // Log response
     let status = response.status().as_u16();
     let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
-    log::info!(
-        "Response: {} {} - Status: {}, Duration: {:.2} ms",
-        method_str,
-        path_str,
-        status,
-        duration_ms
-    );
+    let latency_ms = duration_ms as u64;
+
+    match status {
+        200..=399 => log::info!(
+            "Request handled {} {} {} {} in {}ms", 
+            request_id,
+            method_str,
+            path_str,
+            status,
+            latency_ms
+        ),
+        400..=499 => log::warn!(
+            "Client error {} {} {} {} in {}ms",
+            request_id,
+            method_str,
+            path_str,
+            status,
+            latency_ms
+        ),
+        _ => log::error!(
+            "Server error {} {} {} {} in {}ms",
+            request_id,
+            method_str,
+            path_str,
+            status,
+            latency_ms
+        ),
+    }
 
     // Decrement in-flight and notify drain if needed
     rm.on_request_complete();
@@ -192,7 +243,11 @@ async fn handle_request(State(state): State<AppState>, req: Request<Body>) -> im
 }
 
 /// Inner request handler logic (separated for clean in-flight tracking)
-async fn handle_request_inner(state: &AppState, req: Request<Body>) -> axum::http::Response<Body> {
+async fn handle_request_inner(
+    state: &AppState,
+    req: Request<Body>,
+    request_id: String,
+) -> axum::http::Response<Body> {
     // Convert Axum request to Hypern request
     let fast_req = HypernRequest::from_axum(req).await;
 
@@ -205,6 +260,7 @@ async fn handle_request_inner(state: &AppState, req: Request<Body>) -> axum::htt
         let method = HttpMethod::from_str(fast_req.method().as_str()).unwrap_or(HttpMethod::GET);
         let headers_map = fast_req.headers_map();
         let mw_ctx = MiddlewareContext::new(
+            Arc::from(request_id.as_str()),
             fast_req.path(),
             method,
             headers_map,
@@ -464,5 +520,5 @@ pub async fn handle_request_standalone(
         middleware,
         reload_manager,
     };
-    handle_request_inner(&state, req).await
+    handle_request_inner(&state, req, String::new()).await
 }

@@ -444,18 +444,14 @@ impl MiddlewareContext {
     /// Create a new context from request data
     /// Optimized: lazy initialization of query_params and state
     pub fn new(
+        request_id: Arc<str>,
         path: &str,
         method: HttpMethod,
         headers: HashMap<String, String>,
         query_string: &str,
         body: Option<Bytes>,
     ) -> Self {
-        use xxhash_rust::xxh3::xxh3_64;
-
-        // Generate request ID using fast hash - avoid format! allocation
         let now = std::time::Instant::now();
-        let id_seed = format!("{}{}{:?}", path, query_string, now);
-        let request_id = format!("{:016x}", xxh3_64(id_seed.as_bytes()));
 
         // Don't parse query params eagerly - defer to first access
         Self {
@@ -469,7 +465,7 @@ impl MiddlewareContext {
             state: Arc::new(RwLock::new(None)), // Lazy - initialized on demand
             response_headers: Arc::new(RwLock::new(Vec::new())),
             start_time: now,
-            request_id: Arc::from(request_id),
+            request_id,
         }
     }
 

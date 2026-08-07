@@ -84,7 +84,7 @@ prost = "0.13"
 
 # Log
 pyo3-log = "0.13.4"
-log = "0.4.33"
+log = { version = "0.4", features = ["kv", "kv_std"] }
 
 [target.'cfg(not(any(target_env = "musl", target_os = "freebsd", target_os = "openbsd", target_os = "windows")))'.dependencies]
 tikv-jemallocator = { version = "0.6.1", default-features = false, features = ["disable_initial_exec_tls"] }
