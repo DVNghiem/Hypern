@@ -1292,6 +1292,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-stream",
  "tonic",
+ "url",
  "uuid",
  "xxhash-rust",
 ]
@@ -2319,6 +2320,7 @@ dependencies = [
  "pkcs1",
  "pkcs8 0.10.2",
  "rand_core 0.6.4",
+ "sha2 0.10.9",
  "signature 2.2.0",
  "spki 0.7.3",
  "subtle",

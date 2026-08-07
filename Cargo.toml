@@ -67,12 +67,13 @@ sha2 = "0.11.0"
 hmac = "0.13.0"
 
 # JWT RS256/ES256 support
-rsa = "0.9"
-p256 = { version = "0.14.0", features = ["ecdsa"] }
+rsa = { version = "0.9.10", features = ["sha2"] }
+p256 = { version = "0.14.0", features = ["ecdsa", "sha2"] }
 signature = "3.0.0"
 
 # Async HTTP client
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "gzip"] }
+url = "2.5"
 
 # Redis
 redis = { version = "1.5.0", features = ["tokio-comp", "connection-manager"] }

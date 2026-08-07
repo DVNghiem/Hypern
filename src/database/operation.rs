@@ -12,7 +12,8 @@ use pyo3::{
 };
 use serde_json::to_string;
 use sqlx::{
-    postgres::{PgArguments, PgRow},
+    postgres::PgRow,
+    query_builder::QueryBuilder,
     types::{Json, JsonValue},
     Column, Row, ValueRef,
 };
@@ -76,26 +77,26 @@ impl RowStream {
 pub struct ParameterBinder;
 
 impl ParameterBinder {
-    fn bind_parameters<'q>(
+    fn bind_parameters(
         &self,
         py: Python<'_>,
-        query: &'q str,
+        query: String,
         params: Vec<Py<PyAny>>,
-    ) -> Result<sqlx::query::Query<'q, sqlx::Postgres, PgArguments>, PyErr> {
-        let mut query_builder = sqlx::query(query);
+    ) -> Result<sqlx::query_builder::QueryBuilder<sqlx::Postgres>, PyErr> {
+        let mut query_builder = QueryBuilder::<sqlx::Postgres>::new(&query);
 
         for param in params {
             let p = param.bind(py);
-            query_builder = if p.is_none() {
-                query_builder.bind(None::<Option<String>>)
+            if p.is_none() {
+                query_builder.push_bind(None::<Option<String>>);
             } else if p.is_instance_of::<PyString>() {
-                query_builder.bind(p.extract::<String>()?)
+                query_builder.push_bind(p.extract::<String>()?);
             } else if p.is_instance_of::<PyBool>() {
-                query_builder.bind(p.extract::<bool>()?)
+                query_builder.push_bind(p.extract::<bool>()?);
             } else if p.is_instance_of::<PyInt>() {
-                query_builder.bind(p.extract::<i64>()?)
+                query_builder.push_bind(p.extract::<i64>()?);
             } else if p.is_instance_of::<PyFloat>() {
-                query_builder.bind(p.extract::<f64>()?)
+                query_builder.push_bind(p.extract::<f64>()?);
             } else if p.is_instance_of::<PyDateTime>() {
                 let dt = p.cast::<PyDateTime>()?;
                 let naive_dt = NaiveDateTime::new(
@@ -113,7 +114,7 @@ impl ParameterBinder {
                     )
                     .unwrap(),
                 );
-                query_builder.bind(naive_dt)
+                query_builder.push_bind(naive_dt);
             } else if p.is_instance_of::<PyDate>() {
                 let date = p.cast::<PyDate>()?;
                 let naive_date = NaiveDate::from_ymd_opt(
@@ -122,7 +123,7 @@ impl ParameterBinder {
                     date.get_day() as u32,
                 )
                 .unwrap();
-                query_builder.bind(naive_date)
+                query_builder.push_bind(naive_date);
             } else if p.is_instance_of::<PyTime>() {
                 let time = p.cast::<PyTime>()?;
                 let naive_time = NaiveTime::from_hms_nano_opt(
@@ -132,23 +133,23 @@ impl ParameterBinder {
                     time.get_microsecond() as u32 * 1000,
                 )
                 .unwrap();
-                query_builder.bind(naive_time)
+                query_builder.push_bind(naive_time);
             } else if p.is_instance_of::<PyDict>() {
                 let dict = p.cast::<PyDict>()?;
                 let json_value: JsonValue =
                     serde_json::from_str(&dict.to_string()).unwrap_or(JsonValue::Null);
-                query_builder.bind(Json(json_value))
+                query_builder.push_bind(Json(json_value));
             } else if p.is_instance_of::<PyList>() {
                 let list = p.cast::<PyList>()?;
                 let json_value: JsonValue =
                     serde_json::from_str(&list.to_string()).unwrap_or(JsonValue::Null);
-                query_builder.bind(Json(json_value))
+                query_builder.push_bind(Json(json_value));
             } else {
                 return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
                     "Unsupported parameter type: {:?}",
                     p.get_type()
                 )));
-            };
+            }
         }
 
         Ok(query_builder)
@@ -251,10 +252,11 @@ impl DatabaseOperations {
         query: &str,
         params: Vec<Py<PyAny>>,
     ) -> Result<u64, PyErr> {
-        let query_builder = ParameterBinder.bind_parameters(py, query, params)?;
+        let mut query_builder = ParameterBinder.bind_parameters(py, query.to_string(), params)?;
         let mut guard = transaction.lock().await;
         let transaction = guard.as_mut().unwrap();
         let result = query_builder
+            .build()
             .execute(&mut **transaction)
             .await
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
@@ -270,10 +272,11 @@ impl DatabaseOperations {
         query: &str,
         params: Vec<Py<PyAny>>,
     ) -> Result<Vec<Py<PyAny>>, PyErr> {
-        let query_builder = ParameterBinder.bind_parameters(py, query, params)?;
+        let mut query_builder = ParameterBinder.bind_parameters(py, query.to_string(), params)?;
         let mut guard = transaction.lock().await;
         let transaction = guard.as_mut().unwrap();
         let rows = query_builder
+            .build()
             .fetch_all(&mut **transaction)
             .await
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
@@ -293,9 +296,9 @@ impl DatabaseOperations {
         params: Vec<Py<PyAny>>,
         chunk_size: usize,
     ) -> PyResult<RowStream> {
-        let query_builder = ParameterBinder.bind_parameters(py, query, params)?;
+        let mut query_builder = ParameterBinder.bind_parameters(py, query.to_string(), params)?;
         let mut guard = transaction.lock().await.take().unwrap();
-        let mut stream = query_builder.fetch(&mut *guard);
+        let mut stream = query_builder.build().fetch(&mut *guard);
         let mut chunks: Vec<Vec<Py<PyAny>>> = Vec::new();
         let mut current_chunk: Vec<Py<PyAny>> = Vec::new();
 
@@ -345,8 +348,8 @@ impl DatabaseOperations {
             for param_set in chunk {
                 let cloned_params: Vec<Py<PyAny>> =
                     param_set.iter().map(|p| p.clone_ref(py)).collect();
-                let query_builder = ParameterBinder.bind_parameters(py, query, cloned_params)?;
-                let result = query_builder.execute(&mut **tx).await.map_err(|e| {
+                let mut query_builder = ParameterBinder.bind_parameters(py, query.to_string(), cloned_params)?;
+                let result = query_builder.build().execute(&mut **tx).await.map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())
                 })?;
 

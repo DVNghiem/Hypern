@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use url::Url;
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -57,6 +58,15 @@ pub struct HttpClient {
     rt: tokio::runtime::Runtime,
 }
 
+impl HttpClient {
+    fn build_full_url(&self, url: &str) -> Url {
+        match &self.base_url {
+            Some(base) => Url::parse(base).unwrap().join(url).unwrap(),
+            None => Url::parse(url).unwrap(),
+        }
+    }
+}
+
 #[pymethods]
 impl HttpClient {
     /// Create a new HTTP client
@@ -92,15 +102,28 @@ impl HttpClient {
         headers: Option<HashMap<String, String>>,
         params: Option<HashMap<String, String>>,
     ) -> PyResult<ClientResponse> {
-        let full_url = self.build_url(&url);
-        let mut req = self.client.get(&full_url);
-        if let Some(h) = headers {
+        let full_url = self.build_full_url(&url);
+        let mut req = self.client.get(full_url);
+        if let Some(ref h) = headers {
             for (k, v) in h {
                 req = req.header(k, v);
             }
         }
-        if let Some(p) = params {
-            req = req.query(&p);
+        if let Some(ref p) = params {
+            let mut url = self.build_full_url(&url);
+            {
+                let mut query = url.query_pairs_mut();
+                for (k, v) in p.iter() {
+                    let value = serde_json::to_string(v).unwrap();
+                    query.append_pair(k.as_str(), &value);
+                }
+            }
+            req = self.client.request(reqwest::Method::GET, url.to_string());
+            if let Some(ref h) = headers {
+                for (k, v) in h {
+                    req = req.header(k, v);
+                }
+            }
         }
         self.rt.block_on(send_request(req))
     }
@@ -114,8 +137,8 @@ impl HttpClient {
         json: Option<String>,
         body: Option<Vec<u8>>,
     ) -> PyResult<ClientResponse> {
-        let full_url = self.build_url(&url);
-        let mut req = self.client.post(&full_url);
+        let full_url = self.build_full_url(&url);
+        let mut req = self.client.post(full_url);
         if let Some(h) = headers {
             for (k, v) in h {
                 req = req.header(k, v);
@@ -138,8 +161,8 @@ impl HttpClient {
         json: Option<String>,
         body: Option<Vec<u8>>,
     ) -> PyResult<ClientResponse> {
-        let full_url = self.build_url(&url);
-        let mut req = self.client.put(&full_url);
+        let full_url = self.build_full_url(&url);
+        let mut req = self.client.put(full_url);
         if let Some(h) = headers {
             for (k, v) in h {
                 req = req.header(k, v);
@@ -162,8 +185,8 @@ impl HttpClient {
         json: Option<String>,
         body: Option<Vec<u8>>,
     ) -> PyResult<ClientResponse> {
-        let full_url = self.build_url(&url);
-        let mut req = self.client.patch(&full_url);
+        let full_url = self.build_full_url(&url);
+        let mut req = self.client.patch(full_url);
         if let Some(h) = headers {
             for (k, v) in h {
                 req = req.header(k, v);
@@ -184,8 +207,8 @@ impl HttpClient {
         url: String,
         headers: Option<HashMap<String, String>>,
     ) -> PyResult<ClientResponse> {
-        let full_url = self.build_url(&url);
-        let mut req = self.client.delete(&full_url);
+        let full_url = self.build_full_url(&url);
+        let mut req = self.client.delete(full_url);
         if let Some(h) = headers {
             for (k, v) in h {
                 req = req.header(k, v);
@@ -198,22 +221,6 @@ impl HttpClient {
         match &self.base_url {
             Some(url) => format!("HttpClient(base_url={:?})", url),
             None => "HttpClient()".to_string(),
-        }
-    }
-}
-
-impl HttpClient {
-    fn build_url(&self, url: &str) -> String {
-        match &self.base_url {
-            Some(base) => {
-                let base = base.trim_end_matches('/');
-                if url.starts_with('/') {
-                    format!("{}{}", base, url)
-                } else {
-                    format!("{}/{}", base, url)
-                }
-            }
-            None => url.to_string(),
         }
     }
 }
