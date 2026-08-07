@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import functools
 import inspect
-from typing import Callable
+from collections.abc import Callable
 
 
 def inject(*names: str) -> Callable:

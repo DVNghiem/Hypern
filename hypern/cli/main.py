@@ -3,8 +3,8 @@
 import argparse
 import sys
 
-from .scaffolding import NewCommand
 from .run import RunCommand
+from .scaffolding import NewCommand
 
 # ANSI colours for HTTP methods
 _METHOD_COLORS = {

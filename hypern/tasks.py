@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import functools
-from typing import Callable, Optional, TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from hypern._hypern import TaskExecutor, TaskResult
 
 # Global task executor instance (will be set by the Hypern app)
-_task_executor: Optional['TaskExecutor'] = None
+_task_executor: TaskExecutor | None = None
 
 
-def set_task_executor(executor: 'TaskExecutor') -> None:
+def set_task_executor(executor: TaskExecutor) -> None:
     """
     Set the global task executor.
     
@@ -24,7 +25,7 @@ def set_task_executor(executor: 'TaskExecutor') -> None:
     _task_executor = executor
 
 
-def get_task_executor() -> Optional['TaskExecutor']:
+def get_task_executor() -> TaskExecutor | None:
     """
     Get the global task executor.
     
@@ -35,7 +36,7 @@ def get_task_executor() -> Optional['TaskExecutor']:
 
 
 def background(
-    delay_seconds: Optional[float] = None
+    delay_seconds: float | None = None
 ) -> Callable:
     """
     Decorator to run a function as a background task.
@@ -88,8 +89,8 @@ def background(
 def submit_task(
     handler: Callable, 
     args: tuple = (),
-    delay_seconds: Optional[float] = None
-) -> Optional[str]:
+    delay_seconds: float | None = None
+) -> str | None:
     """
     Submit a background task programmatically.
     
@@ -134,7 +135,7 @@ def submit_task(
     return None
 
 
-def get_task(task_id: str) -> Optional['TaskResult']:
+def get_task(task_id: str) -> TaskResult | None:
     """
     Get the result of a background task.
     
@@ -169,8 +170,8 @@ def get_task(task_id: str) -> Optional['TaskResult']:
 
 __all__ = [
     'background',
-    'submit_task',
     'get_task',
     'get_task_executor',
     'set_task_executor',
+    'submit_task',
 ]

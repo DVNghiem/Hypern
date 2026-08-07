@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import os
-
 import typing
 import warnings
 from pathlib import Path
+
 """
 
 refer: https://github.com/encode/starlette/blob/master/starlette/config.py
@@ -121,7 +120,7 @@ class Config:
     def _read_file(self, file_name: str | Path) -> dict[str, str]:
         file_values: dict[str, str] = {}
         with open(file_name) as input_file:
-            for line in input_file.readlines():
+            for line in input_file.readlines():  # noqa: FURB129
                 line = line.strip()
                 if "=" in line and not line.startswith("#"):
                     key, value = line.split("=", 1)

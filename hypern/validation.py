@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import functools
 import inspect
-from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar, Union, get_args, get_origin
+from collections.abc import Callable
+from typing import Any, Generic, TypeVar, Union, get_args, get_origin
 
 import msgspec
 from msgspec import Struct, field
@@ -16,9 +17,9 @@ class ValidationError(Exception):
     def __init__(
         self,
         message: str,
-        field: Optional[str] = None,
+        field: str | None = None,
         value: Any = None,
-        errors: Optional[List[Dict[str, Any]]] = None
+        errors: list[dict[str, Any]] | None = None
     ):
         self.message = message
         self.field = field
@@ -26,7 +27,7 @@ class ValidationError(Exception):
         self.errors = errors or []
         super().__init__(message)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert error to dictionary for JSON response."""
         result = {"message": self.message}
         if self.field:
@@ -50,12 +51,12 @@ class Validator(Generic[T]):
         user = validator.validate({"name": "John", "email": "john@example.com", "age": 25})
     """
     
-    def __init__(self, schema: Type[T]):
+    def __init__(self, schema: type[T]): # type: ignore
         self.schema = schema
         self._decoder = msgspec.json.Decoder(schema)
         self._encoder = msgspec.json.Encoder()
     
-    def validate(self, data: Union[bytes, str, Dict[str, Any]]) -> T:
+    def validate(self, data: bytes | str | dict[str, Any]) -> T:
         """Validate data against the schema."""
         try:
             if isinstance(data, dict):
@@ -75,7 +76,7 @@ class Validator(Generic[T]):
                 errors=[{"type": "decode_error", "msg": str(e)}]
             )
     
-    def validate_with_coercion(self, data: Dict[str, Any]) -> T:
+    def validate_with_coercion(self, data: dict[str, Any]) -> T:
         """
         Validate data with type coercion for string values.
         Useful for query parameters and path params which come as strings.
@@ -86,13 +87,13 @@ class Validator(Generic[T]):
             return self.validate(coerced_data)
         except ValidationError:
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             raise ValidationError(
-                message=f"Type coercion failed: {e}",
+                message=f"type coercion failed: {e}",
                 errors=[{"type": "coercion_error", "msg": str(e)}]
             )
     
-    def _coerce_types(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _coerce_types(self, data: dict[str, Any]) -> dict[str, Any]:
         """Coerce string values to expected types based on schema annotations."""
         result = {}
         hints = getattr(self.schema, '__annotations__', {})
@@ -127,7 +128,7 @@ class Validator(Generic[T]):
         
         return result
     
-    def validate_partial(self, data: Union[bytes, str, Dict[str, Any]], exclude: Optional[List[str]] = None) -> T:
+    def validate_partial(self, data: bytes | str | dict[str, Any], exclude: list[str] | None = None) -> T:
         """Validate data with optional fields excluded."""
         # For partial validation, we need to handle missing fields
         if isinstance(data, (bytes, str)):
@@ -138,7 +139,7 @@ class Validator(Generic[T]):
         return self.validate(data)
 
 
-def validate_body(schema: Type[T]) -> Callable:
+def validate_body(schema: type[T]) -> Callable:
     """
     Decorator to validate request body against a msgspec schema.
     
@@ -182,7 +183,7 @@ def validate_body(schema: Type[T]) -> Callable:
     return decorator
 
 
-def validate_query(schema: Type[T]) -> Callable:
+def validate_query(schema: type[T]) -> Callable:
     """
     Decorator to validate query parameters against a msgspec schema.
     
@@ -227,7 +228,7 @@ def validate_query(schema: Type[T]) -> Callable:
     return decorator
 
 
-def validate_params(schema: Type[T]) -> Callable:
+def validate_params(schema: type[T]) -> Callable:
     """
     Decorator to validate path parameters against a msgspec schema.
     
@@ -271,9 +272,9 @@ def validate_params(schema: Type[T]) -> Callable:
 
 
 def validate(
-    body: Optional[Type] = None,
-    query: Optional[Type] = None,
-    params: Optional[Type] = None
+    body: type | None = None,
+    query: type | None = None,
+    params: type | None = None
 ) -> Callable:
     """
     Combined decorator for validating body, query, and params.
@@ -348,12 +349,12 @@ def validate(
 
 
 __all__ = [
+    'Struct',
     'ValidationError',
     'Validator',
-    'validate_body',
-    'validate_query',
-    'validate_params',
-    'validate',
-    'Struct',
     'field',
+    'validate',
+    'validate_body',
+    'validate_params',
+    'validate_query',
 ]

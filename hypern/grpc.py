@@ -18,7 +18,7 @@ Example::
 
 from __future__ import annotations
 
-from typing import Callable, Dict
+from collections.abc import Callable
 
 from hypern._hypern import GrpcConfig, GrpcServer
 
@@ -50,9 +50,9 @@ class GrpcRoute:
                 return b"Hello!"
     """
 
-    def get_methods(self) -> Dict[str, Callable]:
+    def get_methods(self) -> dict[str, Callable]:
         """Return a mapping of ``"service/method"`` to handler callables."""
-        methods: Dict[str, Callable] = {}
+        methods: dict[str, Callable] = {}
         for attr_name in dir(self):
             attr = getattr(self, attr_name, None)
             if callable(attr) and hasattr(attr, "_grpc_service"):
@@ -63,7 +63,7 @@ class GrpcRoute:
 
 __all__ = [
     "GrpcConfig",
-    "GrpcServer",
     "GrpcRoute",
+    "GrpcServer",
     "grpc_method",
 ]

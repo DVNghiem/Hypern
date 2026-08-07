@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import functools
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Any
 
 from hypern._hypern import Route as RustRoute
 from hypern._hypern import Router as RustRouter
@@ -36,11 +37,11 @@ class Router:
     
     def __init__(self, prefix: str = ""):
         self.prefix = prefix.rstrip("/")
-        self._routes: List[Tuple[str, str, Callable, Dict[str, Any]]] = []
-        self._middleware: List[Callable] = []
-        self._before_handlers: List[Callable] = []
-        self._after_handlers: List[Callable] = []
-        self._error_handlers: Dict[type, Callable] = {}
+        self._routes: list[tuple[str, str, Callable, dict[str, Any]]] = []
+        self._middleware: list[Callable] = []
+        self._before_handlers: list[Callable] = []
+        self._after_handlers: list[Callable] = []
+        self._error_handlers: dict[type, Callable] = {}
         self._rust_router = RustRouter(path=prefix)
     
     def _normalize_path(self, path: str) -> str:
@@ -56,7 +57,7 @@ class Router:
         """
         return path
     
-    def route(self, path: str) -> 'RouteBuilder':
+    def route(self, path: str) -> RouteBuilder:
         """
         Create a route builder for chaining HTTP methods.
         
@@ -72,7 +73,7 @@ class Router:
         method: str,
         path: str,
         handler: Callable,
-        middleware: Optional[List[Callable]] = None,
+        middleware: list[Callable] | None = None,
         **options
     ):
         """Internal method to add a route."""
@@ -96,7 +97,7 @@ class Router:
         )
         self._rust_router.add_route(route)
     
-    def _wrap_with_middleware(self, handler: Callable, middleware: List[Callable]) -> Callable:
+    def _wrap_with_middleware(self, handler: Callable, middleware: list[Callable]) -> Callable:
         """Wrap a handler with middleware chain."""
         @functools.wraps(handler)
         async def wrapped(req, res):
@@ -121,56 +122,56 @@ class Router:
         
         return wrapped
     
-    def get(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def get(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register a GET route."""
         def decorator(handler: Callable) -> Callable:
             self._add_route("GET", path, handler, middleware, **options)
             return handler
         return decorator
     
-    def post(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def post(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register a POST route."""
         def decorator(handler: Callable) -> Callable:
             self._add_route("POST", path, handler, middleware, **options)
             return handler
         return decorator
     
-    def put(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def put(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register a PUT route."""
         def decorator(handler: Callable) -> Callable:
             self._add_route("PUT", path, handler, middleware, **options)
             return handler
         return decorator
     
-    def delete(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def delete(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register a DELETE route."""
         def decorator(handler: Callable) -> Callable:
             self._add_route("DELETE", path, handler, middleware, **options)
             return handler
         return decorator
     
-    def patch(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def patch(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register a PATCH route."""
         def decorator(handler: Callable) -> Callable:
             self._add_route("PATCH", path, handler, middleware, **options)
             return handler
         return decorator
     
-    def options(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def options(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register an OPTIONS route."""
         def decorator(handler: Callable) -> Callable:
             self._add_route("OPTIONS", path, handler, middleware, **options)
             return handler
         return decorator
     
-    def head(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def head(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register a HEAD route."""
         def decorator(handler: Callable) -> Callable:
             self._add_route("HEAD", path, handler, middleware, **options)
             return handler
         return decorator
     
-    def all(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def all(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register a route for all HTTP methods."""
         def decorator(handler: Callable) -> Callable:
             for method in ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]:
@@ -178,7 +179,7 @@ class Router:
             return handler
         return decorator
     
-    def use(self, middleware: Callable) -> 'Router':
+    def use(self, middleware: Callable) -> Router:
         """
         Add middleware to this router.
         
@@ -245,7 +246,7 @@ class Router:
             return handler
         return decorator
     
-    def get_routes(self) -> List[Tuple[str, str, Callable]]:
+    def get_routes(self) -> list[tuple[str, str, Callable]]:
         """Get all registered routes."""
         return [(method, path, handler) for method, path, handler, _ in self._routes]
     
@@ -270,42 +271,42 @@ class RouteBuilder:
         self.router = router
         self.path = path
     
-    def get(self, handler: Callable, **options) -> 'RouteBuilder':
+    def get(self, handler: Callable, **options) -> RouteBuilder:
         """Add GET handler."""
         self.router._add_route("GET", self.path, handler, **options)
         return self
     
-    def post(self, handler: Callable, **options) -> 'RouteBuilder':
+    def post(self, handler: Callable, **options) -> RouteBuilder:
         """Add POST handler."""
         self.router._add_route("POST", self.path, handler, **options)
         return self
     
-    def put(self, handler: Callable, **options) -> 'RouteBuilder':
+    def put(self, handler: Callable, **options) -> RouteBuilder:
         """Add PUT handler."""
         self.router._add_route("PUT", self.path, handler, **options)
         return self
     
-    def delete(self, handler: Callable, **options) -> 'RouteBuilder':
+    def delete(self, handler: Callable, **options) -> RouteBuilder:
         """Add DELETE handler."""
         self.router._add_route("DELETE", self.path, handler, **options)
         return self
     
-    def patch(self, handler: Callable, **options) -> 'RouteBuilder':
+    def patch(self, handler: Callable, **options) -> RouteBuilder:
         """Add PATCH handler."""
         self.router._add_route("PATCH", self.path, handler, **options)
         return self
     
-    def options(self, handler: Callable, **options) -> 'RouteBuilder':
+    def options(self, handler: Callable, **options) -> RouteBuilder:
         """Add OPTIONS handler."""
         self.router._add_route("OPTIONS", self.path, handler, **options)
         return self
     
-    def head(self, handler: Callable, **options) -> 'RouteBuilder':
+    def head(self, handler: Callable, **options) -> RouteBuilder:
         """Add HEAD handler."""
         self.router._add_route("HEAD", self.path, handler, **options)
         return self
     
-    def all(self, handler: Callable, **options) -> 'RouteBuilder':
+    def all(self, handler: Callable, **options) -> RouteBuilder:
         """Add handler for all methods."""
         for method in ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]:
             self.router._add_route(method, self.path, handler, **options)
@@ -313,6 +314,6 @@ class RouteBuilder:
 
 
 __all__ = [
-    'Router',
     'RouteBuilder',
+    'Router',
 ]

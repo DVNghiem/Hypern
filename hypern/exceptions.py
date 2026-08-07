@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional, Type
+from collections.abc import Callable
+from typing import Any
+
 import orjson
 
 
@@ -16,9 +18,9 @@ class HTTPException(Exception):
     def __init__(
         self,
         status_code: int = 500,
-        detail: Optional[str] = None,
-        data: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None
+        detail: str | None = None,
+        data: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None
     ):
         self.status_code = status_code
         self.detail = detail or self.get_default_detail(status_code)
@@ -51,7 +53,7 @@ class HTTPException(Exception):
         }
         return messages.get(status_code, "Error")
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert exception to dictionary for JSON response."""
         result = {
             "error": True,
@@ -70,61 +72,61 @@ class HTTPException(Exception):
 # Convenience exception classes
 class BadRequest(HTTPException):
     """400 Bad Request"""
-    def __init__(self, detail: str = "Bad Request", data: Optional[Dict] = None, headers: Optional[Dict] = None):
+    def __init__(self, detail: str = "Bad Request", data: dict[str, Any] | None = None, headers: dict[str, str] | None = None):
         super().__init__(400, detail, data, headers)
 
 
 class Unauthorized(HTTPException):
     """401 Unauthorized"""
-    def __init__(self, detail: str = "Unauthorized", data: Optional[Dict] = None, headers: Optional[Dict] = None):
+    def __init__(self, detail: str = "Unauthorized", data: dict[str, Any] | None = None, headers: dict[str, str] | None = None):
         super().__init__(401, detail, data, headers)
 
 
 class Forbidden(HTTPException):
     """403 Forbidden"""
-    def __init__(self, detail: str = "Forbidden", data: Optional[Dict] = None, headers: Optional[Dict] = None):
+    def __init__(self, detail: str = "Forbidden", data: dict[str, Any] | None = None, headers: dict[str, str] | None = None):
         super().__init__(403, detail, data, headers)
 
 
 class NotFound(HTTPException):
     """404 Not Found"""
-    def __init__(self, detail: str = "Not Found", data: Optional[Dict] = None, headers: Optional[Dict] = None):
+    def __init__(self, detail: str = "Not Found", data: dict[str, Any] | None = None, headers: dict[str, str] | None = None):
         super().__init__(404, detail, data, headers)
 
 
 class MethodNotAllowed(HTTPException):
     """405 Method Not Allowed"""
-    def __init__(self, detail: str = "Method Not Allowed", data: Optional[Dict] = None, headers: Optional[Dict] = None):
+    def __init__(self, detail: str = "Method Not Allowed", data: dict[str, Any] | None = None, headers: dict[str, str] | None = None):
         super().__init__(405, detail, data, headers)
 
 
 class Conflict(HTTPException):
     """409 Conflict"""
-    def __init__(self, detail: str = "Conflict", data: Optional[Dict] = None, headers: Optional[Dict] = None):
+    def __init__(self, detail: str = "Conflict", data: dict[str, Any] | None = None, headers: dict[str, str] | None = None):
         super().__init__(409, detail, data, headers)
 
 
 class UnprocessableEntity(HTTPException):
     """422 Unprocessable Entity"""
-    def __init__(self, detail: str = "Unprocessable Entity", data: Optional[Dict] = None, headers: Optional[Dict] = None):
+    def __init__(self, detail: str = "Unprocessable Entity", data: dict[str, Any] | None = None, headers: dict[str, str] | None = None):
         super().__init__(422, detail, data, headers)
 
 
 class TooManyRequests(HTTPException):
     """429 Too Many Requests"""
-    def __init__(self, detail: str = "Too Many Requests", data: Optional[Dict] = None, headers: Optional[Dict] = None):
+    def __init__(self, detail: str = "Too Many Requests", data: dict[str, Any] | None = None, headers: dict[str, str] | None = None):
         super().__init__(429, detail, data, headers)
 
 
 class InternalServerError(HTTPException):
     """500 Internal Server Error"""
-    def __init__(self, detail: str = "Internal Server Error", data: Optional[Dict] = None, headers: Optional[Dict] = None):
+    def __init__(self, detail: str = "Internal Server Error", data: dict[str, Any] | None = None, headers: dict[str, str] | None = None):
         super().__init__(500, detail, data, headers)
 
 
 class ServiceUnavailable(HTTPException):
     """503 Service Unavailable"""
-    def __init__(self, detail: str = "Service Unavailable", data: Optional[Dict] = None, headers: Optional[Dict] = None):
+    def __init__(self, detail: str = "Service Unavailable", data: dict[str, Any] | None = None, headers: dict[str, str] | None = None):
         super().__init__(503, detail, data, headers)
 
 
@@ -145,17 +147,17 @@ class ExceptionHandler:
     """
     
     def __init__(self):
-        self._handlers: Dict[Type[Exception], Callable] = {}
-        self._default_handler: Optional[Callable] = None
+        self._handlers: dict[type[Exception], Callable] = {}
+        self._default_handler: Callable | None = None
     
-    def handle(self, exc_class: Type[Exception]) -> Callable:
+    def handle(self, exc_class: type[Exception]) -> Callable:
         """Decorator to register an exception handler."""
         def decorator(func: Callable) -> Callable:
             self._handlers[exc_class] = func
             return func
         return decorator
     
-    def add_handler(self, exc_class: Type[Exception], handler: Callable) -> None:
+    def add_handler(self, exc_class: type[Exception], handler: Callable) -> None:
         """Add an exception handler programmatically."""
         self._handlers[exc_class] = handler
     
@@ -163,7 +165,7 @@ class ExceptionHandler:
         """Set the default handler for unhandled exceptions."""
         self._default_handler = handler
     
-    def get_handler(self, exc: Exception) -> Optional[Callable]:
+    def get_handler(self, exc: Exception) -> Callable | None:
         """Get the handler for an exception type."""
         # First, try to find exact match
         exc_type = type(exc)
@@ -207,7 +209,7 @@ class ExceptionHandler:
             })
 
 
-def exception_handler(exc_class: Type[Exception]):
+def exception_handler(exc_class: type[Exception]):
     """
     Decorator to mark a function as an exception handler.
     Used with application's exception handling system.
@@ -223,7 +225,7 @@ def exception_handler(exc_class: Type[Exception]):
     return decorator
 
 
-def error_boundary(handler: Optional[Callable] = None):
+def error_boundary(handler: Callable | None = None):
     """
     Decorator to wrap a route handler with error handling.
     
@@ -248,7 +250,7 @@ def error_boundary(handler: Optional[Callable] = None):
                 for key, value in e.headers.items():
                     res.header(key, value)
                 res.status(e.status_code).json(e.to_dict())
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 if handler:
                     if inspect.iscoroutinefunction(handler):
                         await handler(req, res, e)
@@ -268,7 +270,7 @@ def error_boundary(handler: Optional[Callable] = None):
                 for key, value in e.headers.items():
                     res.header(key, value)
                 res.status(e.status_code).json(e.to_dict())
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 if handler:
                     handler(req, res, e)
                 else:
@@ -285,18 +287,18 @@ def error_boundary(handler: Optional[Callable] = None):
 
 
 __all__ = [
-    'HTTPException',
     'BadRequest',
-    'Unauthorized',
-    'Forbidden',
-    'NotFound',
-    'MethodNotAllowed',
     'Conflict',
-    'UnprocessableEntity',
-    'TooManyRequests',
-    'InternalServerError',
-    'ServiceUnavailable',
     'ExceptionHandler',
-    'exception_handler',
+    'Forbidden',
+    'HTTPException',
+    'InternalServerError',
+    'MethodNotAllowed',
+    'NotFound',
+    'ServiceUnavailable',
+    'TooManyRequests',
+    'Unauthorized',
+    'UnprocessableEntity',
     'error_boundary',
+    'exception_handler',
 ]

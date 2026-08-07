@@ -53,31 +53,41 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ._hypern import (
-    # Channel / Topic
-    ChannelManager as _ChannelManager,
-    ChannelStats,
-    Subscriber,
-    TopicMatcher,
-    # Presence
-    PresenceTracker as _PresenceTracker,
-    PresenceInfo,
-    PresenceDiff,
-    # Broadcast
-    RealtimeBroadcast as _RealtimeBroadcast,
+    BackpressurePolicy,
     BroadcastConfig,
     BroadcastStats,
     BroadcastSubscriber,
-    BackpressurePolicy,
-    # Heartbeat
-    HeartbeatMonitor as _HeartbeatMonitor,
+    ChannelStats,
     HeartbeatConfig,
     HeartbeatStats,
+    PresenceDiff,
+    PresenceInfo,
     # SSE types (for integration)
     SSEEvent,
+    Subscriber,
+    TopicMatcher,
 )
+from ._hypern import (
+    # Channel / Topic
+    ChannelManager as _ChannelManager,
+)
+from ._hypern import (
+    # Heartbeat
+    HeartbeatMonitor as _HeartbeatMonitor,
+)
+from ._hypern import (
+    # Presence
+    PresenceTracker as _PresenceTracker,
+)
+from ._hypern import (
+    # Broadcast
+    RealtimeBroadcast as _RealtimeBroadcast,
+)
+
 
 class ChannelManager:
     """
@@ -109,8 +119,8 @@ class ChannelManager:
     def create_channel(
         self,
         name: str,
-        buffer_size: Optional[int] = None,
-        metadata: Optional[Dict[str, str]] = None,
+        buffer_size: int | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> bool:
         """Create a new channel. Returns False if it already exists."""
         return self._inner.create_channel(name, buffer_size, metadata)
@@ -121,7 +131,7 @@ class ChannelManager:
     def has_channel(self, name: str) -> bool:
         return self._inner.has_channel(name)
 
-    def subscribe(self, channel_name: str, client_id: str) -> "Subscriber":
+    def subscribe(self, channel_name: str, client_id: str) -> Subscriber:
         return self._inner.subscribe(channel_name, client_id)
 
     def unsubscribe(self, channel_name: str, client_id: str) -> bool:
@@ -139,17 +149,17 @@ class ChannelManager:
         """Publish to all channels matching a topic pattern."""
         return self._inner.publish_to_topic(topic, message)
 
-    def get_stats(self, channel_name: str) -> "ChannelStats":
+    def get_stats(self, channel_name: str) -> ChannelStats:
         return self._inner.get_stats(channel_name)
 
-    def list_channels(self) -> List[str]:
+    def list_channels(self) -> list[str]:
         return self._inner.list_channels()
 
-    def get_subscribers(self, channel_name: str) -> List[str]:
+    def get_subscribers(self, channel_name: str) -> list[str]:
         return self._inner.get_subscribers(channel_name)
 
     @property
-    def topic_matcher(self) -> "TopicMatcher":
+    def topic_matcher(self) -> TopicMatcher:
         return self._inner.topic_matcher
 
     def channel_count(self) -> int:
@@ -211,44 +221,44 @@ class PresenceTracker:
         self._inner = _PresenceTracker()
 
     def track(
-        self, channel: str, client_id: str, metadata: Optional[Dict[str, str]] = None
-    ) -> "PresenceInfo":
+        self, channel: str, client_id: str, metadata: dict[str, str] | None = None
+    ) -> PresenceInfo:
         return self._inner.track(channel, client_id, metadata)
 
     def untrack(self, channel: str, client_id: str) -> bool:
         return self._inner.untrack(channel, client_id)
 
-    def untrack_all(self, client_id: str) -> List[str]:
+    def untrack_all(self, client_id: str) -> list[str]:
         return self._inner.untrack_all(client_id)
 
-    def update(self, channel: str, client_id: str, metadata: Dict[str, str]) -> bool:
+    def update(self, channel: str, client_id: str, metadata: dict[str, str]) -> bool:
         return self._inner.update(channel, client_id, metadata)
 
     def touch(self, channel: str, client_id: str) -> bool:
         return self._inner.touch(channel, client_id)
 
-    def list(self, channel: str) -> List["PresenceInfo"]:
+    def list(self, channel: str) -> list[PresenceInfo]:
         return self._inner.list(channel)
 
-    def get(self, channel: str, client_id: str) -> Optional["PresenceInfo"]:
+    def get(self, channel: str, client_id: str) -> PresenceInfo | None:
         return self._inner.get(channel, client_id)
 
     def count(self, channel: str) -> int:
         return self._inner.count(channel)
 
-    def flush_diff(self, channel: str) -> "PresenceDiff":
+    def flush_diff(self, channel: str) -> PresenceDiff:
         return self._inner.flush_diff(channel)
 
-    def client_channels(self, client_id: str) -> List[str]:
+    def client_channels(self, client_id: str) -> list[str]:
         return self._inner.client_channels(client_id)
 
-    def active_channels(self) -> List[str]:
+    def active_channels(self) -> list[str]:
         return self._inner.active_channels()
 
     def total_clients(self) -> int:
         return self._inner.total_clients()
 
-    def evict_stale(self, timeout_secs: float) -> List[tuple]:
+    def evict_stale(self, timeout_secs: float) -> list[tuple]:
         return self._inner.evict_stale(timeout_secs)
 
     def clear(self) -> None:
@@ -256,13 +266,13 @@ class PresenceTracker:
 
     def track_json(
         self, channel: str, client_id: str, metadata: Any
-    ) -> "PresenceInfo":
+    ) -> PresenceInfo:
         """Track with JSON-serializable metadata (converted to str dict)."""
         str_meta = {str(k): str(v) for k, v in metadata.items()} if metadata else None
         return self._inner.track(channel, client_id, str_meta)
 
-    def list_as_dicts(self, channel: str) -> List[Dict[str, Any]]:
-        """List presence info as plain dicts (useful for JSON serialization)."""
+    def list_as_dicts(self, channel: str) -> list[dict[str, Any]]:
+        """list presence info as plain dicts (useful for JSON serialization)."""
         return [
             {
                 "client_id": info.client_id,
@@ -274,7 +284,7 @@ class PresenceTracker:
             for info in self._inner.list(channel)
         ]
 
-    def diff_as_dict(self, channel: str) -> Dict[str, Any]:
+    def diff_as_dict(self, channel: str) -> dict[str, Any]:
         """Flush and return diff as a plain dict (useful for broadcasting)."""
         diff = self._inner.flush_diff(channel)
         return {
@@ -311,17 +321,17 @@ class RealtimeBroadcast:
     def __init__(self):
         self._inner = _RealtimeBroadcast()
 
-    def create(self, name: str, config: Optional["BroadcastConfig"] = None) -> bool:
+    def create(self, name: str, config: BroadcastConfig | None = None) -> bool:
         return self._inner.create(name, config)
 
     def remove(self, name: str) -> bool:
         return self._inner.remove(name)
 
-    def subscribe(self, name: str) -> "BroadcastSubscriber":
+    def subscribe(self, name: str) -> BroadcastSubscriber:
         return self._inner.subscribe(name)
 
     def send(
-        self, name: str, message: str, message_id: Optional[str] = None
+        self, name: str, message: str, message_id: str | None = None
     ) -> int:
         return self._inner.send(name, message, message_id)
 
@@ -329,7 +339,7 @@ class RealtimeBroadcast:
         self,
         name: str,
         data: Any,
-        message_id: Optional[str] = None,
+        message_id: str | None = None,
     ) -> int:
         """Send a JSON-serialized message to a broadcast channel."""
         return self._inner.send(
@@ -338,16 +348,16 @@ class RealtimeBroadcast:
             message_id,
         )
 
-    def send_many(self, names: List[str], message: str) -> Dict[str, int]:
+    def send_many(self, names: list[str], message: str) -> dict[str, int]:
         return self._inner.send_many(names, message)
 
-    def stats(self, name: str) -> "BroadcastStats":
+    def stats(self, name: str) -> BroadcastStats:
         return self._inner.stats(name)
 
-    def global_stats(self) -> "BroadcastStats":
+    def global_stats(self) -> BroadcastStats:
         return self._inner.global_stats()
 
-    def list_channels(self) -> List[str]:
+    def list_channels(self) -> list[str]:
         return self._inner.list_channels()
 
     def has_channel(self, name: str) -> bool:
@@ -405,7 +415,7 @@ class HeartbeatMonitor:
         dead = monitor.check_timeouts()
     """
 
-    def __init__(self, config: Optional["HeartbeatConfig"] = None):
+    def __init__(self, config: HeartbeatConfig | None = None):
         self._inner = _HeartbeatMonitor(config)
 
     def __getattr__(self, name: str) -> Any:
@@ -414,9 +424,9 @@ class HeartbeatMonitor:
 
     async def run_heartbeat_loop(
         self,
-        on_ping: Optional[Callable[[str], Any]] = None,
-        on_timeout: Optional[Callable[[str], Any]] = None,
-        on_dead: Optional[Callable[[str], Any]] = None,
+        on_ping: Callable[[str], Any] | None = None,
+        on_timeout: Callable[[str], Any] | None = None,
+        on_dead: Callable[[str], Any] | None = None,
     ) -> None:
         """
         Run an async heartbeat loop that periodically:
@@ -458,9 +468,9 @@ class HeartbeatMonitor:
     def make_sse_event(
         self,
         data: str,
-        event: Optional[str] = None,
-        id: Optional[str] = None,
-    ) -> "SSEEvent":
+        event: str | None = None,
+        id: str | None = None,
+    ) -> SSEEvent:
         """
         Create an SSE event with the heartbeat config's retry value.
 
@@ -508,7 +518,7 @@ class RealtimeHub:
     def __init__(
         self,
         channel_buffer_size: int = 256,
-        heartbeat_config: Optional[HeartbeatConfig] = None,
+        heartbeat_config: HeartbeatConfig | None = None,
     ):
         self.channels = ChannelManager(default_buffer_size=channel_buffer_size)
         self.presence = PresenceTracker()
@@ -518,8 +528,8 @@ class RealtimeHub:
     def create_channel(
         self,
         name: str,
-        buffer_size: Optional[int] = None,
-        broadcast_config: Optional[BroadcastConfig] = None,
+        buffer_size: int | None = None,
+        broadcast_config: BroadcastConfig | None = None,
     ) -> None:
         """
         Create a channel with optional broadcast support.
@@ -537,8 +547,8 @@ class RealtimeHub:
         self,
         channel: str,
         client_id: str,
-        metadata: Optional[Dict[str, str]] = None,
-    ) -> "Subscriber":
+        metadata: dict[str, str] | None = None,
+    ) -> Subscriber:
         """
         Join a channel: subscribe + track presence + register heartbeat.
 
@@ -563,12 +573,12 @@ class RealtimeHub:
         self.presence.untrack(channel, client_id)
         self.heartbeat.unregister(client_id)
 
-    def disconnect(self, client_id: str) -> List[str]:
+    def disconnect(self, client_id: str) -> list[str]:
         """
         Fully disconnect a client from all channels.
 
         Returns:
-            List of channels the client was removed from.
+            list of channels the client was removed from.
         """
         channels = self.presence.untrack_all(client_id)
         for ch in channels:
@@ -584,11 +594,11 @@ class RealtimeHub:
         """Publish a JSON-serialized message to a channel."""
         return self.channels.publish_json(channel, data)
 
-    def get_presence(self, channel: str) -> List["PresenceInfo"]:
+    def get_presence(self, channel: str) -> list[PresenceInfo]:
         """Get presence info for a channel."""
         return self.presence.list(channel)
 
-    def get_presence_diff(self, channel: str) -> Dict[str, Any]:
+    def get_presence_diff(self, channel: str) -> dict[str, Any]:
         """Get and flush presence diff for a channel."""
         return self.presence.diff_as_dict(channel)
 
@@ -603,25 +613,25 @@ class RealtimeHub:
 
 
 __all__ = [
-    # Channel / Topic
-    "ChannelManager",
-    "ChannelStats",
-    "Subscriber",
-    "TopicMatcher",
-    # Presence
-    "PresenceTracker",
-    "PresenceInfo",
-    "PresenceDiff",
-    # Broadcast
-    "RealtimeBroadcast",
+    "BackpressurePolicy",
     "BroadcastConfig",
     "BroadcastStats",
     "BroadcastSubscriber",
-    "BackpressurePolicy",
+    # Channel / Topic
+    "ChannelManager",
+    "ChannelStats",
+    "HeartbeatConfig",
     # Heartbeat
     "HeartbeatMonitor",
-    "HeartbeatConfig",
     "HeartbeatStats",
+    "PresenceDiff",
+    "PresenceInfo",
+    # Presence
+    "PresenceTracker",
+    # Broadcast
+    "RealtimeBroadcast",
     # Hub
     "RealtimeHub",
+    "Subscriber",
+    "TopicMatcher",
 ]

@@ -2,7 +2,7 @@
 
 Each pattern is a module that exposes:
     LABEL: str                       – human-readable pattern name
-    generate(name: str) -> Dict[str, str]  – relative-path→content mapping
+    generate(name: str) -> dict[str, str]  – relative-path→content mapping
 
 Adding a new pattern:
     1. Create a new module in this package (e.g. ``my_pattern.py``).
@@ -13,24 +13,33 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Callable, Dict, Tuple
+from collections.abc import Callable
+
+from .clean import LABEL as _c_label
+from .clean import generate as _c_gen
+from .cqrs import LABEL as _q_label
+from .cqrs import generate as _q_gen
+from .ddd import LABEL as _d_label
+from .ddd import generate as _d_gen
+from .event_driven import LABEL as _e_label
+from .event_driven import generate as _e_gen
+from .hexagonal import LABEL as _h_label
+from .hexagonal import generate as _h_gen
 
 # ── Pattern registry ─────────────────────────────────────────────
 # key  →  (label, generate_function)
 # Lazy imports keep startup fast; each module is imported once the
 # user actually selects (or specifies) the pattern.
+from .layered import LABEL as _l_label
+from .layered import generate as _l_gen
+from .onion import LABEL as _o_label
+from .onion import generate as _o_gen
+from .saga import LABEL as _s_label
+from .saga import generate as _s_gen
+from .saga_event import LABEL as _se_label
+from .saga_event import generate as _se_gen
 
-from .layered import LABEL as _l_label, generate as _l_gen
-from .ddd import LABEL as _d_label, generate as _d_gen
-from .hexagonal import LABEL as _h_label, generate as _h_gen
-from .onion import LABEL as _o_label, generate as _o_gen
-from .clean import LABEL as _c_label, generate as _c_gen
-from .cqrs import LABEL as _q_label, generate as _q_gen
-from .saga import LABEL as _s_label, generate as _s_gen
-from .event_driven import LABEL as _e_label, generate as _e_gen
-from .saga_event import LABEL as _se_label, generate as _se_gen
-
-PATTERNS: Dict[str, Tuple[str, Callable[[str], Dict[str, str]]]] = {
+PATTERNS: dict[str, tuple[str, Callable[[str], dict[str, str]]]] = {
     "layered": (_l_label, _l_gen),
     "ddd": (_d_label, _d_gen),
     "hexagonal": (_h_label, _h_gen),
@@ -57,13 +66,13 @@ def _interactive_select() -> str:
     print()
     while True:
         try:
-            choice = input("Select a pattern [1-{}]: ".format(len(keys))).strip()
+            choice = input(f"Select a pattern [1-{len(keys)}]: ").strip()
             num = int(choice)
             if 1 <= num <= len(keys):
                 return keys[num - 1]
         except (ValueError, EOFError, KeyboardInterrupt):
             pass
-        print("  Invalid choice – please enter a number between 1 and {}.".format(len(keys)))
+        print(f"  Invalid choice – please enter a number between 1 and {len(keys)}.")
 
 
 # ── NewCommand ───────────────────────────────────────────────────

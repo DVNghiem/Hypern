@@ -35,7 +35,8 @@ import asyncio
 import enum
 import json
 import uuid
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from collections.abc import Callable
+from typing import Any
 
 
 class WebSocketState(enum.Enum):
@@ -57,7 +58,6 @@ class WebSocketDisconnect(Exception):
 
 class WebSocketError(Exception):
     """General WebSocket error."""
-    pass
 
 
 class WebSocketMessage:
@@ -69,9 +69,9 @@ class WebSocketMessage:
         data: The payload (``str`` or ``bytes``).
     """
 
-    __slots__ = ("type", "data")
+    __slots__ = ("data", "type")
 
-    def __init__(self, msg_type: str, data: Union[str, bytes]):
+    def __init__(self, msg_type: str, data: str | bytes):
         self.type = msg_type
         self.data = data
 
@@ -109,26 +109,26 @@ class WebSocket:
                 await ws.send_text(f"echo: {msg}")
     """
 
-    def __init__(self, id: Optional[str] = None):
+    def __init__(self, id: str | None = None):
         self.id: str = id or uuid.uuid4().hex
         self.state: WebSocketState = WebSocketState.CONNECTING
         self.path: str = ""
-        self.headers: Dict[str, str] = {}
-        self.query_params: Dict[str, str] = {}
-        self.client_host: Optional[str] = None
-        self.client_port: Optional[int] = None
-        self.extra: Dict[str, Any] = {}
+        self.headers: dict[str, str] = {}
+        self.query_params: dict[str, str] = {}
+        self.client_host: str | None = None
+        self.client_port: int | None = None
+        self.extra: dict[str, Any] = {}
 
         # Internal queues
         self._recv_queue: asyncio.Queue[WebSocketMessage] = asyncio.Queue()
-        self._send_queue: asyncio.Queue[Union[WebSocketMessage, None]] = asyncio.Queue()
+        self._send_queue: asyncio.Queue[WebSocketMessage | None] = asyncio.Queue()
         self._close_code: int = 1000
         self._close_reason: str = ""
 
     async def accept(
         self,
-        subprotocol: Optional[str] = None,
-        headers: Optional[Dict[str, str]] = None,
+        subprotocol: str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         """
         Accept the WebSocket handshake.
@@ -184,7 +184,7 @@ class WebSocket:
         """Send a JSON-serialised text message."""
         await self.send_text(json.dumps(data, separators=(",", ":")))
 
-    async def receive(self, timeout: Optional[float] = None) -> WebSocketMessage:
+    async def receive(self, timeout: float | None = None) -> WebSocketMessage:
         """
         Receive the next message.
 
@@ -201,7 +201,7 @@ class WebSocket:
                 msg = await asyncio.wait_for(self._recv_queue.get(), timeout)
             else:
                 msg = await self._recv_queue.get()
-        except asyncio.TimeoutError:
+        except TimeoutError:  # noqa: TRY203
             raise
 
         if msg is None:
@@ -209,26 +209,26 @@ class WebSocket:
             raise WebSocketDisconnect(self._close_code, self._close_reason)
         return msg
 
-    async def receive_text(self, timeout: Optional[float] = None) -> str:
+    async def receive_text(self, timeout: float | None = None) -> str:
         """Receive a text message."""
         msg = await self.receive(timeout)
         if msg.type != "text":
             raise WebSocketError(f"Expected text message, got {msg.type}")
         return msg.data
 
-    async def receive_bytes(self, timeout: Optional[float] = None) -> bytes:
+    async def receive_bytes(self, timeout: float | None = None) -> bytes:
         """Receive a binary message."""
         msg = await self.receive(timeout)
         if msg.type != "bytes":
             raise WebSocketError(f"Expected binary message, got {msg.type}")
         return msg.data
 
-    async def receive_json(self, timeout: Optional[float] = None) -> Any:
+    async def receive_json(self, timeout: float | None = None) -> Any:
         """Receive and parse a JSON text message."""
         text = await self.receive_text(timeout)
         return json.loads(text)
 
-    def feed_message(self, msg_type: str, data: Union[str, bytes]) -> None:
+    def feed_message(self, msg_type: str, data: str | bytes) -> None:
         """
         Push a message from the transport layer into the receive queue.
 
@@ -242,7 +242,7 @@ class WebSocket:
         self._close_reason = reason
         self._recv_queue.put_nowait(None)
 
-    async def drain_send_queue(self) -> Optional[WebSocketMessage]:
+    async def drain_send_queue(self) -> WebSocketMessage | None:
         """
         Pop the next outgoing message (used by the transport layer).
 
@@ -282,7 +282,7 @@ class WebSocketRoom:
 
     def __init__(self, name: str = "default"):
         self.name = name
-        self._connections: Dict[str, WebSocket] = {}
+        self._connections: dict[str, WebSocket] = {}
 
     @property
     def size(self) -> int:
@@ -297,7 +297,7 @@ class WebSocketRoom:
         """Remove a WebSocket from the room."""
         self._connections.pop(ws.id, None)
 
-    def broadcast(self, data: str, exclude: Optional[Set[str]] = None) -> None:
+    def broadcast(self, data: str, exclude: set[str] | None = None) -> None:
         """
         Broadcast a text message to all connections.
 
@@ -313,11 +313,11 @@ class WebSocketRoom:
             if ws.is_connected:
                 ws._send_queue.put_nowait(msg)
 
-    def broadcast_json(self, data: Any, exclude: Optional[Set[str]] = None) -> None:
+    def broadcast_json(self, data: Any, exclude: set[str] | None = None) -> None:
         """Broadcast a JSON payload."""
         self.broadcast(json.dumps(data, separators=(",", ":")), exclude)
 
-    def broadcast_bytes(self, data: bytes, exclude: Optional[Set[str]] = None) -> None:
+    def broadcast_bytes(self, data: bytes, exclude: set[str] | None = None) -> None:
         """Broadcast binary data."""
         exclude = exclude or set()
         msg = WebSocketMessage("bytes", data)
@@ -332,11 +332,11 @@ class WebSocketRoom:
         for ws in list(self._connections.values()):
             try:
                 await ws.close(code, reason)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         self._connections.clear()
 
-    def get_connections(self) -> List[WebSocket]:
+    def get_connections(self) -> list[WebSocket]:
         """Get all active connections."""
         return [ws for ws in self._connections.values() if ws.is_connected]
 
@@ -370,7 +370,7 @@ class WebSocketRouter:
     """
 
     def __init__(self):
-        self._routes: List[WebSocketRoute] = []
+        self._routes: list[WebSocketRoute] = []
 
     def route(self, path: str, **options) -> Callable:
         """Decorator to register a WebSocket handler."""
@@ -383,11 +383,11 @@ class WebSocketRouter:
         """Register a WebSocket handler programmatically."""
         self._routes.append(WebSocketRoute(path, handler, **options))
 
-    def get_routes(self) -> List[WebSocketRoute]:
+    def get_routes(self) -> list[WebSocketRoute]:
         """Return all registered routes."""
         return list(self._routes)
 
-    def get_handler(self, path: str) -> Optional[Callable]:
+    def get_handler(self, path: str) -> Callable | None:
         """Look up the handler for a given path."""
         for route in self._routes:
             if route.path == path:
@@ -397,11 +397,11 @@ class WebSocketRouter:
 
 __all__ = [
     "WebSocket",
-    "WebSocketState",
-    "WebSocketMessage",
     "WebSocketDisconnect",
     "WebSocketError",
+    "WebSocketMessage",
     "WebSocketRoom",
     "WebSocketRoute",
     "WebSocketRouter",
+    "WebSocketState",
 ]

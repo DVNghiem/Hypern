@@ -10,14 +10,12 @@ Structure:
 
 from __future__ import annotations
 
-from typing import Dict
-
 from ._base import base_files, health_controller
 
 LABEL = "SAGA Pattern"
 
 
-def generate(name: str) -> Dict[str, str]:
+def generate(name: str) -> dict[str, str]:
     files = base_files(name, LABEL)
 
     # ── Entry point ──────────────────────────────────────────────

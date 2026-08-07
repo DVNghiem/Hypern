@@ -2,16 +2,15 @@ import datetime
 import logging
 import sys
 from copy import copy
-from typing import Literal, Optional
+from typing import Literal
 
 import click
-
 
 TRACE_LOG_LEVEL = 5
 
 
 class ColourizedFormatter(logging.Formatter):
-    level_name_colors = {
+    level_name_colors = {  # noqa: RUF012
         TRACE_LOG_LEVEL: lambda level_name: click.style(str(level_name), fg="blue"),
         logging.DEBUG: lambda level_name: click.style(str(level_name), fg="cyan"),
         logging.INFO: lambda level_name: click.style(str(level_name), fg="green"),
@@ -24,10 +23,10 @@ class ColourizedFormatter(logging.Formatter):
 
     def __init__(
         self,
-        fmt: Optional[str] = None,
-        datefmt: Optional[str] = None,
+        fmt: str | None = None,
+        datefmt: str | None = None,
         style: Literal["%", "{", "$"] = "%",
-        use_colors: Optional[bool] = None,
+        use_colors: bool | None = None,
     ):
         if use_colors in (True, False):
             self.use_colors = use_colors
@@ -46,7 +45,7 @@ class ColourizedFormatter(logging.Formatter):
         return True
 
     def formatTime(self, record, datefmt = None):
-        dt = datetime.datetime.fromtimestamp(record.created)
+        dt = datetime.datetime.fromtimestamp(record.created)  # noqa: DTZ006
         return dt.isoformat(timespec='milliseconds') + 'Z'
 
     def formatMessage(self, record: logging.LogRecord) -> str:
