@@ -130,22 +130,21 @@ settings = Settings()
 
 ```python
 # database/init.py
-from hypern.database import Database
+from hypern.database import Database, db
 from config import settings
 
-def init_database(app):
-    app.db = Database(
-        settings.DATABASE_URL,
-        pool_size=settings.DATABASE_POOL_SIZE,
-        timeout=settings.DATABASE_TIMEOUT
+def init_database():
+    Database.configure(
+        url=settings.DATABASE_URL,
+        max_size=settings.DATABASE_POOL_SIZE,
+        connect_timeout_secs=settings.DATABASE_TIMEOUT,
     )
-    
     # Run migrations
-    migrate(app.db)
+    migrate()
 
-def get_db(ctx):
-    """Get database from context"""
-    return ctx.app.db
+def get_session(ctx):
+    """Get database session for the current request"""
+    return db(ctx)
 ```
 
 ### Query Optimization
@@ -157,18 +156,18 @@ def get_db(ctx):
 
 ```python
 # services/user_service.py
-from database import get_db
+from hypern.database import db
 
 class UserService:
     @staticmethod
     def create_users_batch(ctx, users):
-        db = get_db(ctx)
+        session = db(ctx)
         
         # Start transaction
-        with db.transaction():
+        with session.transaction():
             user_ids = []
             for user in users:
-                result = db.execute(
+                result = session.execute(
                     "INSERT INTO users (name, email) VALUES (?, ?)",
                     [user["name"], user["email"]]
                 )
@@ -179,15 +178,14 @@ class UserService:
 
 ### Connection Management
 
+Database sessions are automatically managed per request. Use the `db()` helper in handlers:
+
 ```python
-@app.middleware("before_route")
-def setup_db_context(req, res, ctx, next):
-    ctx.db = app.db
-    try:
-        next()
-    finally:
-        # Clean up if needed
-        pass
+@app.get("/users/:id")
+def get_user(req, res, ctx):
+    session = db(ctx)  # auto-managed, auto-finalized
+    user = session.query_one("SELECT * FROM users WHERE id = $1", [req.param("id")])
+    res.json(user)
 ```
 
 ## Dependency Injection Best Practices
@@ -564,3 +562,259 @@ def check_database(ctx):
     except:
         return "error"
 ```
+
+## Middleware Best Practices
+
+### Order Is Execution Order
+
+Middleware executes in the order added. Each middleware wraps everything after it. Place broad/early middleware first:
+
+```python
+# CORRECT: outer wraps inner
+app.use(RequestIdMiddleware())        # 1. Track before anything else
+app.use(LogMiddleware())              # 2. Log with request ID
+app.use(SecurityHeadersMiddleware()) # 3. Security on every response
+app.use(CorsMiddleware())            # 4. CORS after security
+app.use(RateLimitMiddleware())      # 5. Rate limit after CORS
+app.use(TimeoutMiddleware())        # 6. Timeout last — catches slow handlers
+app.use(CompressionMiddleware())    # 7. Compress at the very end
+```
+
+Wrong order causes subtle bugs: CORS running after RateLimit means preflight OPTIONS requests count toward rate limits.
+
+### Always Call `next()` or Return — Never Both
+
+Short-circuit by returning without calling `next()`. Do not call `next()` and then continue:
+
+```python
+# WRONG — handler runs, then continues after next()
+@middleware
+async def broken(req, res, ctx, next):
+    if is_denied(req):
+        res.status(403).json({"error": "denied"})
+        await next()  # DANGER: continues to handler anyway!
+    await next()
+
+# CORRECT — short circuit stops here
+@middleware
+async def correct(req, res, ctx, next):
+    if is_denied(req):
+        res.status(403).json({"error": "denied"})
+        return  # Stop — don't call next()
+    await next()
+
+# CORRECT — always proceed
+@middleware
+async def always_proceed(req, res, ctx, next):
+    ctx.set("processed", True)
+    await next()
+```
+
+### Catch and Re-Raise, Never Swallow
+
+Error-handling middleware must re-raise after responding, or the chain silently continues:
+
+```python
+# WRONG — handler never runs, chain breaks silently
+@middleware
+async def bad_catch(req, res, ctx, next):
+    try:
+        await next()
+    except ValueError:
+        pass  # Silently drops the error!
+
+# CORRECT — respond, then re-raise so outer handlers see it
+@middleware
+async def good_catch(req, res, ctx, next):
+    try:
+        await next()
+    except ValueError as e:
+        res.status(400).json({"error": str(e)})
+        raise  # Re-raise so outer middleware / framework sees it
+    except Exception:
+        res.status(500).json({"error": "Internal error"})
+        raise
+```
+
+For global error catching at the outermost level only, let the framework handle unhandled exceptions.
+
+### Context Isolation — One Middleware Per Concern
+
+Each middleware should own one piece of state. Mixing concerns creates hidden dependencies:
+
+```python
+# WRONG — auth_middleware does too much
+@middleware
+async def auth_middleware(req, res, ctx, next):
+    token = req.header("Authorization")
+    ctx.set("user", validate(token))    # sets user
+    ctx.set("start", time.time())       # also sets timing — mixed concern
+    await next()
+
+# CORRECT — split by concern
+@middleware
+async def auth(req, res, ctx, next):
+    token = req.header("Authorization")
+    ctx.set("user", validate(token))
+    await next()
+
+@middleware
+async def timing(req, res, ctx, next):
+    start = time.time()
+    await next()
+    elapsed = time.time() - start
+    res.header("X-Response-Time", f"{elapsed:.3f}s")
+```
+
+Split middleware is also easier to test and reuse in different stacks.
+
+### Avoid Blocking I/O in Sync Middleware
+
+Sync middleware holds the async event loop. Move database calls, HTTP requests, and file I/O to async:
+
+```python
+# WRONG — blocks the event loop
+@middleware
+def slow_sync(req, res, ctx, next):
+    result = blocking_db_query()  # blocks everything
+    ctx.set("data", result)
+    next()
+
+# CORRECT — async middleware releases the event loop during I/O
+@middleware
+async def fast_async(req, res, ctx, next):
+    result = await async_db_query()  # yields control while waiting
+    ctx.set("data", result)
+    await next()
+```
+
+If you must use sync I/O in sync middleware, offload to a thread pool:
+
+```python
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+_executor = ThreadPoolExecutor(max_workers=4)
+
+@middleware
+def threaded_middleware(req, res, ctx, next):
+    loop = asyncio.new_event_loop()
+    result = loop.run_until_complete(
+        asyncio.get_event_loop().run_in_executor(_executor, blocking_call)
+    )
+    ctx.set("result", result)
+    next()
+```
+
+### Test Middleware in Isolation
+
+Test each middleware independently. The `@middleware` decorator wraps a function that receives `(req, res, ctx, next)` — construct and pass these directly:
+
+```python
+import pytest
+from unittest.mock import Mock, AsyncMock
+from app.middleware import check_api_key
+
+@pytest.mark.asyncio
+async def test_check_api_key_missing():
+    req = Mock()
+    req.header = Mock(return_value=None)
+    res = Mock()
+    res.status = Mock(return_value=res)
+    res.json = Mock()
+    ctx = Mock()
+    ctx.set = Mock()
+    next = AsyncMock()
+
+    await check_api_key(req, res, ctx, next)
+
+    res.status.assert_called_once_with(401)
+    res.json.assert_called_once_with({"error": "API key required"})
+    next.assert_not_called()  # short-circuited
+
+@pytest.mark.asyncio
+async def test_check_api_key_valid():
+    req = Mock()
+    req.header = Mock(return_value="valid-key-1")
+    res = Mock()
+    ctx = Mock()
+    ctx.set = Mock()
+    next = AsyncMock()
+
+    await check_api_key(req, res, ctx, next)
+
+    ctx.set.assert_called_once_with("api_key", "valid-key-1")
+    next.assert_called_once()
+```
+
+### Prefer Hooks for Global Side Effects
+
+If middleware only needs to run before/after every request without controlling flow, `@before_request` / `@after_request` hooks are cleaner than `@middleware`:
+
+```python
+# Hook — runs globally, no control over flow
+@before_request
+async def add_timestamp(req, res, ctx):
+    ctx.set("arrived_at", time.time())
+
+@after_request
+async def add_timing_header(req, res, ctx):
+    arrived = ctx.get("arrived_at", 0)
+    if arrived:
+        res.header("X-Response-Time", f"{time.time() - arrived:.3f}s")
+
+# Middleware — use only when you need to block or modify flow
+@middleware
+async def require_auth(req, res, ctx, next):
+    if not ctx.get("user"):
+        res.status(401).json({"error": "Unauthorized"})
+        return
+    await next()
+```
+
+### Minimal Middleware — Do One Thing
+
+Small middleware composes cleanly. Avoid middleware that both authenticates AND logs AND modifies the request AND checks a feature flag:
+
+```python
+# WRONG — one middleware doing four things
+@middleware
+async def god_middleware(req, res, ctx, next):
+    ctx.set("user", validate_auth(req))
+    log_request(req)
+    req.headers["X-Forwarded-Proto"] = "https"
+    if not is_feature_enabled("v2"):
+        req.path = req.path.replace("/v2/", "/v1/")
+    await next()
+
+# CORRECT — four small middleware, composed
+app.use(auth)                # 1. set user
+app.use(request_logger)       # 2. log
+app.use(https_forwarder)     # 3. modify headers
+app.use(version_router)       # 4. route to version
+```
+
+Small middleware is easier to test, swap, and reason about under load.
+
+### Don't Store Per-Request State on the Middleware Instance
+
+Using `self` attributes for per-request data causes race conditions under concurrent requests:
+
+```python
+# WRONG — shared mutable state across requests
+class BadMiddleware:
+    def __init__(self):
+        self.current_user = None  # shared!
+
+    async def __call__(self, req, res, ctx, next):
+        self.current_user = validate(req)  # overwrites for all concurrent requests
+        await next()
+
+# CORRECT — per-request state lives in ctx
+class GoodMiddleware:
+    async def __call__(self, req, res, ctx, next):
+        ctx.set("user", validate(req))  # isolated per request
+        await next()
+```
+
+Use `ctx` for per-request data. Use `self` only for shared configuration (connection pools, rate limiters, feature flags).

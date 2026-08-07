@@ -67,11 +67,11 @@ async def startup():
 
 The driver is auto-detected from the URL prefix:
 
-| Prefix | Driver | Backend |
-|--------|--------|---------|
-| `postgresql://` or `postgres://` | deadpool-postgres (Rust) | PostgreSQL |
-| `mysql://` | sqlx Any (Rust) | MySQL / MariaDB |
-| `sqlite://` | sqlx Any (Rust) | SQLite |
+| Prefix | Driver | Backend | Session Type |
+|--------|--------|---------|--------------|
+| `postgresql://` or `postgres://` | deadpool-postgres (Rust) | PostgreSQL | `DbSession` |
+| `mysql://` | sqlx Any (Rust) | MySQL / MariaDB | `AnySession` |
+| `sqlite://` | sqlx Any (Rust) | SQLite | `AnySession` |
 
 > **Note:** PostgreSQL uses the full-featured `DbSession` with transactions, prepared statements, and all PostgreSQL types. MySQL and SQLite use the lighter `AnySession` which supports `query`, `query_one`, and `execute`.
 
@@ -86,12 +86,14 @@ def get_users(req, res, ctx):
     session = db(ctx)  # or db(ctx, alias="default")
     users = session.query("SELECT id, name, email FROM users")
     
-    # Analytics database
+    # Analytics database — returns DbSession (PostgreSQL) or AnySession (MySQL/SQLite)
     analytics_session = db(ctx, alias="analytics")
     stats = analytics_session.query("SELECT COUNT(*) as total FROM user_visits")
     
     res.json({"users": users, "stats": stats})
+```
 
+```python
 @app.get("/users/:id")
 def get_user(req, res, ctx):
     session = db(ctx)
@@ -304,19 +306,17 @@ Get the request ID associated with this session.
 
 Get the current session state: `"idle"`, `"connected"`, `"in_transaction"`, `"committed"`, `"rolled_back"`, or `"closed"`.
 
-##### `session.is_in_transaction`
-
-Returns `True` if a transaction is currently active.
-
 ##### `session.set_auto_commit(enabled)`
 
 Enable or disable auto-commit on session finalization (default: enabled).
 
 ### Helper Functions
 
-#### `db(ctx_or_request_id, alias="default")`
+#### `db(ctx_or_request_id, alias="default")` → `DbSession | AnySession`
 
 Get a database session for the current request from the specified database alias.
+
+Returns `DbSession` for PostgreSQL, `AnySession` for MySQL and SQLite.
 
 ```python
 @app.get("/data")
@@ -724,9 +724,9 @@ class HeaderTenantResolver(TenantResolver):
 
 mt = MultiTenantDatabase(
     resolver=HeaderTenantResolver(),
-    dsn_template="postgresql://user:pass@localhost:5432/tenant_{tenant}",
-    max_size=8,
+    dsn_template="postgresql://user:pass@localhost:5432/{tenant}",
     max_tenants=100,  # LRU eviction after 100 pools
+    pool_max_size=8,
 )
 ```
 
