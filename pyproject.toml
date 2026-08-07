@@ -36,12 +36,11 @@ dependencies=[
     "msgspec>=0.18.0",
     "typing-extensions (>=4.15.0,<5.0.0)",
     "watchdog (>=6.0.0,<7.0.0)",
-    "veloxloop (>=0.2.0,<0.3.0)",
     "click>=8.4.2",
 ]
 
 [project.optional-dependencies]
-graphql = ["strawberry-graphql[cli]>=0.235.0"]
+graphql = ["strawberry-graphql[cli]>=0.323.2"]
 
 [project.scripts]
 hypern = "hypern.cli:main"
