@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import Ordereddict
+from collections import OrderedDict
 from contextlib import contextmanager
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
@@ -558,7 +558,7 @@ class MultiTenantDatabase:
         self._max_tenants = max_tenants
         self._pool_max_size = pool_max_size
         # Ordereddict is used as an LRU cache (move_to_end on access)
-        self._tenants: Ordereddict[str, bool] = Ordereddict()
+        self._tenants: OrderedDict[str, bool] = OrderedDict()
 
     def _ensure_tenant(self, tenant: str) -> None:
         """Configure + initialise the pool for *tenant* if not already done."""
