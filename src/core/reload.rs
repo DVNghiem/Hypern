@@ -277,17 +277,17 @@ impl ReloadManager {
     // -- signalling --
 
     pub fn signal_graceful_reload(&self) {
-        crate::hlog_info!("Signalling graceful reload");
+        log::info!("Signalling graceful reload");
         let _ = self.inner.signal_tx.send(ReloadSignal::Graceful);
     }
 
     pub fn signal_hot_reload(&self) {
-        crate::hlog_info!("Signalling hot reload");
+        log::info!("Signalling hot reload");
         let _ = self.inner.signal_tx.send(ReloadSignal::Hot);
     }
 
     pub fn signal_shutdown(&self) {
-        crate::hlog_info!("Signalling shutdown");
+        log::info!("Signalling shutdown");
         let _ = self.inner.signal_tx.send(ReloadSignal::Shutdown);
     }
 
@@ -299,7 +299,7 @@ impl ReloadManager {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
-            crate::hlog_info!("Starting connection drain");
+            log::info!("Starting connection drain");
             self.inner.health.mark_draining();
         }
     }
@@ -312,7 +312,7 @@ impl ReloadManager {
     pub fn on_request_complete(&self) {
         let remaining = self.inner.health.decrement_in_flight();
         if self.is_draining() && remaining == 0 {
-            crate::hlog_info!("All in-flight requests drained");
+            log::info!("All in-flight requests drained");
             self.inner.drain_complete.notify_waiters();
         }
     }
@@ -327,12 +327,12 @@ impl ReloadManager {
 
         tokio::select! {
             _ = self.inner.drain_complete.notified() => {
-                crate::hlog_info!("Drain completed successfully");
+                log::info!("Drain completed successfully");
                 true
             }
             _ = tokio::time::sleep(timeout) => {
                 let remaining = self.inner.health.in_flight();
-                crate::hlog_warn!("Drain timeout reached with {} requests still in-flight", remaining);
+                log::warn!("Drain timeout reached with {} requests still in-flight", remaining);
                 false
             }
         }
@@ -343,7 +343,7 @@ impl ReloadManager {
         self.inner.draining.store(false, Ordering::Release);
         self.inner.health.set_status(HealthStatus::Healthy);
         let _ = self.inner.signal_tx.send(ReloadSignal::None);
-        crate::hlog_info!("Reload cycle complete, status reset to healthy");
+        log::info!("Reload cycle complete, status reset to healthy");
     }
 }
 

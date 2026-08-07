@@ -2,11 +2,9 @@ use crate::core::multiprocess::{spawn_workers, terminate_workers, wait_for_worke
 use crate::core::reload::{
     PyHealthCheck, PyReloadConfig, PyReloadManager, ReloadConfig, ReloadManager,
 };
-use crate::logging::{LogConfig, LogQueue, PyLogConfig};
 use crate::middleware::MiddlewareChain;
 use crate::routing::router::Router;
 use crate::socket::SocketHeld;
-use crate::{hlog_info, hlog_warn};
 use pyo3::prelude::*;
 use std::sync::Arc;
 
@@ -17,7 +15,6 @@ pub struct Server {
     rust_middleware: Arc<MiddlewareChain>,
     reload_config: ReloadConfig,
     reload_manager: Option<ReloadManager>,
-    log_config: LogConfig,
 }
 
 #[pymethods]
@@ -30,13 +27,7 @@ impl Server {
             rust_middleware: Arc::new(MiddlewareChain::new()),
             reload_config: ReloadConfig::default(),
             reload_manager: None,
-            log_config: LogConfig::default(),
         }
-    }
-
-    /// Configure logging behavior.
-    pub fn set_log_config(&mut self, config: PyLogConfig) {
-        self.log_config = config.inner;
     }
 
     pub fn set_router(&mut self, router: Router) {
@@ -83,7 +74,7 @@ impl Server {
     /// Register a Rust middleware to run before request handlers
     pub fn use_middleware(&mut self, middleware: &Bound<'_, PyAny>) -> PyResult<()> {
         use crate::middleware::{
-            PyBasicAuthMiddleware, PyCompressionMiddleware, PyCorsMiddleware, PyLogMiddleware,
+            PyBasicAuthMiddleware, PyCompressionMiddleware, PyCorsMiddleware,
             PyRateLimitMiddleware, PyRequestIdMiddleware, PySecurityHeadersMiddleware,
             PyTimeoutMiddleware,
         };
@@ -101,8 +92,6 @@ impl Server {
             self.register_boxed_middleware(rate.inner.clone());
         } else if let Ok(timeout) = middleware.extract::<PyTimeoutMiddleware>() {
             self.register_boxed_middleware(timeout.inner.clone());
-        } else if let Ok(log) = middleware.extract::<PyLogMiddleware>() {
-            self.register_boxed_middleware(log.inner.clone());
         } else if let Ok(auth) = middleware.extract::<PyBasicAuthMiddleware>() {
             self.register_boxed_middleware(auth.inner.clone());
         } else {
@@ -126,7 +115,7 @@ impl Server {
         max_connections: usize,
     ) -> PyResult<()> {
         // Initialize the log queue
-        LogQueue::init(self.log_config.clone());
+        pyo3_log::init();
 
         // Collect handlers before fork
         let raw_socket = SocketHeld::new(host.clone(), port)?;
@@ -156,7 +145,7 @@ impl Server {
             reload_manager.clone(),
         );
 
-        hlog_info!("All {} workers started", pids.len());
+        log::info!("All {} workers started", pids.len());
 
         // Setup signal handling in parent process
         #[cfg(unix)]
@@ -201,7 +190,8 @@ impl Server {
                     .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok()
                 {
-                    hlog_info!("Received SIGUSR1: graceful reload – draining workers...");
+
+                    log::info!("Received SIGUSR1: graceful reload – draining workers...");
                     reload_manager.signal_graceful_reload();
 
                     // Send SIGUSR1 to all workers so they start draining
@@ -242,7 +232,7 @@ impl Server {
                     );
 
                     self.reload_manager = Some(new_rm.clone());
-                    hlog_info!(
+                    log::info!(
                         "Graceful reload complete – {} new workers started",
                         new_pids.len()
                     );
@@ -261,7 +251,7 @@ impl Server {
                     .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok()
                 {
-                    hlog_info!("Received SIGUSR2: hot reload – killing workers...");
+                    log::info!("Received SIGUSR2: hot reload – killing workers...");
                     reload_manager.signal_hot_reload();
 
                     // Immediately kill workers
@@ -295,7 +285,7 @@ impl Server {
                     );
 
                     self.reload_manager = Some(new_rm.clone());
-                    hlog_info!(
+                    log::info!(
                         "Hot reload complete – {} new workers started",
                         new_pids.len()
                     );
@@ -305,7 +295,7 @@ impl Server {
                 }
 
                 if SHUTDOWN.load(Ordering::SeqCst) {
-                    hlog_info!("Received shutdown signal, stopping workers...");
+                    log::info!("Received shutdown signal, stopping workers...");
                     // Send SIGUSR1 to workers for brief drain before termination
                     for &pid in &pids {
                         unsafe {
@@ -324,7 +314,7 @@ impl Server {
                     let pid = libc::waitpid(-1, &mut status, libc::WNOHANG);
                     if pid > 0 {
                         // A worker exited, shutdown all workers
-                        hlog_warn!("Worker {} exited, shutting down...", pid);
+                        log::warn!("Worker {} exited, shutting down...", pid);
                         terminate_workers(&pids);
                         break;
                     }

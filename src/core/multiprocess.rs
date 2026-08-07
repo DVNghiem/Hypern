@@ -43,11 +43,6 @@ pub fn spawn_workers(
                 0 => {
                     // Child process - use Axum worker
                     use crate::core::worker::run_worker;
-                    use crate::logging::LogQueue;
-
-                    // Re-initialize the log queue for this child process
-                    // (the parent's consumer thread doesn't survive fork)
-                    LogQueue::reinit_after_fork();
 
                     // Each child gets its own ReloadManager instance
                     let child_reload = ReloadManager::new(reload_manager.config().clone());
@@ -71,7 +66,7 @@ pub fn spawn_workers(
                 child_pid => {
                     // Parent process
                     child_pids.push(child_pid);
-                    crate::hlog_info!(
+                    log::info!(
                         "Spawned Axum worker {} with PID {}",
                         worker_id + 1,
                         child_pid
@@ -95,7 +90,7 @@ pub fn wait_for_workers(pids: &[libc::pid_t]) {
         let remaining = timeout.saturating_sub(start.elapsed());
 
         if remaining.is_zero() {
-            crate::hlog_warn!("Timeout waiting for worker {}, force killing", pid);
+            log::warn!("Timeout waiting for worker {}, force killing", pid);
             unsafe {
                 libc::kill(pid, libc::SIGKILL);
                 let mut status: libc::c_int = 0;
@@ -122,7 +117,7 @@ pub fn wait_for_workers(pids: &[libc::pid_t]) {
             }
 
             if !waited {
-                crate::hlog_warn!("Worker {} did not exit gracefully, force killing", pid);
+                log::warn!("Worker {} did not exit gracefully, force killing", pid);
                 unsafe {
                     libc::kill(pid, libc::SIGKILL);
                     let mut status: libc::c_int = 0;

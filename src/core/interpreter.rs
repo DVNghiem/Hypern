@@ -48,7 +48,7 @@ pub async fn http_execute(route_hash: u64, request: Request) -> axum::response::
     let is_async = match get_handler_info(route_hash) {
         Some(is_async) => is_async,
         None => {
-            crate::hlog_warn!("No handler found for hash: {}", route_hash);
+            log::warn!("No handler found for hash: {}", route_hash);
             response_slot.set_status(404);
             response_slot.set_body(b"Not Found".to_vec());
             return response_slot.into_response();

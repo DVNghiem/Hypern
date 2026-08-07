@@ -165,7 +165,11 @@ async fn handle_request(State(state): State<AppState>, req: Request<Body>) -> im
     let start = std::time::Instant::now();
 
     // Log incoming request
-    crate::logging::log_request(&method_str, &path_str, None);
+    log::info!(
+        "Incoming request: {} {}",
+        method_str,
+        path_str
+    );
 
     // Execute the actual handler and ensure we decrement on exit
     let response = handle_request_inner(&state, req).await;
@@ -173,7 +177,13 @@ async fn handle_request(State(state): State<AppState>, req: Request<Body>) -> im
     // Log response
     let status = response.status().as_u16();
     let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
-    crate::logging::log_response(&method_str, &path_str, status, duration_ms, None);
+    log::info!(
+        "Response: {} {} - Status: {}, Duration: {:.2} ms",
+        method_str,
+        path_str,
+        status,
+        duration_ms
+    );
 
     // Decrement in-flight and notify drain if needed
     rm.on_request_complete();
@@ -344,7 +354,7 @@ pub fn run_worker(
         }
 
         let sig = LAST_SIGNAL.load(Ordering::SeqCst);
-        crate::hlog_info!("Worker {} initiating shutdown (signal={})", worker_id, sig);
+        log::info!("Worker {} initiating shutdown (signal={})", worker_id, sig);
 
         #[cfg(unix)]
         {
@@ -399,7 +409,7 @@ pub fn run_worker(
     rt.spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(startup_grace)).await;
         rm_startup.health().mark_healthy();
-        crate::hlog_info!(
+        log::info!(
             "Worker {} marked healthy after {}s grace period",
             worker_id,
             startup_grace
@@ -420,7 +430,7 @@ pub fn run_worker(
         // Build the Axum router with health probe routes
         let app = build_axum_router(state);
 
-        crate::hlog_info!("Axum worker {} started", worker_id);
+        log::info!("Axum worker {} started", worker_id);
 
         // Serve with Axum
         axum::serve(listener, app)
@@ -430,15 +440,15 @@ pub fn run_worker(
             .await
             .expect("Server error");
 
-        crate::hlog_info!("Worker {} Axum server stopped", worker_id);
+        log::info!("Worker {} Axum server stopped", worker_id);
     });
 
-    crate::hlog_info!("Worker {} started", worker_id);
+    log::info!("Worker {} started", worker_id);
 
     // Keep event loop alive in this worker process until stopped by signal
     let _ = ev_loop.call_method0("run_forever");
 
-    crate::hlog_info!("Worker {} stopped", worker_id);
+    log::info!("Worker {} stopped", worker_id);
     Ok(())
 }
 

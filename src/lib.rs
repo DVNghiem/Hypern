@@ -25,7 +25,6 @@ pub mod database;
 pub mod fast_path;
 pub mod grpc;
 pub mod http;
-pub mod logging;
 pub mod memory;
 pub mod middleware;
 pub mod realtime;
@@ -64,7 +63,6 @@ pub use crate::http::websocket::{RustWebSocket, WsMessage, WsMessageType};
 
 // Realtime exports
 pub use crate::core::reload::{PyHealthCheck, PyReloadConfig, PyReloadManager};
-pub use crate::logging::PyLogConfig;
 pub use crate::realtime::broadcast::{
     BackpressurePolicy, BroadcastConfig, BroadcastStats, BroadcastSubscriber, RealtimeBroadcast,
 };
@@ -74,7 +72,7 @@ pub use crate::realtime::presence::{PresenceDiff, PresenceInfo, PresenceTracker}
 
 pub use crate::middleware::{
     PyBasicAuthMiddleware, PyCacheMiddleware, PyCircuitBreakerMiddleware, PyCompressionMiddleware,
-    PyCorsMiddleware, PyLogMiddleware, PyRateLimitMiddleware, PyRequestIdMiddleware,
+    PyCorsMiddleware, PyRateLimitMiddleware, PyRequestIdMiddleware,
     PySecurityHeadersMiddleware, PyTimeoutMiddleware,
 };
 
@@ -178,13 +176,9 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<PyTimeoutMiddleware>()?;
     module.add_class::<PyCompressionMiddleware>()?;
     module.add_class::<PyRequestIdMiddleware>()?;
-    module.add_class::<PyLogMiddleware>()?;
     module.add_class::<PyBasicAuthMiddleware>()?;
     module.add_class::<PyCircuitBreakerMiddleware>()?;
     module.add_class::<PyCacheMiddleware>()?;
-
-    // Logging
-    module.add_class::<PyLogConfig>()?;
 
     // Static file handler
     module.add_class::<StaticFileHandler>()?;

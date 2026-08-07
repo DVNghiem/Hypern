@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import functools
 import signal
+import inspect
+import logging
 from typing import (
     Any, Callable, Dict, List, Optional, Type, TypeVar, Union, 
     Awaitable, TYPE_CHECKING
@@ -18,11 +20,12 @@ from hypern.router import Router
 from hypern._hypern import DIContainer, TaskExecutor, TaskResult
 from hypern._hypern import SSEStream, StreamingResponse
 from hypern._hypern import HealthCheck, ReloadConfig, ReloadManager
-from hypern._hypern import LogConfig
 from hypern.di import inject as _standalone_inject
 
 from hypern.database import Database as _Database, finalize_db as _finalize_db
 from hypern._hypern import get_db as _get_db
+from hypern.tasks import set_task_executor
+from hypern.logfmt import config_basic_logging
 
 if TYPE_CHECKING:
     from hypern.openapi import OpenAPIGenerator
@@ -70,8 +73,11 @@ class Hypern:
         debug: bool = False,
         task_workers: int = 4,
         task_queue_size: int = 1000,
-        log_config: Optional[LogConfig] = None,
+        log_level: str = "info",
     ) -> None:
+        # set default logging level to INFO if not already set
+        config_basic_logging(level=getattr(logging, log_level.upper(), logging.INFO))
+        
         # Core routing
         self._router = RustRouter(path="/")
         self._routers: List[Router] = []
@@ -99,7 +105,7 @@ class Hypern:
         self._tasks = TaskExecutor(task_workers, task_queue_size)
         
         # Register this app's task executor as the global default
-        from hypern.tasks import set_task_executor
+        
         set_task_executor(self._tasks)
         
         # OpenAPI (lazy-loaded)
@@ -126,9 +132,6 @@ class Hypern:
         # Reload / health configuration
         self._reload_config: Optional[ReloadConfig] = None
         self._reload_manager: Optional[ReloadManager] = None
-        
-        # Logging configuration
-        self._log_config: Optional[LogConfig] = log_config
         
         if routes is not None:
             self._router.extend_route(routes)
@@ -438,7 +441,6 @@ class Hypern:
         }
         if skip_paths is not None:
             kwargs["skip_paths"] = skip_paths
-        self._log_config = LogConfig(**kwargs)
         return self
     
     def setup_reload(
@@ -1021,7 +1023,7 @@ class Hypern:
                 # Execute before-request handlers
                 for before_handler in self._before_handlers:
                     try:
-                        if asyncio.iscoroutinefunction(before_handler):
+                        if inspect.iscoroutinefunction(before_handler):
                             await before_handler(req, res, ctx)
                         else:
                             before_handler(req, res, ctx)
@@ -1031,7 +1033,7 @@ class Hypern:
                 
                 async def execute_handler():
                     try:
-                        if asyncio.iscoroutinefunction(handler):
+                        if inspect.iscoroutinefunction(handler):
                             await handler(req, res, ctx)
                         else:
                             handler(req, res, ctx)
@@ -1220,13 +1222,6 @@ class Hypern:
             else:
                 # Default: enable health probes
                 server.set_reload_config(ReloadConfig())
-            
-            # Configure logging
-            if self._log_config is not None:
-                server.set_log_config(self._log_config)
-            else:
-                # Default: info level with request/response logging
-                server.set_log_config(LogConfig())
             
             # Register Rust middleware
             for mw in self._middleware:

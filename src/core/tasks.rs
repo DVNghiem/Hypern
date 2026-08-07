@@ -234,7 +234,7 @@ fn task_worker(
     results: Arc<DashMap<String, TaskResult>>,
     running: Arc<AtomicBool>,
 ) {
-    crate::hlog_info!("Background task worker {} started", worker_id);
+    log::info!("Background task worker {} started", worker_id);
 
     while running.load(Ordering::SeqCst) {
         match receiver.recv_timeout(Duration::from_millis(100)) {
@@ -325,7 +325,7 @@ fn task_worker(
         }
     }
 
-    crate::hlog_info!("Background task worker {} stopped", worker_id);
+    log::info!("Background task worker {} stopped", worker_id);
 }
 
 /// Async task runner for Tokio-based background tasks

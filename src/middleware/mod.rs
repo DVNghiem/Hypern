@@ -14,7 +14,7 @@ pub use chain::{
 pub use builtin::{
     BasicAuthMiddleware, CacheConfig, CacheMiddleware, CircuitBreakerConfig,
     CircuitBreakerMiddleware, CircuitState, CompressionMiddleware, CorsConfig, CorsMiddleware,
-    LogAfterMiddleware, LogConfig, LogLevel, LogMiddleware, MethodMiddleware, PathMiddleware,
+    MethodMiddleware, PathMiddleware,
     RateLimitAlgorithm, RateLimitConfig, RateLimitMiddleware, RequestIdMiddleware,
     SecurityHeadersConfig, SecurityHeadersMiddleware, TimeoutMiddleware,
 };
@@ -346,68 +346,6 @@ impl PyRequestIdMiddleware {
         "RequestIdMiddleware(...)".to_string()
     }
 }
-
-/// Python-accessible logging middleware
-///
-/// Logs incoming requests with method, path, and timing information.
-#[pyclass(name = "LogMiddleware", from_py_object)]
-#[derive(Clone)]
-pub struct PyLogMiddleware {
-    pub(crate) inner: Arc<LogMiddleware>,
-}
-
-#[pymethods]
-impl PyLogMiddleware {
-    /// Create logging middleware
-    ///
-    /// Args:
-    ///     level: Log level - "debug", "info", "warn", "error" (default: "info")
-    ///     log_headers: Whether to log request headers (default: false)
-    ///     skip_paths: Paths to skip logging (default: ["/health", "/favicon.ico"])
-    #[new]
-    #[pyo3(signature = (
-        level = "info",
-        log_headers = false,
-        skip_paths = None
-    ))]
-    pub fn new(level: &str, log_headers: bool, skip_paths: Option<Vec<String>>) -> Self {
-        let log_level = match level.to_lowercase().as_str() {
-            "debug" => LogLevel::Debug,
-            "warn" | "warning" => LogLevel::Warn,
-            "error" => LogLevel::Error,
-            _ => LogLevel::Info,
-        };
-
-        let mut config = LogConfig::new().with_level(log_level);
-
-        if log_headers {
-            config = config.with_headers();
-        }
-
-        if let Some(paths) = skip_paths {
-            for path in paths {
-                config = config.skip_path(path);
-            }
-        }
-
-        Self {
-            inner: Arc::new(LogMiddleware::new(config)),
-        }
-    }
-
-    /// Create with default settings
-    #[staticmethod]
-    pub fn default_logger() -> Self {
-        Self {
-            inner: Arc::new(LogMiddleware::default_logger()),
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        "LogMiddleware(...)".to_string()
-    }
-}
-
 /// Python-accessible basic authentication middleware
 ///
 /// Implements HTTP Basic Authentication.

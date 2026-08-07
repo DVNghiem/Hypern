@@ -25,7 +25,6 @@ from ._hypern import (
     ReloadConfig,
     ReloadManager,
     # Logging
-    LogConfig,
     # Utils (Rust-accelerated)
     PageInfo,
     paginate,
@@ -81,7 +80,6 @@ from .middleware import (
     TimeoutMiddleware,
     CompressionMiddleware,
     RequestIdMiddleware,
-    LogMiddleware,
     BasicAuthMiddleware,
     # Utilities
     MiddlewareStack,
@@ -220,7 +218,6 @@ __all__ = [
     "TimeoutMiddleware",
     "CompressionMiddleware",
     "RequestIdMiddleware",
-    "LogMiddleware",
     "BasicAuthMiddleware",
     # Middleware utilities
     "MiddlewareStack",
@@ -283,8 +280,6 @@ __all__ = [
     "HealthCheck",
     "ReloadConfig",
     "ReloadManager",
-    # Logging
-    "LogConfig",
     # Database
     "Database",
     "get_database",
