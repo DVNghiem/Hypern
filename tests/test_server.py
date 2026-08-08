@@ -5,6 +5,7 @@ This server runs in a separate process to avoid threading issues with signals.
 """
 
 import asyncio
+import builtins
 import json
 import os
 import sys
@@ -34,6 +35,29 @@ from hypern.middleware import (
     CorsMiddleware, RateLimitMiddleware, SecurityHeadersMiddleware, CompressionMiddleware,
     RequestIdMiddleware, BasicAuthMiddleware
 )
+
+
+_asyncio_import_count = 0
+_asyncio_get_event_loop_count = 0
+_original_import = builtins.__import__
+_original_get_event_loop = asyncio.get_event_loop
+
+
+def _track_asyncio_import(name, *args, **kwargs):
+    global _asyncio_import_count
+    if name == "asyncio":
+        _asyncio_import_count += 1
+    return _original_import(name, *args, **kwargs)
+
+
+def _track_get_event_loop():
+    global _asyncio_get_event_loop_count
+    _asyncio_get_event_loop_count += 1
+    return _original_get_event_loop()
+
+
+builtins.__import__ = _track_asyncio_import
+asyncio.get_event_loop = _track_get_event_loop
 
 
 # ============================================================================
@@ -1145,6 +1169,14 @@ def create_test_app() -> Hypern:
         return {
             "thread_id": threading.get_ident(),
             "loop_id": id(asyncio.get_running_loop()),
+        }
+
+    @app.get("/async/loop-runtime-stats")
+    async def async_loop_runtime_stats():
+        await asyncio.sleep(0)
+        return {
+            "asyncio_imports": _asyncio_import_count,
+            "get_event_loop_calls": _asyncio_get_event_loop_count,
         }
 
     @app.get("/async/cancellation-resistant")

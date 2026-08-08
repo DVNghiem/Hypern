@@ -1,4 +1,4 @@
-use crate::core::blocking::{BlockingRunner, BlockingRunnerError};
+use crate::core::blocking::{BlockingRunner, BlockingRunnerError, WorkerEventLoop};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use std::future::Future;
@@ -85,6 +85,19 @@ impl RuntimeRef {
     pub fn block_on<F: Future>(&self, fut: F) -> F::Output {
         self.inner.block_on(fut)
     }
+
+    #[inline]
+    fn spawn_blocking_with_event_loop<F, C>(
+        &self,
+        task: F,
+        completion: C,
+    ) -> Result<(), BlockingRunnerError>
+    where
+        F: FnOnce(Python, &WorkerEventLoop) + Send + 'static,
+        C: FnOnce(Result<(), BlockingRunnerError>) + Send + 'static,
+    {
+        self.innerb.run_with_event_loop(task, completion)
+    }
 }
 
 impl JoinError for tokio::task::JoinError {
@@ -153,31 +166,31 @@ where
 {
     if is_async {
         // Run async handlers on the event loop owned by this blocking worker.
-        rt.spawn_blocking(
-            move |py| {
+        rt.spawn_blocking_with_event_loop(
+            move |py, event_loop| {
                 let (handler, args) = args_builder(py);
 
-                // Call the handler to get its coroutine with minimum overhead.
-                let coro_ptr = unsafe {
-                    pyo3::ffi::PyObject_Call(handler.as_ptr(), args.as_ptr(), std::ptr::null_mut())
-                };
-
-                if coro_ptr.is_null() {
-                    unsafe {
+                unsafe {
+                    let coroutine = pyo3::ffi::PyObject_Call(
+                        handler.as_ptr(),
+                        args.as_ptr(),
+                        std::ptr::null_mut(),
+                    );
+                    if coroutine.is_null() {
                         pyo3::ffi::PyErr_Print();
+                        return;
                     }
-                    return;
-                }
 
-                let coroutine = unsafe { Bound::from_owned_ptr(py, coro_ptr) };
-                let result = py
-                    .import("asyncio")
-                    .and_then(|asyncio| asyncio.call_method0("get_event_loop"))
-                    .and_then(|event_loop| {
-                        event_loop.call_method1("run_until_complete", (&coroutine,))
-                    });
-                if let Err(error) = result {
-                    error.print(py);
+                    let result = pyo3::ffi::PyObject_CallOneArg(
+                        event_loop.run_until_complete.as_ptr(),
+                        coroutine,
+                    );
+                    pyo3::ffi::Py_DECREF(coroutine);
+                    if result.is_null() {
+                        pyo3::ffi::PyErr_Print();
+                    } else {
+                        pyo3::ffi::Py_DECREF(result);
+                    }
                 }
             },
             on_complete,

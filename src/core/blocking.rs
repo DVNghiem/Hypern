@@ -13,7 +13,7 @@ pub enum BlockingRunnerError {
 
 pub(crate) enum BlockingTask {
     Run {
-        inner: Box<dyn FnOnce(Python) + Send + 'static>,
+        inner: Box<dyn FnOnce(Python, &WorkerEventLoop) + Send + 'static>,
         completion: Box<dyn FnOnce(Result<(), BlockingRunnerError>) + Send + 'static>,
     },
     Shutdown(channel::Sender<()>),
@@ -23,7 +23,7 @@ impl BlockingTask {
     #[inline]
     pub fn new<T, C>(inner: T, completion: C) -> BlockingTask
     where
-        T: FnOnce(Python) + Send + 'static,
+        T: FnOnce(Python, &WorkerEventLoop) + Send + 'static,
         C: FnOnce(Result<(), BlockingRunnerError>) + Send + 'static,
     {
         Self::Run {
@@ -33,9 +33,9 @@ impl BlockingTask {
     }
 
     #[inline(always)]
-    fn run(self, py: Python<'_>) {
+    fn run(self, py: Python<'_>, event_loop: &WorkerEventLoop) {
         if let Self::Run { inner, completion } = self {
-            inner(py);
+            inner(py, event_loop);
             completion(Ok(()));
         }
     }
@@ -45,6 +45,11 @@ impl BlockingTask {
             completion(Err(error));
         }
     }
+}
+
+pub(crate) struct WorkerEventLoop {
+    event_loop: Py<PyAny>,
+    pub(crate) run_until_complete: Py<PyAny>,
 }
 
 #[derive(Debug)]
@@ -146,6 +151,19 @@ impl BlockingRunner {
     pub fn run<T, C>(&self, task: T, completion: C) -> Result<(), BlockingRunnerError>
     where
         T: FnOnce(Python) + Send + 'static,
+        C: FnOnce(Result<(), BlockingRunnerError>) + Send + 'static,
+    {
+        self.run_with_event_loop(move |py, _| task(py), completion)
+    }
+
+    #[inline(always)]
+    pub fn run_with_event_loop<T, C>(
+        &self,
+        task: T,
+        completion: C,
+    ) -> Result<(), BlockingRunnerError>
+    where
+        T: FnOnce(Python, &WorkerEventLoop) + Send + 'static,
         C: FnOnce(Result<(), BlockingRunnerError>) + Send + 'static,
     {
         let task = BlockingTask::new(task, completion);
@@ -293,14 +311,17 @@ fn blocking_worker(
 ) {
     Python::attach(|py| {
         let event_loop = create_worker_event_loop(py);
-        event_loops.lock().unwrap().push(event_loop.clone_ref(py));
+        event_loops
+            .lock()
+            .unwrap()
+            .push(event_loop.event_loop.clone_ref(py));
         let completion = loop {
             match py.detach(|| queue.recv()) {
                 Ok(task @ BlockingTask::Run { .. }) => {
                     if shutting_down.load(atomic::Ordering::Acquire) {
                         task.reject(BlockingRunnerError::ShuttingDown);
                     } else {
-                        task.run(py);
+                        task.run(py, &event_loop);
                     }
                 }
                 Ok(BlockingTask::Shutdown(completion)) => break Some(completion),
@@ -309,7 +330,7 @@ fn blocking_worker(
         };
         close_worker_event_loop(
             py,
-            &event_loop,
+            &event_loop.event_loop,
             force_shutdown.load(atomic::Ordering::Acquire),
         );
         if let Some(completion) = completion {
@@ -327,14 +348,17 @@ fn blocking_worker_idle(
 ) {
     Python::attach(|py| {
         let event_loop = create_worker_event_loop(py);
-        event_loops.lock().unwrap().push(event_loop.clone_ref(py));
+        event_loops
+            .lock()
+            .unwrap()
+            .push(event_loop.event_loop.clone_ref(py));
         let completion = loop {
             match py.detach(|| queue.recv_timeout(timeout)) {
                 Ok(task @ BlockingTask::Run { .. }) => {
                     if shutting_down.load(atomic::Ordering::Acquire) {
                         task.reject(BlockingRunnerError::ShuttingDown);
                     } else {
-                        task.run(py);
+                        task.run(py, &event_loop);
                     }
                 }
                 Ok(BlockingTask::Shutdown(completion)) => break Some(completion),
@@ -343,7 +367,7 @@ fn blocking_worker_idle(
         };
         close_worker_event_loop(
             py,
-            &event_loop,
+            &event_loop.event_loop,
             force_shutdown.load(atomic::Ordering::Acquire),
         );
         if let Some(completion) = completion {
@@ -352,7 +376,7 @@ fn blocking_worker_idle(
     });
 }
 
-fn create_worker_event_loop(py: Python<'_>) -> Py<PyAny> {
+fn create_worker_event_loop(py: Python<'_>) -> WorkerEventLoop {
     let asyncio = py.import("asyncio").expect("Failed to import asyncio");
     let event_loop = asyncio
         .call_method0("new_event_loop")
@@ -360,7 +384,14 @@ fn create_worker_event_loop(py: Python<'_>) -> Py<PyAny> {
     asyncio
         .call_method1("set_event_loop", (&event_loop,))
         .expect("Failed to set worker event loop");
-    event_loop.unbind()
+    let run_until_complete = event_loop
+        .getattr("run_until_complete")
+        .expect("Failed to cache worker event loop runner")
+        .unbind();
+    WorkerEventLoop {
+        event_loop: event_loop.unbind(),
+        run_until_complete,
+    }
 }
 
 fn close_worker_event_loop(py: Python<'_>, event_loop: &Py<PyAny>, forced: bool) {

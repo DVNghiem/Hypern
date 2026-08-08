@@ -264,14 +264,20 @@ def test_compiled_binding_runs_through_http_server(client: httpx.Client) -> None
     assert response.json() == {"id": 7, "name": "book", "service": "request"}
 
 
-def test_rust_workers_reuse_event_loops_across_suspending_requests(
+def test_rust_workers_reuse_event_loops_without_per_request_asyncio_lookup(
     client: httpx.Client,
 ) -> None:
+    initial_stats = client.get("/async/loop-runtime-stats")
+    assert initial_stats.status_code == 200
+
     identities = []
     for _ in range(32):
         response = client.get("/async/loop-identity")
         assert response.status_code == 200
         identities.append(response.json())
+
+    final_stats = client.get("/async/loop-runtime-stats")
+    assert final_stats.status_code == 200
 
     loops_by_thread: dict[int, set[int]] = {}
     for identity in identities:
@@ -279,6 +285,8 @@ def test_rust_workers_reuse_event_loops_across_suspending_requests(
 
     assert len(identities) > len(loops_by_thread)
     assert all(len(loop_ids) == 1 for loop_ids in loops_by_thread.values())
+    assert final_stats.json()["asyncio_imports"] == initial_stats.json()["asyncio_imports"]
+    assert final_stats.json()["get_event_loop_calls"] == initial_stats.json()["get_event_loop_calls"]
 
 
 def test_shutdown_rejects_queued_and_stops_active_async_handlers() -> None:
