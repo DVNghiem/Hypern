@@ -1,9 +1,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import functools
 import inspect
+from collections.abc import Callable
 from typing import Any
 
 from hypern._hypern import (
@@ -117,9 +117,9 @@ __all__ = [
     'CompressionMiddleware',
     # Rust Middleware
     'CorsMiddleware',
+    'Middleware',
     # Utilities
     'MiddlewareStack',
-    'Middleware',
     'RateLimitMiddleware',
     'RequestIdMiddleware',
     'SecurityHeadersMiddleware',

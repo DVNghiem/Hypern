@@ -1279,7 +1279,7 @@ class Hypern:
     async def _run_startup_handlers(self):
         """Run all startup handlers."""
         for handler in self._startup_handlers:
-            if asyncio.iscoroutinefunction(handler):
+            if inspect.iscoroutinefunction(handler):
                 await handler()
             else:
                 handler()
@@ -1288,7 +1288,7 @@ class Hypern:
         """Run all shutdown handlers."""
         for handler in self._shutdown_handlers:
             try:
-                if asyncio.iscoroutinefunction(handler):
+                if inspect.iscoroutinefunction(handler):
                     await handler()
                 else:
                     handler()
