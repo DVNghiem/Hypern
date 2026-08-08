@@ -63,12 +63,17 @@ impl RouteCache {
         self.cache.insert(path_hash, cached);
     }
 
-    /// Evict least recently used entry
+    /// Evict the oldest entry from a small, fixed-size sample.
+    ///
+    /// A full DashMap scan makes a new route pay O(cache_size) at capacity.
+    /// Sampling keeps eviction bounded while retaining the useful recency
+    /// signal; cache eviction is an optimisation and does not affect routing
+    /// correctness.
     fn evict_lru(&self) {
         let mut oldest_key = None;
         let mut oldest_time = u64::MAX;
 
-        for entry in self.cache.iter() {
+        for entry in self.cache.iter().take(16) {
             if entry.last_access < oldest_time {
                 oldest_time = entry.last_access;
                 oldest_key = Some(*entry.key());

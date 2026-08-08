@@ -278,7 +278,9 @@ pub fn parse_multipart(body: &Bytes, boundary: &str) -> FormData {
         // Find header/body separator
         if let Some(sep_pos) = find_double_crlf(&part) {
             let header_bytes = &part[..sep_pos];
-            let body_bytes = &part[sep_pos + 4..]; // Skip \r\n\r\n
+            // Keep the payload as a Bytes view so uploaded files share the
+            // request buffer instead of allocating and copying a second time.
+            let body_bytes = part.slice(sep_pos + 4..); // Skip \r\n\r\n
 
             // Parse headers
             let headers = parse_part_headers(header_bytes);
@@ -297,21 +299,17 @@ pub fn parse_multipart(body: &Bytes, boundary: &str) -> FormData {
 
                         // Remove trailing \r\n if present
                         let body_bytes = if body_bytes.ends_with(b"\r\n") {
-                            &body_bytes[..body_bytes.len() - 2]
+                            body_bytes.slice(..body_bytes.len() - 2)
                         } else {
                             body_bytes
                         };
 
-                        let file = UploadedFile::new(
-                            name.clone(),
-                            filename,
-                            content_type,
-                            Bytes::copy_from_slice(body_bytes),
-                        );
+                        let file =
+                            UploadedFile::new(name.clone(), filename, content_type, body_bytes);
                         form_data.add_file(name, file);
                     } else {
                         // This is a text field
-                        let value = String::from_utf8_lossy(body_bytes)
+                        let value = String::from_utf8_lossy(&body_bytes)
                             .trim_end_matches("\r\n")
                             .to_string();
                         form_data.add_field(name, value);
@@ -325,7 +323,7 @@ pub fn parse_multipart(body: &Bytes, boundary: &str) -> FormData {
 }
 
 /// Split multipart body by boundary
-fn split_multipart(body: &Bytes, boundary: &[u8]) -> Vec<Vec<u8>> {
+fn split_multipart(body: &Bytes, boundary: &[u8]) -> Vec<Bytes> {
     let mut parts = Vec::new();
     let mut start = 0;
 
@@ -341,7 +339,7 @@ fn split_multipart(body: &Bytes, boundary: &[u8]) -> Vec<Vec<u8>> {
     loop {
         // Find next boundary
         if let Some(end) = find_bytes(&body[start..], boundary) {
-            let part = body[start..start + end].to_vec();
+            let part = body.slice(start..start + end);
             parts.push(part);
             start = start + end + boundary.len();
 
@@ -357,7 +355,7 @@ fn split_multipart(body: &Bytes, boundary: &[u8]) -> Vec<Vec<u8>> {
         } else {
             // No more boundaries
             if start < body.len() {
-                parts.push(body[start..].to_vec());
+                parts.push(body.slice(start..));
             }
             break;
         }

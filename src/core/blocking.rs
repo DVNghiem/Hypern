@@ -9,6 +9,7 @@ use std::{
 pub enum BlockingRunnerError {
     ShuttingDown,
     Closed,
+    QueueFull,
 }
 
 pub(crate) enum BlockingTask {
@@ -69,8 +70,11 @@ pub(crate) struct BlockingRunner {
 }
 
 impl BlockingRunner {
-    pub fn new(max_threads: usize, idle_timeout: u64) -> Self {
-        let (qtx, qrx) = channel::unbounded();
+    pub fn new(max_threads: usize, idle_timeout: u64, queue_capacity: usize) -> Self {
+        // Do not let slow Python handlers turn into an unbounded latency and
+        // memory queue.  Admission is non-blocking; callers get QueueFull and
+        // can return an overload response immediately.
+        let (qtx, qrx) = channel::bounded(queue_capacity.max(1));
         let threads = Arc::new(atomic::AtomicUsize::new(0));
         let event_loops = Arc::new(Mutex::new(Vec::with_capacity(max_threads)));
         let force_shutdown = Arc::new(atomic::AtomicBool::new(false));
@@ -175,10 +179,18 @@ impl BlockingRunner {
             task.reject(BlockingRunnerError::ShuttingDown);
             return Err(BlockingRunnerError::ShuttingDown);
         }
-        if let Err(error) = self.queue.send(task) {
-            drop(admission);
-            error.0.reject(BlockingRunnerError::Closed);
-            return Err(BlockingRunnerError::Closed);
+        match self.queue.try_send(task) {
+            Ok(()) => {}
+            Err(channel::TrySendError::Full(task)) => {
+                drop(admission);
+                task.reject(BlockingRunnerError::QueueFull);
+                return Err(BlockingRunnerError::QueueFull);
+            }
+            Err(channel::TrySendError::Disconnected(task)) => {
+                drop(admission);
+                task.reject(BlockingRunnerError::Closed);
+                return Err(BlockingRunnerError::Closed);
+            }
         }
         // Spawn additional threads if queue is building up
         if self.queue.len() > 2 && self.threads.load(atomic::Ordering::Acquire) < self.tmax {
@@ -426,5 +438,24 @@ fn close_worker_event_loop(py: Python<'_>, event_loop: &Py<PyAny>, forced: bool)
     }
     if let Err(error) = asyncio.call_method1("set_event_loop", (py.None(),)) {
         error.print(py);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_work_when_the_bounded_queue_is_full() {
+        // No workers are needed: the first item occupies the sole queue slot,
+        // allowing the admission path to be tested deterministically.
+        let runner = BlockingRunner::new(0, 1, 1);
+        runner.run(|_| {}, |_| {}).unwrap();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let result = runner.run(|_| {}, move |outcome| tx.send(outcome).unwrap());
+
+        assert_eq!(result, Err(BlockingRunnerError::QueueFull));
+        assert_eq!(rx.recv().unwrap(), Err(BlockingRunnerError::QueueFull));
     }
 }

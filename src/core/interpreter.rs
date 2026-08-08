@@ -112,7 +112,12 @@ pub async fn http_execute(route_hash: u64, request: Request) -> axum::response::
                 error
             );
             response_slot.set_status(503);
-            response_slot.set_body(b"Service Unavailable".to_vec());
+            if matches!(error, crate::core::blocking::BlockingRunnerError::QueueFull) {
+                response_slot.add_header("Retry-After".to_string(), "1".to_string());
+                response_slot.set_body(b"Service Busy".to_vec());
+            } else {
+                response_slot.set_body(b"Service Unavailable".to_vec());
+            }
         }
         Err(error) => {
             log::warn!("Python worker completion channel closed: {}", error);

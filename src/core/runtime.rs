@@ -45,7 +45,15 @@ impl RuntimeWrapper {
     ) -> Self {
         Self {
             inner: rt,
-            br: BlockingRunner::new(py_threads, py_threads_idle_timeout).into(),
+            // A bounded backlog provides backpressure.  Keep enough work to
+            // absorb short bursts without allowing tail latency to grow
+            // without bound when Python handlers are saturated.
+            br: BlockingRunner::new(
+                py_threads,
+                py_threads_idle_timeout,
+                py_threads.max(1).saturating_mul(8),
+            )
+            .into(),
             pr: py_loop,
         }
     }
