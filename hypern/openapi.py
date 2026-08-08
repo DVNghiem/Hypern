@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import inspect
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Type, Union, get_type_hints
+from typing import Any, Union, get_type_hints
+
 import orjson
 
 
@@ -14,7 +16,7 @@ class APIParameter:
     location: str  # "path", "query", "header", "cookie"
     required: bool = True
     description: str = ""
-    schema: Dict[str, Any] = field(default_factory=dict)
+    schema: dict[str, Any] = field(default_factory=dict)
     example: Any = None
 
 
@@ -22,7 +24,7 @@ class APIParameter:
 class APIRequestBody:
     """Represents a request body schema."""
     content_type: str = "application/json"
-    schema: Dict[str, Any] = field(default_factory=dict)
+    schema: dict[str, Any] = field(default_factory=dict)
     required: bool = True
     description: str = ""
     example: Any = None
@@ -34,9 +36,9 @@ class APIResponse:
     status_code: int
     description: str
     content_type: str = "application/json"
-    schema: Dict[str, Any] = field(default_factory=dict)
+    schema: dict[str, Any] = field(default_factory=dict)
     example: Any = None
-    headers: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    headers: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
@@ -46,13 +48,13 @@ class APIEndpoint:
     method: str
     summary: str = ""
     description: str = ""
-    tags: List[str] = field(default_factory=list)
-    parameters: List[APIParameter] = field(default_factory=list)
-    request_body: Optional[APIRequestBody] = None
-    responses: Dict[int, APIResponse] = field(default_factory=dict)
+    tags: list[str] = field(default_factory=list)
+    parameters: list[APIParameter] = field(default_factory=list)
+    request_body: APIRequestBody | None = None
+    responses: dict[int, APIResponse] = field(default_factory=dict)
     deprecated: bool = False
-    security: List[Dict[str, List[str]]] = field(default_factory=list)
-    operation_id: Optional[str] = None
+    security: list[dict[str, list[str]]] = field(default_factory=list)
+    operation_id: str | None = None
 
 
 class OpenAPIGenerator:
@@ -83,11 +85,11 @@ class OpenAPIGenerator:
         title: str = "API",
         version: str = "1.0.0",
         description: str = "",
-        terms_of_service: Optional[str] = None,
-        contact: Optional[Dict[str, str]] = None,
-        license_info: Optional[Dict[str, str]] = None,
-        servers: Optional[List[Dict[str, str]]] = None,
-        external_docs: Optional[Dict[str, str]] = None,
+        terms_of_service: str | None = None,
+        contact: dict[str, str] | None = None,
+        license_info: dict[str, str] | None = None,
+        servers: list[dict[str, str]] | None = None,
+        external_docs: dict[str, str] | None = None,
     ):
         self.title = title
         self.version = version
@@ -98,10 +100,10 @@ class OpenAPIGenerator:
         self.servers = servers or [{"url": "/", "description": "Default server"}]
         self.external_docs = external_docs
         
-        self.endpoints: List[APIEndpoint] = []
-        self.schemas: Dict[str, Dict[str, Any]] = {}
-        self.security_schemes: Dict[str, Dict[str, Any]] = {}
-        self.tags: List[Dict[str, Any]] = []
+        self.endpoints: list[APIEndpoint] = []
+        self.schemas: dict[str, dict[str, Any]] = {}
+        self.security_schemes: dict[str, dict[str, Any]] = {}
+        self.tags: list[dict[str, Any]] = []
     
     @staticmethod
     def _get_handler_attr(handler: Callable, attr: str, default: Any = None) -> Any:
@@ -129,7 +131,7 @@ class OpenAPIGenerator:
         name: str,
         scheme_type: str,
         **kwargs,
-    ) -> "OpenAPIGenerator":
+    ) -> OpenAPIGenerator:
         """
         Add a security scheme.
         
@@ -142,7 +144,7 @@ class OpenAPIGenerator:
         self.security_schemes[name] = scheme
         return self
     
-    def add_bearer_auth(self, name: str = "bearerAuth") -> "OpenAPIGenerator":
+    def add_bearer_auth(self, name: str = "bearerAuth") -> OpenAPIGenerator:
         """Add Bearer token authentication scheme."""
         return self.add_security_scheme(
             name,
@@ -156,7 +158,7 @@ class OpenAPIGenerator:
         scheme_name: str = "apiKeyAuth",
         location: str = "header",
         key_name: str = "X-API-Key",
-    ) -> "OpenAPIGenerator":
+    ) -> OpenAPIGenerator:
         """Add API Key authentication scheme."""
         scheme = {
             "type": "apiKey",
@@ -170,8 +172,8 @@ class OpenAPIGenerator:
         self,
         name: str,
         description: str = "",
-        external_docs: Optional[Dict[str, str]] = None,
-    ) -> "OpenAPIGenerator":
+        external_docs: dict[str, str] | None = None,
+    ) -> OpenAPIGenerator:
         """Add a tag for grouping endpoints."""
         tag = {"name": name}
         if description:
@@ -181,17 +183,17 @@ class OpenAPIGenerator:
         self.tags.append(tag)
         return self
     
-    def add_endpoint(self, endpoint: APIEndpoint) -> "OpenAPIGenerator":
+    def add_endpoint(self, endpoint: APIEndpoint) -> OpenAPIGenerator:
         """Add an endpoint to the documentation."""
         self.endpoints.append(endpoint)
         return self
     
-    def add_schema(self, name: str, schema: Dict[str, Any]) -> "OpenAPIGenerator":
+    def add_schema(self, name: str, schema: dict[str, Any]) -> OpenAPIGenerator:
         """Add a reusable schema."""
         self.schemas[name] = schema
         return self
     
-    def schema_from_type(self, type_hint: Type) -> Dict[str, Any]:
+    def schema_from_type(self, type_hint: type) -> dict[str, Any]:
         """Generate JSON Schema from a Python type hint."""
         if type_hint is None or type_hint is type(None):
             return {"type": "null"}
@@ -248,7 +250,7 @@ class OpenAPIGenerator:
         # Default to object
         return {"type": "object"}
     
-    def _schema_from_msgspec_struct(self, struct_type: Type) -> Dict[str, Any]:
+    def _schema_from_msgspec_struct(self, struct_type: type) -> dict[str, Any]:
         """Generate schema from msgspec Struct."""
         schema = {
             "type": "object",
@@ -273,9 +275,10 @@ class OpenAPIGenerator:
         
         return {"$ref": f"#/components/schemas/{schema_name}"}
     
-    def _schema_from_dataclass(self, dc_type: Type) -> Dict[str, Any]:
+    def _schema_from_dataclass(self, dc_type: type) -> dict[str, Any]:
         """Generate schema from dataclass."""
-        from dataclasses import fields as dc_fields, MISSING
+        from dataclasses import MISSING
+        from dataclasses import fields as dc_fields
         
         schema = {
             "type": "object",
@@ -299,7 +302,7 @@ class OpenAPIGenerator:
         path: str,
         method: str,
         handler: Callable,
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
     ) -> APIEndpoint:
         """
         Generate an APIEndpoint from a route handler.
@@ -334,7 +337,7 @@ class OpenAPIGenerator:
         # Extract type hints
         try:
             hints = get_type_hints(handler)
-        except Exception:
+        except Exception:  # noqa: BLE001
             hints = {}
         
         # Look for body parameter
@@ -416,7 +419,7 @@ class OpenAPIGenerator:
         
         return endpoint
     
-    def generate(self, app=None) -> Dict[str, Any]:
+    def generate(self, app=None) -> dict[str, Any]:
         """
         Generate the complete OpenAPI specification.
         
@@ -457,7 +460,7 @@ class OpenAPIGenerator:
             spec["tags"] = self.tags
         
         # Build paths
-        paths: Dict[str, Dict[str, Any]] = {}
+        paths: dict[str, dict[str, Any]] = {}
         for endpoint in self.endpoints:
             # Convert path format from :param to {param}
             openapi_path = re.sub(r":(\w+)", r"{\1}", endpoint.path)
@@ -583,7 +586,7 @@ def requires_auth(func):
     return func
 
 
-def response(status_code: int, description: str, schema: Optional[Type] = None):
+def response(status_code: int, description: str, schema: type | None = None):
     """Document a response for an endpoint."""
     def decorator(func):
         if not hasattr(func, "_responses"):
@@ -661,7 +664,7 @@ def setup_openapi_routes(
     openapi: OpenAPIGenerator,
     spec_path: str = "/openapi.json",
     docs_path: str = "/docs",
-    redoc_path: Optional[str] = "/redoc",
+    redoc_path: str | None = "/redoc",
 ):
     """
     Set up OpenAPI documentation routes on an app.
@@ -706,23 +709,23 @@ api_doc = summary  # api_doc is an alias for summary
 
 
 __all__ = [
-    "OpenAPIGenerator",
+    "REDOC_HTML",
+    # HTML templates
+    "SWAGGER_UI_HTML",
     "APIEndpoint",
     "APIParameter",
     "APIRequestBody",
     "APIResponse",
-    "setup_openapi_routes",
-    # Decorators
-    "tags",
+    "OpenAPIGenerator",
+    "api_doc",  # Alias for summary
     "api_tags",  # Alias for tags
     "deprecated",
+    "description",
     "operation_id",
     "requires_auth",
     "response",
+    "setup_openapi_routes",
     "summary",
-    "api_doc",  # Alias for summary
-    "description",
-    # HTML templates
-    "SWAGGER_UI_HTML",
-    "REDOC_HTML",
+    # Decorators
+    "tags",
 ]

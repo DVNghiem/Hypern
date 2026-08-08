@@ -12,6 +12,6 @@ Example::
     data = response.json()
 """
 
-from hypern._hypern import HttpClient, ClientResponse
+from hypern._hypern import ClientResponse, HttpClient
 
-__all__ = ["HttpClient", "ClientResponse"]
+__all__ = ["ClientResponse", "HttpClient"]

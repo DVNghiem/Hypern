@@ -36,6 +36,7 @@ if __name__ == "__main__":
 | [Error Handling](error-handling.md) | Exception handling and error responses |
 | [File Uploads](file-uploads.md) | Multipart file handling |
 | [Database](database.md) | Database operations and connection pooling |
+| [SQLAlchemy](sqlalchemy.md) | SQLAlchemy ORM integration and migrations |
 | [Best Practices](best-practices.md) | Performance tips and patterns |
 | [User Guide](user-guide.md) | Comprehensive user guide |
 

@@ -5,6 +5,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use sqlx::query_builder::QueryBuilder;
 use std::sync::OnceLock;
 
 static ANY_RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
@@ -64,11 +65,12 @@ impl AnyPool {
         let params = params.unwrap_or_default();
 
         any_runtime().block_on(async {
-            let mut q = sqlx::query(&sql);
+            let mut q = QueryBuilder::<sqlx::Any>::new(&sql);
             for p in &params {
-                q = q.bind(p);
+                q.push_bind(p);
             }
             let rows = q
+                .build()
                 .fetch_all(&pool)
                 .await
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
@@ -95,11 +97,12 @@ impl AnyPool {
         let params = params.unwrap_or_default();
 
         any_runtime().block_on(async {
-            let mut q = sqlx::query(&sql);
+            let mut q = QueryBuilder::<sqlx::Any>::new(&sql);
             for p in &params {
-                q = q.bind(p);
+                q.push_bind(p);
             }
             let row = q
+                .build()
                 .fetch_one(&pool)
                 .await
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
@@ -116,11 +119,12 @@ impl AnyPool {
         let params = params.unwrap_or_default();
 
         any_runtime().block_on(async {
-            let mut q = sqlx::query(&sql);
+            let mut q = QueryBuilder::<sqlx::Any>::new(&sql);
             for p in &params {
-                q = q.bind(p);
+                q.push_bind(p);
             }
             let result = q
+                .build()
                 .execute(&pool)
                 .await
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;

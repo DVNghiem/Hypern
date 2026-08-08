@@ -31,7 +31,7 @@ class RunCommand:
     """Handles the `hypern run` CLI command."""
 
     # Common module:attribute patterns to auto-discover
-    _DISCOVERY_PATTERNS = [
+    _DISCOVERY_PATTERNS = [  # noqa: RUF012
         ("app", "app"),
         ("app", "application"),
         ("main", "app"),
@@ -127,7 +127,7 @@ class RunCommand:
                 continue
             try:
                 module = importlib.import_module(mod_name)
-            except Exception:
+            except Exception:  # noqa: BLE001, S112
                 continue
             for attr_name in dir(module):
                 obj = getattr(module, attr_name, None)

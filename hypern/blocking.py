@@ -33,13 +33,14 @@ from __future__ import annotations
 
 import functools
 import os
-from typing import Any, Callable, List, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from hypern._hypern import BlockingExecutor
 
 T = TypeVar("T")
 
-_default_executor: Optional[BlockingExecutor] = None
+_default_executor: BlockingExecutor | None = None
 
 def _get_default_executor() -> BlockingExecutor:
     """Return (and lazily create) the module-level default executor."""
@@ -92,11 +93,11 @@ def blocking_run(callable: Callable[..., T], *args: Any, **kwargs: Any) -> T:
 
 def blocking_map(
     callable: Callable[[Any], T],
-    items: List[Any],
+    items: list[Any],
     *,
     chunk_size: int = 0,
-    executor: Optional[BlockingExecutor] = None,
-) -> List[T]:
+    executor: BlockingExecutor | None = None,
+) -> list[T]:
     """
     Map *callable* over *items* in parallel on Rust threads.
 
@@ -116,10 +117,10 @@ def blocking_map(
 
 
 def blocking_parallel(
-    tasks: List[tuple],
+    tasks: list[tuple],
     *,
-    executor: Optional[BlockingExecutor] = None,
-) -> List[Any]:
+    executor: BlockingExecutor | None = None,
+) -> list[Any]:
     """
     Run heterogeneous tasks in parallel on Rust threads.
 
@@ -136,7 +137,7 @@ def blocking_parallel(
     return ex.run_parallel(tasks)
 
 
-def blocking(fn: Optional[Callable] = None, *, executor: Optional[BlockingExecutor] = None):
+def blocking(fn: Callable | None = None, *, executor: BlockingExecutor | None = None):
     """
     Decorator that offloads a function to a Rust blocking thread.
 

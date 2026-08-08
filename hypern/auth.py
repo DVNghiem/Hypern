@@ -37,14 +37,16 @@ Example:
 
 from __future__ import annotations
 
+import base64
 import functools
 import hashlib
 import hmac
 import inspect
-import time
-import base64
 import json
-from typing import Any, Callable, Dict, List, Optional, Set
+import time
+from collections.abc import Callable
+from typing import Any
+
 
 class JWTAuth:
     """
@@ -83,13 +85,13 @@ class JWTAuth:
         secret: str = "",
         algorithm: str = "HS256",
         expiry_seconds: int = 3600,
-        issuer: Optional[str] = None,
-        audience: Optional[str] = None,
+        issuer: str | None = None,
+        audience: str | None = None,
         header_name: str = "Authorization",
         header_prefix: str = "Bearer",
         auto_error: bool = True,
-        private_key_pem: Optional[str] = None,
-        public_key_pem: Optional[str] = None,
+        private_key_pem: str | None = None,
+        public_key_pem: str | None = None,
     ):
         self.secret = secret
         self.algorithm = algorithm.upper()
@@ -101,22 +103,21 @@ class JWTAuth:
         self.auto_error = auto_error
 
         # Asymmetric key material (RS256 / ES256)
-        self._private_key_pem: Optional[bytes] = (
+        self._private_key_pem: bytes | None = (
             private_key_pem.encode() if isinstance(private_key_pem, str) else private_key_pem
         )
-        self._public_key_pem: Optional[bytes] = (
+        self._public_key_pem: bytes | None = (
             public_key_pem.encode() if isinstance(public_key_pem, str) else public_key_pem
         )
 
-        if self.algorithm in ("RS256", "ES256"):
-            if self._private_key_pem is None and self._public_key_pem is None:
-                raise ValueError(
-                    f"{self.algorithm} requires at least one of "
-                    "private_key_pem or public_key_pem"
-                )
+        if self.algorithm in ("RS256", "ES256") and self._private_key_pem is None and self._public_key_pem is None:
+            raise ValueError(
+                f"{self.algorithm} requires at least one of "
+                "private_key_pem or public_key_pem"
+            )
 
         # Token blacklist for revocation
-        self._blacklist: Set[str] = set()
+        self._blacklist: set[str] = set()
 
     @staticmethod
     def _b64url_encode(data: bytes) -> str:
@@ -131,7 +132,7 @@ class JWTAuth:
             s += "=" * padding
         return base64.urlsafe_b64decode(s)
 
-    def encode(self, payload: Dict[str, Any], expiry_seconds: Optional[int] = None) -> str:
+    def encode(self, payload: dict[str, Any], expiry_seconds: int | None = None) -> str:
         """
         Create a signed JWT token.
 
@@ -148,7 +149,7 @@ class JWTAuth:
         now = int(time.time())
         exp = expiry_seconds if expiry_seconds is not None else self.expiry_seconds
 
-        claims: Dict[str, Any] = {
+        claims: dict[str, Any] = {
             **payload,
             "iat": now,
             "exp": now + exp,
@@ -181,7 +182,7 @@ class JWTAuth:
         else:
             raise JWTError(f"Unsupported algorithm: {self.algorithm}")
 
-    def decode(self, token: str) -> Dict[str, Any]:
+    def decode(self, token: str) -> dict[str, Any]:
         """
         Decode and validate a JWT token.
 
@@ -218,21 +219,21 @@ class JWTAuth:
             # Decode payload
             try:
                 payload = json.loads(self._b64url_decode(payload_b64))
-            except (json.JSONDecodeError, Exception) as e:
+            except (json.JSONDecodeError, Exception) as e:  # noqa: BLE001
                 raise JWTError(f"Invalid payload: {e}")
         elif self.algorithm == "RS256":
             from hypern._hypern import jwt_verify_rs256
             try:
                 payload_json = jwt_verify_rs256(token, self._public_key_pem or self._private_key_pem)
                 payload = json.loads(payload_json)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 raise JWTError(f"RS256 verification failed: {e}")
         elif self.algorithm == "ES256":
             from hypern._hypern import jwt_verify_es256
             try:
                 payload_json = jwt_verify_es256(token, self._public_key_pem or self._private_key_pem)
                 payload = json.loads(payload_json)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 raise JWTError(f"ES256 verification failed: {e}")
         else:
             raise JWTError(f"Unsupported algorithm: {self.algorithm}")
@@ -276,7 +277,7 @@ class JWTAuth:
             jti = token[:32]
         self._blacklist.add(jti)
 
-    def refresh(self, token: str, expiry_seconds: Optional[int] = None) -> str:
+    def refresh(self, token: str, expiry_seconds: int | None = None) -> str:
         """
         Refresh a token by creating a new one with the same claims.
 
@@ -293,7 +294,7 @@ class JWTAuth:
             payload.pop(key, None)
         return self.encode(payload, expiry_seconds)
 
-    def _extract_token(self, req) -> Optional[str]:
+    def _extract_token(self, req) -> str | None:
         """Extract the JWT from the request header."""
         auth_header = req.header(self.header_name)
         if not auth_header:
@@ -471,13 +472,13 @@ class APIKeyAuth:
 
     def __init__(
         self,
-        keys: Optional[Dict[str, str]] = None,
+        keys: dict[str, str] | None = None,
         header_name: str = "X-API-Key",
-        query_param: Optional[str] = None,
-        cookie_name: Optional[str] = None,
+        query_param: str | None = None,
+        cookie_name: str | None = None,
         auto_error: bool = True,
     ):
-        self._keys: Dict[str, str] = keys or {}
+        self._keys: dict[str, str] = keys or {}
         self.header_name = header_name
         self.query_param = query_param
         self.cookie_name = cookie_name
@@ -491,7 +492,7 @@ class APIKeyAuth:
         """Remove an API key. Returns True if removed."""
         return self._keys.pop(key, None) is not None
 
-    def validate_key(self, key: str) -> Optional[str]:
+    def validate_key(self, key: str) -> str | None:
         """
         Validate an API key and return the associated client name.
 
@@ -500,7 +501,7 @@ class APIKeyAuth:
         """
         return self._keys.get(key)
 
-    def _extract_key(self, req) -> Optional[str]:
+    def _extract_key(self, req) -> str | None:
         """Extract the API key from the request."""
         # 1. Header
         key = req.header(self.header_name)
@@ -610,13 +611,13 @@ class RBACPolicy:
             ...
     """
 
-    def __init__(self, roles: Optional[Dict[str, List[str]]] = None):
-        self._roles: Dict[str, Set[str]] = {}
+    def __init__(self, roles: dict[str, list[str]] | None = None):
+        self._roles: dict[str, set[str]] = {}
         if roles:
             for role, perms in roles.items():
                 self._roles[role] = set(perms)
 
-    def add_role(self, role: str, permissions: Optional[List[str]] = None) -> None:
+    def add_role(self, role: str, permissions: list[str] | None = None) -> None:
         """Define a new role with optional permissions."""
         self._roles[role] = set(permissions or [])
 
@@ -635,39 +636,39 @@ class RBACPolicy:
         if role in self._roles:
             self._roles[role] -= set(permissions)
 
-    def get_permissions(self, role: str) -> Set[str]:
+    def get_permissions(self, role: str) -> set[str]:
         """Get all permissions for a role."""
         return self._roles.get(role, set()).copy()
 
-    def get_all_permissions(self, roles: List[str]) -> Set[str]:
+    def get_all_permissions(self, roles: list[str]) -> set[str]:
         """Get the union of permissions for multiple roles."""
-        perms: Set[str] = set()
+        perms: set[str] = set()
         for role in roles:
             perms |= self._roles.get(role, set())
         return perms
 
-    def has_role(self, user_roles: List[str], required_role: str) -> bool:
+    def has_role(self, user_roles: list[str], required_role: str) -> bool:
         """Check if the user has a specific role."""
         return required_role in user_roles
 
-    def has_any_role(self, user_roles: List[str], required_roles: List[str]) -> bool:
+    def has_any_role(self, user_roles: list[str], required_roles: list[str]) -> bool:
         """Check if the user has any of the required roles."""
         return bool(set(user_roles) & set(required_roles))
 
-    def has_all_roles(self, user_roles: List[str], required_roles: List[str]) -> bool:
+    def has_all_roles(self, user_roles: list[str], required_roles: list[str]) -> bool:
         """Check if the user has all required roles."""
         return set(required_roles) <= set(user_roles)
 
-    def has_permission(self, user_roles: List[str], permission: str) -> bool:
+    def has_permission(self, user_roles: list[str], permission: str) -> bool:
         """Check if any of the user's roles grant a specific permission."""
         return permission in self.get_all_permissions(user_roles)
 
-    def has_any_permission(self, user_roles: List[str], permissions: List[str]) -> bool:
+    def has_any_permission(self, user_roles: list[str], permissions: list[str]) -> bool:
         """Check if any of the user's roles grant any of the permissions."""
         user_perms = self.get_all_permissions(user_roles)
         return bool(user_perms & set(permissions))
 
-    def has_all_permissions(self, user_roles: List[str], permissions: List[str]) -> bool:
+    def has_all_permissions(self, user_roles: list[str], permissions: list[str]) -> bool:
         """Check if the user's roles grant all required permissions."""
         user_perms = self.get_all_permissions(user_roles)
         return set(permissions) <= user_perms
@@ -776,7 +777,7 @@ class RBACPolicy:
         return decorator
 
     @staticmethod
-    def _get_user_roles(ctx) -> Optional[List[str]]:
+    def _get_user_roles(ctx) -> list[str] | None:
         """Extract user roles from the request context."""
         if ctx is None:
             return None
@@ -902,7 +903,7 @@ def requires_permission(*permissions: str, match_all: bool = True) -> Callable:
     return decorator
 
 
-def _extract_roles(ctx) -> Optional[List[str]]:
+def _extract_roles(ctx) -> list[str] | None:
     """Extract roles from context (auth_user dict or object)."""
     if ctx is None:
         return None
@@ -914,7 +915,7 @@ def _extract_roles(ctx) -> Optional[List[str]]:
     return getattr(auth_user, "roles", [])
 
 
-def _extract_permissions(ctx) -> Optional[set]:
+def _extract_permissions(ctx) -> set[str] | None:
     """Extract permissions from context."""
     if ctx is None:
         return None
@@ -929,10 +930,10 @@ def _extract_permissions(ctx) -> Optional[set]:
 
 
 __all__ = [
+    "APIKeyAuth",
     "JWTAuth",
     "JWTError",
-    "APIKeyAuth",
     "RBACPolicy",
-    "requires_role",
     "requires_permission",
+    "requires_role",
 ]

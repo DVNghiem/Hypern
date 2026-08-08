@@ -1,9 +1,9 @@
 use axum::body::HttpBody;
 use axum::{body::Body, extract::State, http::Request, response::IntoResponse, Router};
 use pyo3::prelude::*;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::net::TcpListener;
-use xxhash_rust::xxh3::xxh3_64;
 
 use crate::core::interpreter::http_execute;
 use crate::core::reload::ReloadManager;
@@ -18,6 +18,10 @@ use crate::{
     core::global::{get_event_loop, set_global_runtime},
     http::response::response_404,
 };
+
+static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
+static REQUEST_ID_PREFIX: LazyLock<u64> =
+    LazyLock::new(|| uuid::Uuid::new_v4().as_u128() as u64);
 
 /// Shared application state for Axum handlers
 #[derive(Clone)]
@@ -161,15 +165,19 @@ async fn handle_request(State(state): State<AppState>, req: Request<Body>) -> im
     state.reload_manager.health().increment_in_flight();
     let rm = state.reload_manager.clone();
 
-    // Capture method and path for logging before consuming request
-    // Generate request_id upfront using xxh3_64 (same pattern as MiddlewareContext)
-    let id_seed = format!("{}{}", req.uri().path(), req.method());
+    // Capture method and path for logging before consuming request.
+    // Generated IDs are unique per request and retain the 16-character hex form.
     let request_id = req
         .headers()
         .get("x-request-id")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.split(',').next().unwrap_or(s).trim().to_string())
-        .unwrap_or_else(|| format!("{:016x}", xxh3_64(id_seed.as_bytes())));
+        .unwrap_or_else(|| {
+            format!(
+                "{:016x}",
+                *REQUEST_ID_PREFIX ^ NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+            )
+        });
     
     let method_str = req.method().to_string();
     let path_str = req.uri().path().to_string();

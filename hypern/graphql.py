@@ -24,7 +24,7 @@ Example::
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any
 
 try:
     from strawberry import Schema
@@ -106,7 +106,7 @@ class GraphQLRoute:
             return
 
         variables_raw = _get_query_param(request, "variables")
-        variables: Optional[Dict[str, Any]] = None
+        variables: dict[str, Any] | None = None
         if variables_raw:
             try:
                 variables = json.loads(variables_raw)
@@ -119,7 +119,7 @@ class GraphQLRoute:
     async def _handle_post(self, request: Any, response: Any) -> None:
         try:
             body = _get_body_json(request)
-        except Exception:
+        except Exception:  # noqa: BLE001
             response.status_code = 400
             response.json({"errors": [{"message": "Invalid JSON body"}]})
             return
@@ -141,7 +141,7 @@ class GraphQLRoute:
         _send_result(response, result)
 
 
-def _get_header(request: Any, name: str) -> Optional[str]:
+def _get_header(request: Any, name: str) -> str | None:
     headers = getattr(request, "headers", None)
     if headers is None:
         return None
@@ -152,7 +152,7 @@ def _get_header(request: Any, name: str) -> Optional[str]:
     return None
 
 
-def _get_query_param(request: Any, name: str) -> Optional[str]:
+def _get_query_param(request: Any, name: str) -> str | None:
     if hasattr(request, "query_params"):
         qp = request.query_params
         if isinstance(qp, dict):
@@ -162,7 +162,7 @@ def _get_query_param(request: Any, name: str) -> Optional[str]:
     return None
 
 
-def _get_body_json(request: Any) -> Dict[str, Any]:
+def _get_body_json(request: Any) -> dict[str, Any]:
     if hasattr(request, "json"):
         body = request.json
         if callable(body):
@@ -177,7 +177,7 @@ def _get_body_json(request: Any) -> Dict[str, Any]:
 
 
 def _send_result(response: Any, result: Any) -> None:
-    payload: Dict[str, Any] = {"data": result.data}
+    payload: dict[str, Any] = {"data": result.data}
     if result.errors:
         payload["errors"] = [
             {"message": str(e), "path": getattr(e, "path", None)}

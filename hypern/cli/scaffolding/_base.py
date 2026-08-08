@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Dict
-
 
 def readme(name: str, pattern_label: str) -> str:
     """Generate README.md content."""
@@ -141,7 +139,7 @@ WORKERS=1
 """
 
 
-def base_files(name: str, pattern_label: str) -> Dict[str, str]:
+def base_files(name: str, pattern_label: str) -> dict[str, str]:
     """Return the files common to every scaffolded project."""
     return {
         "config.py": config(name),

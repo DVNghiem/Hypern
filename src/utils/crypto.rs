@@ -1,3 +1,4 @@
+use hmac::KeyInit;
 use pyo3::prelude::*;
 use rand::{Rng, RngExt};
 
@@ -49,7 +50,8 @@ pub fn hmac_sha256_hex(key: &str, data: &str) -> String {
     use sha2::Sha256;
     type HmacSha256 = Hmac<Sha256>;
 
-    let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC: any key size");
+    // hmac::Hmac::new was removed; use new_from_slice which returns a Result
+    let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC can take key of any length");
     mac.update(data.as_bytes());
     hex_encode(&mac.finalize().into_bytes())
 }
@@ -61,7 +63,8 @@ pub fn hmac_sha256_bytes(key: &[u8], data: &[u8]) -> Vec<u8> {
     use sha2::Sha256;
     type HmacSha256 = Hmac<Sha256>;
 
-    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC: any key size");
+    // Use new_from_slice for raw key bytes
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any length");
     mac.update(data);
     mac.finalize().into_bytes().to_vec()
 }
@@ -182,8 +185,8 @@ pub fn jwt_sign_rs256(payload_json: &str, pem_key: &[u8]) -> PyResult<String> {
     use base64::Engine;
     use rsa::pkcs1v15::SigningKey;
     use rsa::pkcs8::DecodePrivateKey;
-    use sha2::Sha256;
-    use signature::SignatureEncoding;
+    use rsa::sha2::Sha256;
+    use rsa::signature::Signer;
 
     let header = r#"{"alg":"RS256","typ":"JWT"}"#;
     let b64url = base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -200,11 +203,12 @@ pub fn jwt_sign_rs256(payload_json: &str, pem_key: &[u8]) -> PyResult<String> {
         pyo3::exceptions::PyValueError::new_err(format!("Invalid RSA private key: {}", e))
     })?;
 
-    let signing_key = SigningKey::<Sha256>::new_unprefixed(private_key);
-    let sig: rsa::pkcs1v15::Signature =
-        signature::Signer::sign(&signing_key, signing_input.as_bytes());
+    let signing_key = SigningKey::<Sha256>::new(private_key);
+    let sig = signing_key.sign(signing_input.as_bytes());
+    use rsa::signature::SignatureEncoding;
+    let sig_bytes: &[u8] = &sig.to_bytes();
+    let sig_b64 = b64url.encode(sig_bytes);
 
-    let sig_b64 = b64url.encode(sig.to_bytes());
     Ok(format!("{}.{}", signing_input, sig_b64))
 }
 
@@ -220,8 +224,8 @@ pub fn jwt_verify_rs256(token: &str, pem_key: &[u8]) -> PyResult<String> {
     use base64::Engine;
     use rsa::pkcs1v15::VerifyingKey;
     use rsa::pkcs8::DecodePublicKey;
-    use sha2::Sha256;
-    use signature::Verifier;
+    use rsa::sha2::Sha256;
+    use rsa::signature::Verifier;
 
     let b64url = base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
@@ -242,7 +246,8 @@ pub fn jwt_verify_rs256(token: &str, pem_key: &[u8]) -> PyResult<String> {
         pyo3::exceptions::PyValueError::new_err(format!("Invalid RSA public key: {}", e))
     })?;
 
-    let verifying_key = VerifyingKey::<Sha256>::new_unprefixed(public_key);
+    let verifying_key = VerifyingKey::<Sha256>::new(public_key);
+
     let sig_bytes = b64url.decode(parts[2]).map_err(|e| {
         pyo3::exceptions::PyValueError::new_err(format!("Invalid signature encoding: {}", e))
     })?;

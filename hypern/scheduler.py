@@ -36,13 +36,14 @@ import logging
 import math
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger("hypern.scheduler")
 
-
+    
 class RetryPolicy:
     """
     Configurable retry policy with exponential back-off.
@@ -66,7 +67,7 @@ class RetryPolicy:
         backoff: float = 1.0,
         backoff_factor: float = 2.0,
         max_delay: float = 60.0,
-        retry_on: Optional[Tuple[type, ...]] = None,
+        retry_on: tuple[type, ...] | None = None,
     ):
         self.max_retries = max_retries
         self.backoff = backoff
@@ -98,8 +99,8 @@ class TaskMetrics:
         self.total_failed: int = 0
         self.total_retried: int = 0
         self.total_cancelled: int = 0
-        self._durations: List[float] = []
-        self._failure_counts: Dict[str, int] = {}
+        self._durations: list[float] = []
+        self._failure_counts: dict[str, int] = {}
 
     def record_submit(self) -> None:
         with self._lock:
@@ -141,7 +142,7 @@ class TaskMetrics:
             if not self._durations:
                 return 0.0
             sorted_d = sorted(self._durations)
-            idx = int(math.ceil(0.95 * len(sorted_d))) - 1
+            idx = math.ceil(0.95 * len(sorted_d)) - 1
             return sorted_d[max(0, idx)]
 
     @property
@@ -151,7 +152,7 @@ class TaskMetrics:
             if not self._durations:
                 return 0.0
             sorted_d = sorted(self._durations)
-            idx = int(math.ceil(0.99 * len(sorted_d))) - 1
+            idx = math.ceil(0.99 * len(sorted_d)) - 1
             return sorted_d[max(0, idx)]
 
     @property
@@ -163,12 +164,12 @@ class TaskMetrics:
         return (self.total_completed / total) * 100.0
 
     @property
-    def top_errors(self) -> List[Tuple[str, int]]:
+    def top_errors(self) -> list[tuple[str, int]]:
         """Top error types sorted by frequency."""
         with self._lock:
             return sorted(self._failure_counts.items(), key=lambda x: x[1], reverse=True)[:10]
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         """Return a JSON-serialisable snapshot of all metrics."""
         return {
             "total_submitted": self.total_submitted,
@@ -200,9 +201,9 @@ class TaskMonitor:
 
     def __init__(self):
         self.metrics = TaskMetrics()
-        self._hooks_before: List[Callable] = []
-        self._hooks_after: List[Callable] = []
-        self._hooks_error: List[Callable] = []
+        self._hooks_before: list[Callable] = []
+        self._hooks_after: list[Callable] = []
+        self._hooks_error: list[Callable] = []
 
     def before_task(self, func: Callable) -> Callable:
         """Register a hook called before each task executes."""
@@ -223,21 +224,21 @@ class TaskMonitor:
         for hook in self._hooks_before:
             try:
                 hook(task_name, args)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
     def _fire_after(self, task_name: str, result: Any, duration: float) -> None:
         for hook in self._hooks_after:
             try:
                 hook(task_name, result, duration)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
     def _fire_error(self, task_name: str, error: Exception, attempt: int) -> None:
         for hook in self._hooks_error:
             try:
                 hook(task_name, error, attempt)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
 
@@ -257,11 +258,11 @@ class ScheduledTaskResult:
     task_name: str
     state: ScheduledTaskState
     result: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     attempts: int = 0
-    started_at: Optional[float] = None
-    completed_at: Optional[float] = None
-    next_run: Optional[float] = None
+    started_at: float | None = None
+    completed_at: float | None = None
+    next_run: float | None = None
     duration_ms: float = 0.0
 
 
@@ -357,14 +358,14 @@ class TaskScheduler:
         scheduler.stop()
     """
 
-    def __init__(self, monitor: Optional[TaskMonitor] = None):
+    def __init__(self, monitor: TaskMonitor | None = None):
         self.monitor = monitor or TaskMonitor()
-        self._cron_tasks: List[Tuple[CronExpression, Callable, RetryPolicy, str]] = []
-        self._interval_tasks: List[Tuple[float, Callable, RetryPolicy, str, float]] = []
-        self._one_shot_tasks: List[Tuple[float, Callable, tuple, RetryPolicy, str]] = []
+        self._cron_tasks: list[tuple[CronExpression, Callable, RetryPolicy, str]] = []
+        self._interval_tasks: list[tuple[float, Callable, RetryPolicy, str, float]] = []
+        self._one_shot_tasks: list[tuple[float, Callable, tuple, RetryPolicy, str]] = []
         self._running = False
-        self._thread: Optional[threading.Thread] = None
-        self._results: Dict[str, ScheduledTaskResult] = {}
+        self._thread: threading.Thread | None = None
+        self._results: dict[str, ScheduledTaskResult] = {}
         self._lock = threading.Lock()
         self._task_counter = 0
 
@@ -373,7 +374,7 @@ class TaskScheduler:
             self._task_counter += 1
             return f"sched-{self._task_counter}"
 
-    def cron(self, expression: str, retry: Optional[RetryPolicy] = None, name: Optional[str] = None) -> Callable:
+    def cron(self, expression: str, retry: RetryPolicy | None = None, name: str | None = None) -> Callable:
         """
         Decorator to schedule a function on a cron expression.
 
@@ -391,7 +392,7 @@ class TaskScheduler:
             return func
         return decorator
 
-    def interval(self, seconds: float, retry: Optional[RetryPolicy] = None, name: Optional[str] = None) -> Callable:
+    def interval(self, seconds: float, retry: RetryPolicy | None = None, name: str | None = None) -> Callable:
         """
         Decorator to run a function at a fixed interval.
 
@@ -408,7 +409,7 @@ class TaskScheduler:
             return func
         return decorator
 
-    def task(self, retry: Optional[RetryPolicy] = None, delay_seconds: float = 0) -> Callable:
+    def task(self, retry: RetryPolicy | None = None, delay_seconds: float = 0) -> Callable:
         """
         Decorator for a one-shot task submitted to the scheduler.
 
@@ -475,7 +476,7 @@ class TaskScheduler:
                 self.monitor.metrics.record_complete(duration)
                 self.monitor._fire_after(task_name, ret, duration)
                 break
-            except Exception as exc:
+            except Exception as exc: # noqa: BLE001
                 error_str = f"{type(exc).__name__}: {exc}"
                 result.error = error_str
                 self.monitor._fire_error(task_name, exc, attempt)
@@ -567,22 +568,22 @@ class TaskScheduler:
             # Sleep for ~1 second before checking again
             time.sleep(1.0)
 
-    def get_result(self, task_id: str) -> Optional[ScheduledTaskResult]:
+    def get_result(self, task_id: str) -> ScheduledTaskResult | None:
         """Get the result of a scheduled task by ID."""
         with self._lock:
             return self._results.get(task_id)
 
-    def get_all_results(self) -> Dict[str, ScheduledTaskResult]:
+    def get_all_results(self) -> dict[str, ScheduledTaskResult]:
         """Get all task results."""
         with self._lock:
             return dict(self._results)
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """Get a snapshot of task metrics."""
         return self.monitor.metrics.snapshot()
 
 
-def periodic(seconds: float, retry: Optional[RetryPolicy] = None) -> Callable:
+def periodic(seconds: float, retry: RetryPolicy | None = None) -> Callable:
     """
     Standalone decorator to mark a function as a periodic task.
 
@@ -604,12 +605,12 @@ def periodic(seconds: float, retry: Optional[RetryPolicy] = None) -> Callable:
 
 
 __all__ = [
+    "CronExpression",
     "RetryPolicy",
+    "ScheduledTaskResult",
+    "ScheduledTaskState",
     "TaskMetrics",
     "TaskMonitor",
-    "ScheduledTaskState",
-    "ScheduledTaskResult",
-    "CronExpression",
     "TaskScheduler",
     "periodic",
 ]

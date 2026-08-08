@@ -1,19 +1,20 @@
 
 from __future__ import annotations
 
-from typing import Callable, List
+from collections.abc import Callable
 
 from hypern._hypern import (
+    BasicAuthMiddleware,
+    CacheMiddleware,
+    CircuitBreakerMiddleware,
+    CompressionMiddleware,
     CorsMiddleware,
     RateLimitMiddleware,
+    RequestIdMiddleware,
     SecurityHeadersMiddleware,
     TimeoutMiddleware,
-    CompressionMiddleware,
-    RequestIdMiddleware,
-    BasicAuthMiddleware,
-    CircuitBreakerMiddleware,
-    CacheMiddleware,
 )
+
 
 class MiddlewareStack:
     """
@@ -32,14 +33,14 @@ class MiddlewareStack:
     """
     
     def __init__(self):
-        self._middleware: List[object] = []
+        self._middleware: list[object] = []
     
-    def use(self, middleware: object) -> 'MiddlewareStack':
+    def use(self, middleware: object) -> MiddlewareStack:
         """Add middleware to the stack."""
         self._middleware.append(middleware)
         return self
     
-    def get_middleware(self) -> List[object]:
+    def get_middleware(self) -> list[object]:
         """Get the list of middleware."""
         return self._middleware.copy()
     
@@ -96,20 +97,19 @@ def after_request(func: Callable) -> Callable:
 
 
 __all__ = [
+    'BasicAuthMiddleware',
+    'CacheMiddleware',
+    'CircuitBreakerMiddleware',
+    'CompressionMiddleware',
     # Rust Middleware
     'CorsMiddleware',
-    'RateLimitMiddleware',
-    'SecurityHeadersMiddleware',
-    'TimeoutMiddleware',
-    'CompressionMiddleware',
-    'RequestIdMiddleware',
-    'BasicAuthMiddleware',
-    'CircuitBreakerMiddleware',
-    'CacheMiddleware',
-    
     # Utilities
     'MiddlewareStack',
-    'middleware',
-    'before_request',
+    'RateLimitMiddleware',
+    'RequestIdMiddleware',
+    'SecurityHeadersMiddleware',
+    'TimeoutMiddleware',
     'after_request',
+    'before_request',
+    'middleware',
 ]

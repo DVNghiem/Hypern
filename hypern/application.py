@@ -2,41 +2,49 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import signal
 import inspect
 import logging
-from typing import (
-    Any, Callable, Dict, List, Optional, Type, TypeVar, Union, 
-    Awaitable, TYPE_CHECKING
-)
+import signal
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated, Any, Self, TypeVar
 
-from typing_extensions import Annotated, Doc
+from typing_extensions import Doc
 
+from hypern._hypern import DIContainer, HealthCheck, ReloadConfig, ReloadManager, Server, SSEStream, StreamingResponse, TaskExecutor, TaskResult
 from hypern._hypern import Route as RustRoute
 from hypern._hypern import Router as RustRouter
-from hypern._hypern import Server
-from hypern.exceptions import ExceptionHandler
-from hypern.router import Router
-from hypern._hypern import DIContainer, TaskExecutor, TaskResult
-from hypern._hypern import SSEStream, StreamingResponse
-from hypern._hypern import HealthCheck, ReloadConfig, ReloadManager
-from hypern.di import inject as _standalone_inject
-
-from hypern.database import Database as _Database, finalize_db as _finalize_db
 from hypern._hypern import get_db as _get_db
-from hypern.tasks import set_task_executor
+from hypern.database import Database as _Database
+from hypern.database import finalize_db as _finalize_db
+from hypern.di import inject as _standalone_inject
+from hypern.exceptions import ExceptionHandler
 from hypern.logfmt import config_basic_logging
+from hypern.router import Router
+from hypern.tasks import set_task_executor
 
 if TYPE_CHECKING:
     from hypern.openapi import OpenAPIGenerator
-    from hypern.websocket import WebSocketRouter
     from hypern.scheduler import TaskScheduler
+    from hypern.websocket import WebSocketRouter
 
 AppType = TypeVar("AppType", bound="Hypern")
-HandlerType = Callable[..., Union[None, Awaitable[None]]]
+HandlerType = Callable[..., None | Awaitable[None]]
 
 # Type alias for middleware (can be Rust middleware object or Python callable)
-Middleware = Union[Callable, object]
+Middleware = Callable | object
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _PipelineScope:
+    """One immutable scope in a compiled Python request pipeline."""
+
+    name: str
+    before: tuple[Callable, ...]
+    middleware: tuple[Callable, ...]
+    after: tuple[Callable, ...]
 
 
 class Hypern:
@@ -65,9 +73,9 @@ class Hypern:
     """
     
     def __init__(
-        self: AppType,
+        self: Self,
         routes: Annotated[
-            Optional[List[RustRoute]],
+            list[RustRoute] | None,
             Doc("A list of routes to serve incoming HTTP and WebSocket requests.")
         ] = None,
         debug: bool = False,
@@ -80,24 +88,29 @@ class Hypern:
         
         # Core routing
         self._router = RustRouter(path="/")
-        self._routers: List[Router] = []
+        self._routers: list[tuple[str, Router]] = []
+
+        # Pipeline descriptors are rebuilt only while registration is open,
+        # then finalized and frozen when listen() begins.
+        self._pipeline_compilers: list[Callable[[], None]] = []
+        self._registration_frozen = False
         
         # Middleware (Rust middleware instances or callables)
-        self._middleware: List[Union[Callable, object, tuple]] = []
+        self._middleware: list[Callable | object | tuple] = []
         
         # Request lifecycle handlers
-        self._before_handlers: List[Callable] = []
-        self._after_handlers: List[Callable] = []
+        self._before_handlers: list[Callable] = []
+        self._after_handlers: list[Callable] = []
         
         # Exception handling
         self._exception_handler = ExceptionHandler()
         
         # Lifecycle handlers
-        self._startup_handlers: List[Callable] = []
-        self._shutdown_handlers: List[Callable] = []
+        self._startup_handlers: list[Callable] = []
+        self._shutdown_handlers: list[Callable] = []
         
         # Settings
-        self._settings: Dict[str, Any] = {}
+        self._settings: dict[str, Any] = {}
         self.debug = debug
         
         self._di = DIContainer()
@@ -109,16 +122,16 @@ class Hypern:
         set_task_executor(self._tasks)
         
         # OpenAPI (lazy-loaded)
-        self._openapi: Optional['OpenAPIGenerator'] = None
+        self._openapi: OpenAPIGenerator | None = None
         self._openapi_enabled = False
         
         # Graceful shutdown
-        self._shutdown_event: Optional[asyncio.Event] = None
+        self._shutdown_event: asyncio.Event | None = None
         self._running = False
         
         # Backwards compatibility
         self.router = self._router
-        self.response_headers: Dict[str, str] = {}
+        self.response_headers: dict[str, str] = {}
         self.start_up_handler = None
         self.shutdown_handler = None
         
@@ -127,31 +140,31 @@ class Hypern:
         self._ws_router: _WSRouter = _WSRouter()
         
         # Task scheduler (lazy-initialised)
-        self._scheduler: Optional['TaskScheduler'] = None
+        self._scheduler: TaskScheduler | None = None
         
         # Reload / health configuration
-        self._reload_config: Optional[ReloadConfig] = None
-        self._reload_manager: Optional[ReloadManager] = None
+        self._reload_config: ReloadConfig | None = None
+        self._reload_manager: ReloadManager | None = None
         
         if routes is not None:
             self._router.extend_route(routes)
   
     @property
-    def di(self) -> Optional['DIContainer']:
+    def di(self) -> DIContainer | None:
         """Access the dependency injection container."""
         return self._di
     
     @property
-    def tasks(self) -> Optional['TaskExecutor']:
+    def tasks(self) -> TaskExecutor | None:
         """Access the background task executor."""
         return self._tasks
     
     @property
-    def openapi(self) -> Optional['OpenAPIGenerator']:
+    def openapi(self) -> OpenAPIGenerator | None:
         """Access the OpenAPI generator (if enabled)."""
         return self._openapi
     
-    def set(self, key: str, value: Any) -> 'Hypern':
+    def set(self, key: str, value: Any) -> Hypern:
         """
         Set an application setting.
         
@@ -171,12 +184,12 @@ class Hypern:
         """
         return self._settings.get(key, default)
     
-    def enable(self, key: str) -> 'Hypern':
+    def enable(self, key: str) -> Hypern:
         """Enable a boolean setting."""
         self._settings[key] = True
         return self
     
-    def disable(self, key: str) -> 'Hypern':
+    def disable(self, key: str) -> Hypern:
         """Disable a boolean setting."""
         self._settings[key] = False
         return self
@@ -189,7 +202,7 @@ class Hypern:
         """Check if a setting is disabled."""
         return not self.enabled(key)
     
-    def singleton(self, name: str, value: Any) -> 'Hypern':
+    def singleton(self, name: str, value: Any) -> Hypern:
         """
         Register a singleton dependency (shared across all requests).
         
@@ -201,7 +214,7 @@ class Hypern:
             self._di.singleton(name, value)
         return self
     
-    def factory(self, name: str, factory_fn: Callable) -> 'Hypern':
+    def factory(self, name: str, factory_fn: Callable) -> Hypern:
         """
         Register a factory dependency (created for each request).
         
@@ -230,7 +243,7 @@ class Hypern:
     
     def background(
         self, 
-        delay_seconds: Optional[float] = None
+        delay_seconds: float | None = None
     ) -> Callable:
         """
         Decorator to run a function as a background task.
@@ -263,8 +276,8 @@ class Hypern:
         self, 
         handler: Callable, 
         args: tuple = (),
-        delay_seconds: Optional[float] = None
-    ) -> Optional[str]:
+        delay_seconds: float | None = None
+    ) -> str | None:
         """
         Submit a background task programmatically.
         
@@ -287,7 +300,7 @@ class Hypern:
         from hypern.tasks import submit_task as global_submit_task
         return global_submit_task(handler, args=args, delay_seconds=delay_seconds)
     
-    def get_task(self, task_id: str) -> Optional["TaskResult"]:
+    def get_task(self, task_id: str) -> TaskResult | None:
         """
         Get the result of a background task.
         
@@ -302,7 +315,7 @@ class Hypern:
         from hypern.tasks import get_task as global_get_task
         return global_get_task(task_id)
     
-    def sse(self, buffer_size: int = 100) -> 'SSEStream':
+    def sse(self, buffer_size: int = 100) -> SSEStream:
         """
         Create an SSE stream for sending server-sent events.
         
@@ -334,7 +347,7 @@ class Hypern:
         self, 
         content_type: str = "application/octet-stream",
         buffer_size: int = 100
-    ) -> 'StreamingResponse':
+    ) -> StreamingResponse:
         """
         Create a streaming response builder.
         
@@ -366,17 +379,18 @@ class Hypern:
                     await ws.send_text(f"echo: {msg}")
         """
         def decorator(handler: Callable) -> Callable:
+            self._assert_registration_open()
             self._ws_router.add_route(path, handler, **options)
             return handler
         return decorator
     
     @property
-    def ws_router(self) -> 'WebSocketRouter':
+    def ws_router(self) -> WebSocketRouter:
         """Access the WebSocket router."""
         return self._ws_router
     
     @property
-    def scheduler(self) -> 'TaskScheduler':
+    def scheduler(self) -> TaskScheduler:
         """
         Access or create the task scheduler.
         
@@ -402,8 +416,8 @@ class Hypern:
         log_request: bool = True,
         log_response: bool = True,
         queue_size: int = 10_000,
-        skip_paths: Optional[List[str]] = None,
-    ) -> 'Hypern':
+        skip_paths: list[str] | None = None,
+    ) -> Hypern:
         """
         Configure logging behavior from the Rust layer.
         
@@ -449,7 +463,7 @@ class Hypern:
         startup_grace_secs: int = 2,
         health_probes: bool = True,
         health_path: str = "/_health",
-    ) -> 'Hypern':
+    ) -> Hypern:
         """
         Configure zero-downtime reload and health probes.
         
@@ -496,7 +510,7 @@ class Hypern:
         return self
     
     @property
-    def health(self) -> Optional[HealthCheck]:
+    def health(self) -> HealthCheck | None:
         """
         Access the health check instance (available after server starts).
         
@@ -509,7 +523,7 @@ class Hypern:
         return None
     
     @property
-    def reload_manager(self) -> Optional[ReloadManager]:
+    def reload_manager(self) -> ReloadManager | None:
         """
         Access the reload manager (available after server starts).
         
@@ -555,7 +569,7 @@ class Hypern:
         docs_path: str = "/docs",
         redoc_path: str = "/redoc",
         openapi_path: str = "/openapi.json",
-    ) -> 'Hypern':
+    ) -> Hypern:
         """
         Enable OpenAPI/Swagger documentation.
         
@@ -600,6 +614,8 @@ class Hypern:
             endpoint: The endpoint path (e.g., "/users/:id")
             handler: The function that handles requests
         """
+        self._assert_registration_open()
+
         # Normalize path to start with /
         if endpoint and not endpoint.startswith("/"):
             endpoint = "/" + endpoint
@@ -627,7 +643,7 @@ class Hypern:
         # if self._openapi_enabled and self._openapi:
         #     self._openapi.add_route(method, endpoint, handler)
     
-    def get(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def get(self, path: str, middleware: list[Callable] | None = None, **options):
         """
         Register a GET route.
         
@@ -637,12 +653,12 @@ class Hypern:
                 res.json([{"id": 1}])
         """
         def decorator(handler: Callable[..., Any]):
-            wrapped = self._wrap_handler(handler, middleware)
+            wrapped = self._wrap_handler(handler, middleware, route_path=path)
             self.add_route("GET", path, wrapped)
             return handler
         return decorator
     
-    def post(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def post(self, path: str, middleware: list[Callable] | None = None, **options):
         """
         Register a POST route.
         
@@ -653,52 +669,52 @@ class Hypern:
                 res.status(201).json(body)
         """
         def decorator(handler: Callable[..., Any]):
-            wrapped = self._wrap_handler(handler, middleware)
+            wrapped = self._wrap_handler(handler, middleware, route_path=path)
             self.add_route("POST", path, wrapped)
             return handler
         return decorator
     
-    def put(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def put(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register a PUT route."""
         def decorator(handler: Callable[..., Any]):
-            wrapped = self._wrap_handler(handler, middleware)
+            wrapped = self._wrap_handler(handler, middleware, route_path=path)
             self.add_route("PUT", path, wrapped)
             return handler
         return decorator
     
-    def delete(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def delete(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register a DELETE route."""
         def decorator(handler: Callable[..., Any]):
-            wrapped = self._wrap_handler(handler, middleware)
+            wrapped = self._wrap_handler(handler, middleware, route_path=path)
             self.add_route("DELETE", path, wrapped)
             return handler
         return decorator
     
-    def patch(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def patch(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register a PATCH route."""
         def decorator(handler: Callable[..., Any]):
-            wrapped = self._wrap_handler(handler, middleware)
+            wrapped = self._wrap_handler(handler, middleware, route_path=path)
             self.add_route("PATCH", path, wrapped)
             return handler
         return decorator
     
-    def options(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def options(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register an OPTIONS route."""
         def decorator(handler: Callable[..., Any]):
-            wrapped = self._wrap_handler(handler, middleware)
+            wrapped = self._wrap_handler(handler, middleware, route_path=path)
             self.add_route("OPTIONS", path, wrapped)
             return handler
         return decorator
     
-    def head(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def head(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register a HEAD route."""
         def decorator(handler: Callable[..., Any]):
-            wrapped = self._wrap_handler(handler, middleware)
+            wrapped = self._wrap_handler(handler, middleware, route_path=path)
             self.add_route("HEAD", path, wrapped)
             return handler
         return decorator
     
-    def all(self, path: str, middleware: Optional[List[Callable]] = None, **options):
+    def all(self, path: str, middleware: list[Callable] | None = None, **options):
         """
         Register a route for all HTTP methods.
         
@@ -708,7 +724,7 @@ class Hypern:
                 res.json({"method": req.method})
         """
         def decorator(handler: Callable[..., Any]):
-            wrapped = self._wrap_handler(handler, middleware)
+            wrapped = self._wrap_handler(handler, middleware, route_path=path)
             for method in ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]:
                 self.add_route(method, path, wrapped)
             return handler
@@ -761,7 +777,7 @@ class Hypern:
         url_path: str = "/static",
         directory: str = "static",
         index: str = "index.html"
-    ) -> 'Hypern':
+    ) -> Hypern:
         """
         Serve static files from a directory.
         
@@ -776,8 +792,8 @@ class Hypern:
             app.static("/assets", "public")  # Serve /assets/* from ./public
             app.static()  # Serve /static/* from ./static
         """
-        import os
         import mimetypes
+        import os
         
         # Ensure directory exists
         if not os.path.isdir(directory):
@@ -827,16 +843,16 @@ class Hypern:
                 res.header("Cache-Control", "public, max-age=3600")
                 
                 res.send(content)
-            except IOError:
+            except OSError:
                 res.status(500).send("Error reading file")
         
         return self
     
     def use(
         self, 
-        path_or_middleware: Union[str, Middleware, Callable, Router], 
-        middleware_or_router: Optional[Union[Middleware, Callable, Router]] = None
-    ) -> 'Hypern':
+        path_or_middleware: str | Middleware | Callable | Router, 
+        middleware_or_router: Middleware | Callable | Router | None = None
+    ) -> Hypern:
         """
         Use middleware or mount a router.
         
@@ -853,6 +869,8 @@ class Hypern:
             app.use("/admin", auth_middleware)
         """
         from hypern.middleware import MiddlewareStack
+
+        self._assert_registration_open()
 
         if isinstance(path_or_middleware, str):
             path = path_or_middleware
@@ -882,27 +900,36 @@ class Hypern:
         
         return self
 
-    def _register_middleware(self, target: Any, path: Optional[str] = None):
+    def _register_middleware(self, target: Any, path: str | None = None):
         """Register middleware or hook, optionally with a path."""
-        # Check for request hooks
-        if hasattr(target, "_before_request"):
+        self._assert_registration_open()
+
+        # Legacy hook decorators are classified once at registration so the
+        # request executor never needs callable signature or marker inspection.
+        is_before_hook = bool(getattr(target, "_before_request", False))
+        is_after_hook = bool(getattr(target, "_after_request", False))
+
+        if is_before_hook:
             self._before_handlers.append(target)
-        
-        if hasattr(target, "_after_request"):
+
+        if is_after_hook:
             self._after_handlers.append(target)
-            
-        # If it's a hook but not explicitly marked as middleware, still keep it for global execution
-        # But if it's a standard middleware (with next) or Rust middleware, add to _middleware
+
+        if is_before_hook or is_after_hook:
+            self._refresh_pipeline_descriptors()
+            return
+
         if path:
             self._middleware.append((path, target))
         else:
             self._middleware.append(target)
+        self._refresh_pipeline_descriptors()
     
     def mount(
         self,
-        router_or_prefix: Union[str, Router],
-        router: Optional[Router] = None,
-    ) -> 'Hypern':
+        router_or_prefix: str | Router,
+        router: Router | None = None,
+    ) -> Hypern:
         """
         Mount a router on the application.
         
@@ -914,6 +941,8 @@ class Hypern:
             # Mount with explicit prefix
             app.mount("/api/v2", api_v2)
         """
+        self._assert_registration_open()
+
         if isinstance(router_or_prefix, Router):
             # app.mount(router) - use router's own prefix
             self._mount_router(router_or_prefix.prefix, router_or_prefix)
@@ -929,14 +958,23 @@ class Hypern:
 
     def _mount_router(self, prefix: str, router: Router):
         """Mount a router at a path prefix."""
+        self._assert_registration_open()
         self._routers.append((prefix, router))
+        router._register_change_listener(self._refresh_pipeline_descriptors)
         
-        # Add all routes from the router to the main router
-        # Wrap each handler so it gets ctx injection, error handling, etc.
-        for method, path, handler, options in router._routes:
-            full_path = prefix + path if prefix else path
-            wrapped = self._wrap_handler(handler)
-            self.add_route(method, full_path, wrapped)
+        # The application owns the only Python wrapper for mounted routes. The
+        # router contributes raw handlers plus its scope and route metadata.
+        for route in router._routes:
+            full_path = prefix + route.path if prefix else route.path
+            wrapped = self._wrap_handler(
+                route.handler,
+                route.middleware,
+                router=router,
+                route_path=full_path,
+                route_before=route.before_hooks,
+                route_after=route.after_hooks,
+            )
+            self.add_route(route.method, full_path, wrapped)
     
     def on_startup(self, handler: Callable) -> Callable:
         """
@@ -948,6 +986,7 @@ class Hypern:
                 print("Server starting...")
                 await init_database()
         """
+        self._assert_registration_open()
         self._startup_handlers.append(handler)
         return handler
     
@@ -961,6 +1000,7 @@ class Hypern:
                 print("Server shutting down...")
                 await close_database()
         """
+        self._assert_registration_open()
         self._shutdown_handlers.append(handler)
         return handler
     
@@ -973,7 +1013,9 @@ class Hypern:
             async def log_request(req, res, ctx):
                 print(f"Request: {req.method} {req.path}")
         """
+        self._assert_registration_open()
         self._before_handlers.append(handler)
+        self._refresh_pipeline_descriptors()
         return handler
     
     def after_request(self, handler: Callable) -> Callable:
@@ -985,10 +1027,12 @@ class Hypern:
             async def add_headers(req, res, ctx):
                 res.header("X-Server", "Hypern")
         """
+        self._assert_registration_open()
         self._after_handlers.append(handler)
+        self._refresh_pipeline_descriptors()
         return handler
     
-    def errorhandler(self, exc_class: Type[Exception]) -> Callable:
+    def errorhandler(self, exc_class: type[Exception]) -> Callable:
         """
         Register an exception handler.
         
@@ -1001,122 +1045,295 @@ class Hypern:
             def handle_all(req, res, error):
                 res.status(500).json({"error": "Server error"})
         """
-        return self._exception_handler.handle(exc_class)
+        self._assert_registration_open()
+
+        def decorator(handler: Callable) -> Callable:
+            self._assert_registration_open()
+            self._exception_handler.add_handler(exc_class, handler)
+            return handler
+
+        return decorator
     
-    def register_error_handler(self, exc_class: Type[Exception], handler: Callable):
+    def register_error_handler(self, exc_class: type[Exception], handler: Callable):
         """Register an exception handler programmatically."""
+        self._assert_registration_open()
         self._exception_handler.add_handler(exc_class, handler)
+
+    def _assert_registration_open(self) -> None:
+        """Reject setup mutations after listen() freezes the application."""
+        if self._registration_frozen:
+            raise RuntimeError("application registration is frozen after listen()")
+
+    def _refresh_pipeline_descriptors(self) -> None:
+        """Recompile route descriptors after a setup-time pipeline mutation."""
+        for compile_descriptor in self._pipeline_compilers:
+            compile_descriptor()
+
+    def _freeze_registration(self) -> None:
+        """Compile final descriptors and freeze the app and mounted routers."""
+        if self._registration_frozen:
+            return
+
+        self._refresh_pipeline_descriptors()
+        for _, router in self._routers:
+            router._freeze_registration()
+        self._registration_frozen = True
+
+    @staticmethod
+    async def _invoke_callable(callable_: Callable, *args: Any) -> Any:
+        """Invoke a sync or async hook/handler and await returned awaitables."""
+        result = callable_(*args)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    @staticmethod
+    def _response_is_terminal(res: Any) -> bool:
+        """Return whether the response has become terminal for inward stages."""
+        is_sent = getattr(res, "is_sent", None)
+        if callable(is_sent):
+            return bool(is_sent())
+        if is_sent is not None:
+            return bool(is_sent)
+        return bool(getattr(res, "finished", False))
+
+    def _python_middleware_for(self, route_path: str) -> tuple[Callable, ...]:
+        """Compile Python middleware for a registered route path."""
+        if route_path and not route_path.startswith("/"):
+            route_path = "/" + route_path
+        selected: list[Callable] = []
+        for entry in self._middleware:
+            if isinstance(entry, tuple):
+                path_prefix, middleware = entry
+                if route_path.startswith(path_prefix) and callable(middleware):
+                    selected.append(middleware)
+            elif callable(entry):
+                # Rust middleware objects are not callable and remain owned by
+                # the server's Tower pipeline.
+                selected.append(entry)
+        return tuple(selected)
+
+    def _compile_pipeline_scopes(
+        self,
+        middleware: tuple[Callable, ...],
+        *,
+        router: Router | None,
+        route_path: str,
+        route_before: tuple[Callable, ...],
+        route_after: tuple[Callable, ...],
+    ) -> tuple[_PipelineScope, ...]:
+        """Build one immutable descriptor for a registered route."""
+        scopes = [
+            _PipelineScope(
+                name="app",
+                before=tuple(self._before_handlers),
+                middleware=self._python_middleware_for(route_path),
+                after=tuple(self._after_handlers),
+            )
+        ]
+        if router is not None:
+            scopes.append(
+                _PipelineScope(
+                    name="router",
+                    before=tuple(router._before_handlers),
+                    middleware=tuple(router._middleware),
+                    after=tuple(router._after_handlers),
+                )
+            )
+        scopes.append(
+            _PipelineScope(
+                name="route",
+                before=route_before,
+                middleware=middleware,
+                after=route_after,
+            )
+        )
+        return tuple(scopes)
+
+    async def _run_middleware_chain(
+        self,
+        middleware: list[Callable] | tuple[Callable, ...],
+        req: Any,
+        res: Any,
+        ctx: Any,
+        continuation: Callable[[], Awaitable[None]],
+    ) -> None:
+        """Run async middleware in registration order around a continuation."""
+        async def dispatch(index: int) -> None:
+            if self._response_is_terminal(res):
+                return
+            if index == len(middleware):
+                await continuation()
+                return
+
+            next_called = False
+
+            async def next_fn() -> None:
+                nonlocal next_called
+                if next_called:
+                    raise RuntimeError("middleware next_fn may only be awaited once")
+                next_called = True
+                if not self._response_is_terminal(res):
+                    await dispatch(index + 1)
+
+            result = middleware[index](req, res, ctx, next_fn)
+            if not inspect.isawaitable(result):
+                # Compatibility for legacy synchronous middleware that has
+                # already completed a terminal short-circuit. It cannot enter
+                # another pipeline stage; every non-terminal middleware call
+                # still has to produce an awaitable.
+                if self._response_is_terminal(res):
+                    return
+                raise TypeError(
+                    "Python middleware must return an awaitable and use "
+                    "(req, res, ctx, next_fn)"
+                )
+            await result
+
+        await dispatch(0)
+
+    async def _execute_python_pipeline(
+        self,
+        handler: Callable,
+        scopes: tuple[_PipelineScope, ...],
+        entered_scopes: list[_PipelineScope],
+        req: Any,
+        res: Any,
+        ctx: Any,
+    ) -> None:
+        """Execute the canonical app -> router -> route Python pipeline."""
+        route_scope = scopes[-1]
+
+        # App and router before hooks precede every Python middleware stage.
+        for scope in scopes[:-1]:
+            entered_scopes.append(scope)
+            for before_handler in scope.before:
+                await self._invoke_callable(before_handler, req, res, ctx)
+                if self._response_is_terminal(res):
+                    return
+
+        async def execute_scope(index: int) -> None:
+            scope = scopes[index]
+            if scope is route_scope:
+                entered_scopes.append(scope)
+                for before_handler in scope.before:
+                    await self._invoke_callable(before_handler, req, res, ctx)
+                    if self._response_is_terminal(res):
+                        return
+
+            async def continue_inward() -> None:
+                if self._response_is_terminal(res):
+                    return
+                if index + 1 < len(scopes):
+                    await execute_scope(index + 1)
+                else:
+                    await self._invoke_callable(handler, req, res, ctx)
+
+            await self._run_middleware_chain(
+                scope.middleware,
+                req,
+                res,
+                ctx,
+                continue_inward,
+            )
+
+        await execute_scope(0)
+
+    def _mark_database_error(self, ctx: Any) -> None:
+        """Mark an active request database session for rollback."""
+        if not ctx:
+            return
+        try:
+            if _Database.is_configured():
+                session = _get_db(ctx.request_id)
+                session.set_error()
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to mark the request database session as errored")
+
+    async def _run_after_hooks(
+        self,
+        entered_scopes: list[_PipelineScope],
+        req: Any,
+        res: Any,
+        ctx: Any,
+    ) -> None:
+        """Unwind entered scopes and suppress observer hook failures."""
+        for scope in reversed(entered_scopes):
+            for after_handler in reversed(scope.after):
+                try:
+                    await self._invoke_callable(after_handler, req, res, ctx)
+                except Exception:  # noqa: BLE001
+                    logger.exception("%s after hook failed", scope.name)
     
     def _wrap_handler(
-        self, 
-        handler: Callable, 
-        middleware: Optional[List[Callable]] = None
+        self,
+        handler: Callable,
+        middleware: list[Callable] | tuple[Callable, ...] | None = None,
+        *,
+        router: Router | None = None,
+        route_path: str = "/",
+        route_before: tuple[Callable, ...] = (),
+        route_after: tuple[Callable, ...] = (),
     ) -> Callable:
-        """Wrap a handler with middleware, context injection, error handling, and auto DB finalization."""
-        
+        """Create the application-owned wrapper for one Python route pipeline."""
+        self._assert_registration_open()
+        route_middleware = tuple(middleware or ())
+        route_before = tuple(route_before)
+        route_after = tuple(route_after)
+        scopes: tuple[_PipelineScope, ...] = ()
+
+        def compile_descriptor() -> None:
+            nonlocal scopes
+            scopes = self._compile_pipeline_scopes(
+                route_middleware,
+                router=router,
+                route_path=route_path,
+                route_before=route_before,
+                route_after=route_after,
+            )
+
+        compile_descriptor()
+        self._pipeline_compilers.append(compile_descriptor)
+
         @functools.wraps(handler)
         async def wrapped(req, res):
-            # Create request context with DI
             ctx = self._di.create_context() if self._di else None
-            
+            entered_scopes: list[_PipelineScope] = []
+            unhandled_error: Exception | None = None
+            exception_handler_error: Exception | None = None
+
             try:
-                # Execute before-request handlers
-                for before_handler in self._before_handlers:
-                    try:
-                        if inspect.iscoroutinefunction(before_handler):
-                            await before_handler(req, res, ctx)
-                        else:
-                            before_handler(req, res, ctx)
-                    except Exception as e:
-                        await self._exception_handler.handle_exception(req, res, e)
-                        return
-                
-                async def execute_handler():
-                    try:
-                        if inspect.iscoroutinefunction(handler):
-                            await handler(req, res, ctx)
-                        else:
-                            handler(req, res, ctx)
-                    except Exception as e:
-                        # Mark DB session as having error for rollback
-                        if ctx:
-                            try:
-                                if _Database.is_configured():
-                                    session = _get_db(ctx.request_id)
-                                    session.set_error()
-                            except Exception:
-                                pass
-                        await self._exception_handler.handle_exception(req, res, e)
-                
-                # Collect applicable Python middleware
-                all_middleware = []
-                
-                # Add applicable global/path-specific middleware from self._middleware
-                for mw_entry in self._middleware:
-                    if isinstance(mw_entry, tuple):
-                        path_prefix, mw = mw_entry
-                        # Path matching for path-specific middleware
-                        if req.path.startswith(path_prefix):
-                            # Skip if it's already a before/after hook (already executed)
-                            if not hasattr(mw, "_before_request") and not hasattr(mw, "_after_request"):
-                                if callable(mw) or hasattr(mw, "_is_middleware"):
-                                    all_middleware.append(mw)
-                    else:
-                        mw = mw_entry
-                        # Skip Rust middleware (they are handled by server core)
-                        # Skip before/after hooks (they are handled above/below)
-                        if callable(mw) and not isinstance(mw, tuple):
-                            if not hasattr(mw, "_before_request") and not hasattr(mw, "_after_request"):
-                                if hasattr(mw, "_is_middleware") or (
-                                    # Fallback for simple callables that behave like middleware (req, res, ctx, next)
-                                    mw.__code__.co_argcount >= 4 if hasattr(mw, "__code__") else False
-                                ):
-                                    all_middleware.append(mw)
-                
-                # Add route-specific middleware
-                if middleware:
-                    all_middleware.extend(middleware)
-                
-                # Execute middleware chain
-                if all_middleware:
-                    index = 0
-                    
-                    async def next_middleware():
-                        nonlocal index
-                        if index < len(all_middleware):
-                            mw = all_middleware[index]
-                            index += 1
-                            if asyncio.iscoroutinefunction(mw):
-                                await mw(req, res, ctx, next_middleware)
-                            else:
-                                mw(req, res, ctx, next_middleware)
-                        else:
-                            await execute_handler()
-                    
-                    try:
-                        await next_middleware()
-                    except Exception as e:
-                        await self._exception_handler.handle_exception(req, res, e)
+                await self._execute_python_pipeline(
+                    handler,
+                    scopes,
+                    entered_scopes,
+                    req,
+                    res,
+                    ctx,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._mark_database_error(ctx)
+                response_was_terminal = self._response_is_terminal(res)
+                try:
+                    await self._exception_handler.handle_exception(req, res, exc)
+                except Exception as handler_exc:  # noqa: BLE001
+                    unhandled_error = exc
+                    exception_handler_error = handler_exc
                 else:
-                    await execute_handler()
-                
-                # Execute after-request handlers
-                for after_handler in self._after_handlers:
-                    try:
-                        if asyncio.iscoroutinefunction(after_handler):
-                            await after_handler(req, res, ctx)
-                        else:
-                            after_handler(req, res, ctx)
-                    except Exception:
-                        pass  # Don't fail on after-request errors
+                    response_is_terminal = self._response_is_terminal(res)
+                    if response_was_terminal or not response_is_terminal:
+                        unhandled_error = exc
             finally:
-                # Auto-finalize database session at end of request (like Flask-SQLAlchemy session scope)
+                await self._run_after_hooks(entered_scopes, req, res, ctx)
                 if ctx:
                     try:
                         if _Database.is_configured():
                             _finalize_db(ctx)
-                    except Exception:
-                        pass  # Don't fail if DB wasn't used
+                    except Exception:  # noqa: BLE001
+                        logger.exception("Failed to finalize the request database session")
+
+            if unhandled_error is not None:
+                raise unhandled_error.with_traceback(unhandled_error.__traceback__) from exception_handler_error
         
         return wrapped
     
@@ -1136,7 +1353,7 @@ class Hypern:
                     await handler()
                 else:
                     handler()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"Error in shutdown handler: {e}")
     
     def _setup_signal_handlers(self):
@@ -1154,7 +1371,7 @@ class Hypern:
         self,
         port: int = 3000,
         host: str = '0.0.0.0',
-        callback: Optional[Callable] = None,
+        callback: Callable | None = None,
         **kwargs
     ):
         """
@@ -1165,6 +1382,8 @@ class Hypern:
             app.listen(3000, "127.0.0.1")
             app.listen(3000, callback=lambda: print("Server running on port 3000"))
         """
+        self._freeze_registration()
+
         if callback:
             callback()
         else:
@@ -1230,11 +1449,7 @@ class Hypern:
                     continue
                     
                 # Register Rust middleware objects (CORS, SecurityHeaders, etc.)
-                try:
-                    server.use_middleware(mw)
-                except Exception:
-                    # Silently skip non-Rust middleware (e.g., MiddlewareStack, Python middleware)
-                    pass
+                server.use_middleware(mw)
             
             server.start(
                 host=host,
@@ -1268,7 +1483,7 @@ class Hypern:
         port: int = 3000,
         host: str = '0.0.0.0',
         reload: bool = True,
-        reload_dirs: Optional[List[str]] = None,
+        reload_dirs: list[str] | None = None,
         reload_delay: float = 0.5,
         **kwargs
     ):
@@ -1302,8 +1517,8 @@ class Hypern:
         
         # Use watchdog for file watching if available, otherwise use polling
         try:
+            from watchdog.events import FileModifiedEvent, FileSystemEventHandler
             from watchdog.observers import Observer
-            from watchdog.events import FileSystemEventHandler, FileModifiedEvent
             
             watch_dirs = reload_dirs or ["."]
             
@@ -1416,9 +1631,8 @@ def hypern() -> Hypern:
     return Hypern()
 
 
-__all__ = [
-    'Hypern',
+__all__ = [  # noqa: PLE0604
+    Hypern,
     'create_app',
     'hypern',
 ]
-

@@ -67,6 +67,7 @@ docs/_build/
 
 # VSCode
 .vscode/
+.worktrees/
 
 # Pyenv
 .python-version

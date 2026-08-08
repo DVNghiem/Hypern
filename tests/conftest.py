@@ -78,8 +78,11 @@ class TestServerProcess:
         # Start the server process
         self.process = subprocess.Popen(
             [python_exe, server_script, "--host", self.host, "--port", str(self.port)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            # The test server logs each request.  These streams are not read
+            # while the server is running, so pipes eventually fill and block
+            # the worker in a write after a long test session.
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         )
         

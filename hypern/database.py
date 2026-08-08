@@ -1,19 +1,32 @@
 from __future__ import annotations
-from typing import Protocol, runtime_checkable
-from collections import OrderedDict
 
-from typing import Any, Dict, List, Optional, Union
+from collections import OrderedDict
 from contextlib import contextmanager
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from hypern._hypern import (
-    ConnectionPool as _ConnectionPool,
-    PoolConfig as _PoolConfig,
-    PoolStatus as _PoolStatus,
-    DbSession as _DbSession,
     AnyPool as _AnyPool,
-    get_db as _get_db,
+)
+from hypern._hypern import (
+    ConnectionPool as _ConnectionPool,
+)
+from hypern._hypern import (
+    DbSession as _DbSession,
+)
+from hypern._hypern import (
+    PoolConfig as _PoolConfig,
+)
+from hypern._hypern import (
+    PoolStatus as _PoolStatus,
+)
+from hypern._hypern import (
     finalize_db as _finalize_db,
+)
+from hypern._hypern import (
     finalize_db_all as _finalize_db_all,
+)
+from hypern._hypern import (
+    get_db as _get_db,
 )
 
 
@@ -32,21 +45,21 @@ class Database:
     - ``sqlite://`` — Uses the sqlx Any driver
     """
     
-    _databases: Dict[str, Dict[str, Any]] = {}
-    _initialized_pools: Dict[str, bool] = {}
-    _any_pools: Dict[str, "_AnyPool"] = {}
+    _databases: ClassVar[dict[str, dict[str, Any]]] = {}
+    _initialized_pools: ClassVar[dict[str, bool]] = {}
+    _any_pools: ClassVar[dict[str, _AnyPool]] = {}
     
     @classmethod
     def configure(
         cls,
         url: str,
         max_size: int = 16,
-        min_idle: Optional[int] = None,
+        min_idle: int | None = None,
         connect_timeout_secs: int = 30,
-        idle_timeout_secs: Optional[int] = None,
-        max_lifetime_secs: Optional[int] = None,
+        idle_timeout_secs: int | None = None,
+        max_lifetime_secs: int | None = None,
         test_before_acquire: bool = False,
-        keepalive_secs: Optional[int] = None,
+        keepalive_secs: int | None = None,
         alias: str = "default",
     ) -> None:
         """
@@ -128,7 +141,7 @@ class Database:
         return alias in cls._databases
     
     @classmethod
-    def status(cls, alias: str = "default") -> Optional[_PoolStatus]:
+    def status(cls, alias: str = "default") -> _PoolStatus | None:
         """
         Get the current pool status for the specified alias.
         
@@ -141,7 +154,7 @@ class Database:
         return _ConnectionPool.status_for_alias(alias)
     
     @classmethod
-    def close(cls, alias: Optional[str] = None) -> None:
+    def close(cls, alias: str | None = None) -> None:
         """
         Close connections and reset the pool(s).
         
@@ -185,7 +198,7 @@ class DbSession:
         """Get the request ID associated with this session."""
         return self._session.request_id
     
-    def begin(self) -> "DbSession":
+    def begin(self) -> DbSession:
         """
         Begin a database transaction.
         
@@ -198,7 +211,7 @@ class DbSession:
         self._session.begin()
         return self
     
-    def commit(self) -> "DbSession":
+    def commit(self) -> DbSession:
         """
         Commit the current transaction.
         
@@ -211,7 +224,7 @@ class DbSession:
         self._session.commit()
         return self
     
-    def rollback(self) -> "DbSession":
+    def rollback(self) -> DbSession:
         """
         Rollback the current transaction.
         
@@ -227,8 +240,8 @@ class DbSession:
     def query(
         self,
         sql: str,
-        params: Optional[List[Any]] = None
-    ) -> List[Dict[str, Any]]:
+        params: list[Any] | None = None
+    ) -> list[dict[str, Any]]:
         """
         Execute a SELECT query and return results as a list of dictionaries.
         
@@ -250,8 +263,8 @@ class DbSession:
     def query_one(
         self,
         sql: str,
-        params: Optional[List[Any]] = None
-    ) -> Dict[str, Any]:
+        params: list[Any] | None = None
+    ) -> dict[str, Any]:
         """
         Execute a SELECT query and return a single result.
         
@@ -260,7 +273,7 @@ class DbSession:
             params: List of parameter values
         
         Returns:
-            Dictionary representing the row
+            dictionary representing the row
         
         Raises:
             RuntimeError: If no rows are returned
@@ -276,7 +289,7 @@ class DbSession:
     def execute(
         self,
         sql: str,
-        params: Optional[List[Any]] = None
+        params: list[Any] | None = None
     ) -> int:
         """
         Execute an INSERT, UPDATE, or DELETE query.
@@ -299,7 +312,7 @@ class DbSession:
     def execute_many(
         self,
         sql: str,
-        params_list: List[List[Any]]
+        params_list: list[list[Any]]
     ) -> int:
         """
         Execute a batch of INSERT, UPDATE, or DELETE queries.
@@ -322,7 +335,7 @@ class DbSession:
         """
         return self._session.execute_many(sql, params_list)
     
-    def set_auto_commit(self, auto_commit: bool) -> "DbSession":
+    def set_auto_commit(self, auto_commit: bool) -> DbSession:
         """
         Set whether to auto-commit the transaction on request end.
         
@@ -335,7 +348,7 @@ class DbSession:
         self._session.set_auto_commit(auto_commit)
         return self
     
-    def set_error(self) -> "DbSession":
+    def set_error(self) -> DbSession:
         """
         Mark that an error occurred.
         
@@ -376,7 +389,7 @@ class DbSession:
         return f"DbSession(request_id='{self.request_id}', state='{self.state}')"
 
 
-def db(ctx_or_request_id: Union[str, Any], alias: str = "default") -> Union["DbSession", "AnySession"]:
+def db(ctx_or_request_id: str | Any, alias: str = "default") -> DbSession | AnySession:
     """
     Get a database session for the current request with the specified alias.
     
@@ -407,7 +420,7 @@ def db(ctx_or_request_id: Union[str, Any], alias: str = "default") -> Union["DbS
     return DbSession(_get_db(request_id, alias))
 
 
-def finalize_db(ctx_or_request_id: Union[str, Any], alias: Optional[str] = None) -> None:
+def finalize_db(ctx_or_request_id: str | Any, alias: str | None = None) -> None:
     """
     Finalize the database session(s) for a request.
     
@@ -455,29 +468,29 @@ class AnySession:
     Provides a similar API to ``DbSession`` but backed by sqlx's ``AnyPool``.
     """
 
-    def __init__(self, pool: "_AnyPool"):
+    def __init__(self, pool: _AnyPool):
         self._pool = pool
 
     def query(
         self,
         sql: str,
-        params: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        params: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Execute a SELECT query and return results as a list of dicts."""
         return self._pool.query(sql, params)
 
     def query_one(
         self,
         sql: str,
-        params: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        params: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Execute a SELECT query and return a single result."""
         return self._pool.query_one(sql, params)
 
     def execute(
         self,
         sql: str,
-        params: Optional[List[str]] = None,
+        params: list[str] | None = None,
     ) -> int:
         """Execute an INSERT/UPDATE/DELETE and return rows affected."""
         return self._pool.execute(sql, params)
@@ -544,7 +557,7 @@ class MultiTenantDatabase:
         self._dsn_template = dsn_template
         self._max_tenants = max_tenants
         self._pool_max_size = pool_max_size
-        # OrderedDict is used as an LRU cache (move_to_end on access)
+        # Ordereddict is used as an LRU cache (move_to_end on access)
         self._tenants: OrderedDict[str, bool] = OrderedDict()
 
     def _ensure_tenant(self, tenant: str) -> None:
@@ -566,7 +579,7 @@ class MultiTenantDatabase:
         Database._ensure_initialized(alias)
         self._tenants[tenant] = True
 
-    async def session(self, request: Any, ctx_or_request_id: Any) -> "DbSession":
+    async def session(self, request: Any, ctx_or_request_id: Any) -> DbSession:
         """
         Resolve the tenant from *request* and return a ``DbSession``.
 
@@ -590,11 +603,11 @@ class MultiTenantDatabase:
         self._tenants.clear()
 
 __all__ = [
+    "AnySession",
     "Database",
     "DbSession",
-    "AnySession",
+    "MultiTenantDatabase",
+    "TenantResolver",
     "db",
     "finalize_db",
-    "TenantResolver",
-    "MultiTenantDatabase",
 ]
