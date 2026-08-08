@@ -67,7 +67,7 @@ Hypern achieves high performance through:
 │                    Rust Core (Axum/Tokio)                    │
 │  - HTTP Server       - Middleware Chain    - JSON Parser     │
 │  - Radix Router      - Memory Pools        - SSE Streaming   │
-│  - Redis Pool        - Arena Allocator     - Task Executor   │
+│  - Arena Allocator   - Task Executor       - Pub/Sub          │
 └─────────────────────────────────────────────────────────────┘
 ```
 

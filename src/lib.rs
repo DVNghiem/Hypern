@@ -26,7 +26,6 @@ pub mod http;
 pub mod memory;
 pub mod middleware;
 pub mod realtime;
-pub mod redis;
 pub mod routing;
 pub mod telemetry;
 pub mod utils;
@@ -50,8 +49,6 @@ pub use crate::core::blocking_executor::BlockingExecutor;
 pub use crate::client::{ClientResponse, HttpClient};
 
 pub use crate::telemetry::MetricsRegistry;
-
-pub use crate::redis::RedisPool;
 
 pub use crate::http::streaming::{SSEEvent, SSEGenerator, SSEStream, StreamingResponse};
 
@@ -112,9 +109,6 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
 
     // Telemetry / Metrics
     module.add_class::<MetricsRegistry>()?;
-
-    // Redis
-    module.add_class::<RedisPool>()?;
 
     // Streaming/SSE
     module.add_class::<SSEEvent>()?;

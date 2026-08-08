@@ -25,7 +25,6 @@ app = Hypern()
 config = {
     "debug": True,
     "service_endpoint": "https://api.example.com",
-    "redis_url": "redis://localhost:6379",
     "secret_key": "your-secret-key"
 }
 app.singleton("config", config)
