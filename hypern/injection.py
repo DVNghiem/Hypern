@@ -770,8 +770,8 @@ def _allows_none(annotation: object) -> bool:
 __all__ = [
     "Body",
     "DependencyCycleError",
-    "Header",
     "HandlerPlan",
+    "Header",
     "Inject",
     "InjectionConfigurationError",
     "Json",
