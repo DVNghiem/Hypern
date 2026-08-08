@@ -23,6 +23,7 @@ nav:
       - WebSocket: websocket.md
       - Validation: validation.md
       - Dependency Injection: dependency-injection.md
+      - SQLAlchemy: sqlalchemy.md
       - Background Tasks: tasks.md
       - Task Scheduling: scheduling.md
       - Blocking Executor: blocking-executor.md
@@ -34,8 +35,6 @@ nav:
       - Metrics: metrics.md
       - Utilities: utils.md
   - Best Practices: best-practices.md
-  - Advanced:
-      - Performance Optimization: performance-optimization-plan.md
   - User Guide: user-guide.md
 
 markdown_extensions:

@@ -602,6 +602,7 @@ For more detailed documentation, visit:
 - [Task Scheduling](docs/scheduling.md)
 - [Request Validation](docs/validation.md)
 - [Dependency Injection](docs/dependency-injection.md)
+- [SQLAlchemy Integration](docs/sqlalchemy.md)
 
 ## 🤝 Contributing
 

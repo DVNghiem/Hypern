@@ -29,6 +29,7 @@ if __name__ == "__main__":
 | [Zero-Downtime Reloads](zero-downtime.md) | Graceful/hot reloads with health probes |
 | [Validation](validation.md) | Request validation and schema definition |
 | [Dependency Injection](dependency-injection.md) | Compiled providers and marker-based parameter binding |
+| [SQLAlchemy](sqlalchemy.md) | SQLAlchemy engine, session, transaction, and connection lifecycle |
 | [Authentication](auth.md) | JWT, API keys, and RBAC authorization |
 | [WebSocket](websocket.md) | Real-time WebSocket connections and rooms |
 | [Background Tasks](tasks.md) | Background job processing |
