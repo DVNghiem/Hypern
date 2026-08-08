@@ -5,7 +5,7 @@ build-backend = "maturin"
 
 [project]
 name = "hypern"
-version = "1.1.3"
+version = "1.1.4"
 description = "A Fast Async Python backend with a Rust runtime."
 authors = [{ name = "Martin Dang", email = "vannghiem848@gmail.com" }]
 requires-python = ">=3.11,<4.0"
@@ -72,6 +72,9 @@ mkdocs-material = "^9.7.1"
 [tool.ruff]
 line-length = 160
 exclude = ["src/*", ".git", "docs"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["hypern.injection.Body", "hypern.injection.Json"]
 
 [tool.ruff.mccabe]
 max-complexity = 10

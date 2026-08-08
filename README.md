@@ -403,6 +403,7 @@ async def delete_user(req, res, ctx):
 
 ```python
 import msgspec
+from typing import Annotated
 
 from hypern import Body, Header, Hypern, Json, Path, Query
 
@@ -420,22 +421,22 @@ class SearchQuery(msgspec.Struct):
 @app.post("/users/:user_id")
 async def create_user(
     res,
-    user_id: int = Path(),
-    payload: CreateUser = Json(),
-    request_id: str | None = Header("X-Request-ID"),
+    user_id: Annotated[int, Path()],
+    payload: Annotated[CreateUser, Json()],
+    request_id: Annotated[str | None, Header("X-Request-ID")],
 ):
     res.status(201).json({"id": user_id, "name": payload.name, "request_id": request_id})
 
 @app.get("/search")
-async def search(res, query: SearchQuery = Query()):
+async def search(res, query: Annotated[SearchQuery, Query()]):
     res.json({"query": query.q, "limit": query.limit})
 
 @app.post("/events")
-async def receive_event(res, raw_body: bytes = Body()):
+async def receive_event(res, raw_body: Annotated[bytes, Body()]):
     res.json({"size": len(raw_body)})
 ```
 
-`Json()`, `Query()`, `Path()`, and `Header()` coerce values using their type annotations. Invalid JSON, missing required values, and failed coercions flow through Hypern's normal validation error handling. `Body()` supplies raw `bytes` without parsing JSON.
+`Annotated` keeps source markers with the type annotation, so user projects can enable Ruff without B008 warnings. `Json()`, `Query()`, `Path()`, and `Header()` coerce values using their type annotations. Invalid JSON, missing required values, and failed coercions flow through Hypern's normal validation error handling. `Body()` supplies raw `bytes` without parsing JSON. The older default-marker form remains supported for compatibility.
 
 ### Router Mounting
 

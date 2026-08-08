@@ -208,10 +208,24 @@ class ProviderRegistry:
 
     @staticmethod
     def _unwrap_inject_annotation(annotation: object) -> tuple[object, Inject | None]:
+        annotation, marker = ProviderRegistry._unwrap_source_annotation(annotation)
+        return annotation, marker if isinstance(marker, Inject) else None
+
+    @staticmethod
+    def _unwrap_source_annotation(
+        annotation: object,
+    ) -> tuple[object, Inject | Json | Query | Header | Path | Body | None]:
         if get_origin(annotation) is not Annotated:
             return annotation, None
         annotated_type, *metadata = get_args(annotation)
-        marker = next((item for item in metadata if isinstance(item, Inject)), None)
+        marker = next(
+            (
+                item
+                for item in metadata
+                if isinstance(item, (Inject, Json, Query, Header, Path, Body))
+            ),
+            None,
+        )
         return annotated_type, marker
 
     @staticmethod
@@ -562,10 +576,15 @@ def _compile_handler_parameter(
         raise InjectionConfigurationError("handlers cannot declare variadic parameters")
 
     annotation = hints.get(parameter.name, parameter.annotation)
-    annotation, annotated_inject = ProviderRegistry._unwrap_inject_annotation(annotation)
+    annotation, annotated_marker = ProviderRegistry._unwrap_source_annotation(annotation)
     default = parameter.default
     default_inject = default if isinstance(default, Inject) else None
-    if annotated_inject is not None and default is not inspect.Parameter.empty:
+    default_marker = (
+        default
+        if isinstance(default, (Inject, Json, Query, Header, Path, Body))
+        else None
+    )
+    if annotated_marker is not None and default is not inspect.Parameter.empty:
         if default_inject is not None:
             raise InjectionConfigurationError(
                 f"parameter {parameter.name!r} declares Inject twice"
@@ -573,25 +592,26 @@ def _compile_handler_parameter(
         raise InjectionConfigurationError(
             f"parameter {parameter.name!r} declares conflicting sources"
         )
-    inject_marker = default_inject or annotated_inject
+    source_marker = default_marker or annotated_marker
+    inject_marker = source_marker if isinstance(source_marker, Inject) else None
 
     if parameter.name in {"req", "res", "ctx"}:
-        if default is not inspect.Parameter.empty or annotated_inject is not None:
+        if default is not inspect.Parameter.empty or annotated_marker is not None:
             raise InjectionConfigurationError(
                 f"reserved parameter {parameter.name!r} cannot declare a source marker"
             )
         resolver = _transport_resolver(parameter.name)
     elif inject_marker is not None:
         resolver = _inject_resolver(parameter, annotation, inject_marker, registry)
-    elif isinstance(default, Json):
+    elif isinstance(source_marker, Json):
         resolver = _json_resolver(parameter, annotation)
-    elif isinstance(default, Query):
-        resolver = _query_resolver(parameter, annotation, default)
-    elif isinstance(default, Header):
-        resolver = _header_resolver(parameter, annotation, default)
-    elif isinstance(default, Path):
-        resolver = _path_resolver(parameter, annotation, default, path_parameter_names)
-    elif isinstance(default, Body):
+    elif isinstance(source_marker, Query):
+        resolver = _query_resolver(parameter, annotation, source_marker)
+    elif isinstance(source_marker, Header):
+        resolver = _header_resolver(parameter, annotation, source_marker)
+    elif isinstance(source_marker, Path):
+        resolver = _path_resolver(parameter, annotation, source_marker, path_parameter_names)
+    elif isinstance(source_marker, Body):
         resolver = _body_resolver(parameter, annotation)
     else:
         raise InjectionConfigurationError(

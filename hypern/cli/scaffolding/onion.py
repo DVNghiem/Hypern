@@ -392,6 +392,8 @@ class DatabaseConfig:
     files["presentation/controllers/example_controller.py"] = '''\
 """Example controller – outermost ring, depends on application services."""
 
+from typing import Annotated
+
 from hypern import Inject, Json, Path, Query, Router
 
 example_router = Router(prefix="/examples")
@@ -399,8 +401,8 @@ example_router = Router(prefix="/examples")
 
 @example_router.get("/")
 async def list_examples(
-    active_only: bool | None = Query("active"),
-    service: object = Inject("example_service"),
+    active_only: Annotated[bool | None, Query("active")],
+    service: Annotated[object, Inject("example_service")],
 ) -> list:
     """List all examples (optionally filter active only via ?active=true)."""
     # items = await service.get_all(active_only=active_only)
@@ -409,8 +411,8 @@ async def list_examples(
 
 @example_router.get("/:id")
 async def get_example(
-    item_id: str = Path("id"),
-    service: object = Inject("example_service"),
+    item_id: Annotated[str, Path("id")],
+    service: Annotated[object, Inject("example_service")],
 ) -> dict:
     """Get a single example by ID."""
     # item = await service.get_by_id(item_id)
@@ -419,8 +421,8 @@ async def get_example(
 
 @example_router.post("/")
 async def create_example(
-    payload: dict = Json(),
-    service: object = Inject("example_service"),
+    payload: Annotated[dict, Json()],
+    service: Annotated[object, Inject("example_service")],
 ) -> dict:
     """Create a new example."""
     # dto = CreateExampleDTO(**payload)
@@ -430,9 +432,9 @@ async def create_example(
 
 @example_router.put("/:id")
 async def update_example(
-    item_id: str = Path("id"),
-    payload: dict = Json(),
-    service: object = Inject("example_service"),
+    item_id: Annotated[str, Path("id")],
+    payload: Annotated[dict, Json()],
+    service: Annotated[object, Inject("example_service")],
 ) -> dict:
     """Update an existing example."""
     # dto = UpdateExampleDTO(**payload)
@@ -442,8 +444,8 @@ async def update_example(
 
 @example_router.delete("/:id")
 async def delete_example(
-    item_id: str = Path("id"),
-    service: object = Inject("example_service"),
+    item_id: Annotated[str, Path("id")],
+    service: Annotated[object, Inject("example_service")],
 ) -> None:
     """Delete an example by ID."""
     # await service.delete(item_id)

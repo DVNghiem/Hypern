@@ -511,6 +511,44 @@ def test_handler_plan_binds_json_query_body_and_keyword_only_header() -> None:
     )
 
 
+def test_handler_plan_binds_all_sources_from_annotated_metadata() -> None:
+    service = Service(Database())
+    registry = ProviderRegistry()
+    registry.provide(Service, service)
+    registry.freeze()
+    request = _Request(
+        body=b'{"name":"widget","quantity":3}',
+        query_params={"page": "2", "active": "true"},
+        path_params={"user_id": "7"},
+        headers={"X-Token": "abc"},
+    )
+
+    def handler(
+        payload: typing.Annotated[_Payload, Json()],
+        query: typing.Annotated[_Search, Query()],
+        token: typing.Annotated[str, Header("X-Token")],
+        user_id: typing.Annotated[int, Path()],
+        body: typing.Annotated[bytes, Body()],
+        injected_service: typing.Annotated[Service, Inject()],
+    ) -> tuple[_Payload, _Search, str, int, bytes, Service]:
+        return payload, query, token, user_id, body, injected_service
+
+    plan = compile_handler(
+        handler,
+        path_parameter_names=frozenset({"user_id"}),
+        registry=registry,
+    )
+
+    assert asyncio.run(plan.invoke(request, object(), object(), RequestScope(registry))) == (
+        _Payload("widget", 3),
+        _Search(2, True),
+        "abc",
+        7,
+        request._body,
+        service,
+    )
+
+
 def test_handler_plan_rejects_invalid_json() -> None:
     registry = ProviderRegistry()
     registry.freeze()
