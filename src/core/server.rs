@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use crate::core::multiprocess::wait_for_workers_timeout;
 use crate::core::multiprocess::{spawn_workers, terminate_workers, wait_for_workers};
 use crate::core::reload::{
     PyHealthCheck, PyReloadConfig, PyReloadManager, ReloadConfig, ReloadManager,
@@ -200,13 +202,11 @@ impl Server {
                         }
                     }
 
-                    // Wait for drain timeout, then SIGTERM workers
                     let drain_secs = reload_manager.config().drain_timeout_secs;
-                    std::thread::sleep(std::time::Duration::from_secs(drain_secs));
-
-                    // Terminate old workers gracefully
-                    terminate_workers(&pids);
-                    wait_for_workers(&pids);
+                    wait_for_workers_timeout(
+                        &pids,
+                        std::time::Duration::from_secs(drain_secs.saturating_add(3)),
+                    );
 
                     // Respawn workers
                     let new_rm = ReloadManager::new(self.reload_config.clone());
@@ -295,14 +295,7 @@ impl Server {
 
                 if SHUTDOWN.load(Ordering::SeqCst) {
                     log::info!("Received shutdown signal, stopping workers...");
-                    // Send SIGUSR1 to workers for brief drain before termination
-                    for &pid in &pids {
-                        unsafe {
-                            libc::kill(pid, libc::SIGUSR1);
-                        }
-                    }
-                    // Brief grace period for in-flight requests
-                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    // Each worker owns its bounded drain and cancellation sequence.
                     terminate_workers(&pids);
                     break;
                 }
@@ -323,7 +316,13 @@ impl Server {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
         }
-        // Wait for all workers to finish
+        // Wait for the configured drain window plus bounded Python cleanup.
+        #[cfg(unix)]
+        wait_for_workers_timeout(
+            &pids,
+            std::time::Duration::from_secs(self.reload_config.drain_timeout_secs.saturating_add(3)),
+        );
+        #[cfg(not(unix))]
         wait_for_workers(&pids);
 
         Ok(())

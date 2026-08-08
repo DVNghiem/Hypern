@@ -320,21 +320,29 @@ impl ReloadManager {
     /// Wait until all in-flight requests complete or timeout expires.
     pub async fn wait_for_drain(&self) -> bool {
         let timeout = Duration::from_secs(self.inner.config.drain_timeout_secs);
-
-        if self.inner.health.in_flight() == 0 {
-            return true;
-        }
-
-        tokio::select! {
-            _ = self.inner.drain_complete.notified() => {
-                log::info!("Drain completed successfully");
-                true
+        let drained = tokio::time::timeout(timeout, async {
+            loop {
+                // Create the waiter before reading the counter so a transition
+                // to zero cannot be lost between the check and notification.
+                let notified = self.inner.drain_complete.notified();
+                if self.inner.health.in_flight() == 0 {
+                    return;
+                }
+                notified.await;
             }
-            _ = tokio::time::sleep(timeout) => {
-                let remaining = self.inner.health.in_flight();
-                log::warn!("Drain timeout reached with {} requests still in-flight", remaining);
-                false
-            }
+        })
+        .await;
+
+        if drained.is_ok() {
+            log::info!("Drain completed successfully");
+            true
+        } else {
+            let remaining = self.inner.health.in_flight();
+            log::warn!(
+                "Drain timeout reached with {} requests still in-flight",
+                remaining
+            );
+            false
         }
     }
 

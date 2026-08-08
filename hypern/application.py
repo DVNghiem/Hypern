@@ -1168,8 +1168,15 @@ class Hypern:
                     return
                 if index + 1 < len(scopes):
                     await execute_scope(index + 1)
-                else:
+                elif handler_plan.requires_async:
                     handler_result = await handler_plan.invoke(
+                        req,
+                        res,
+                        ctx,
+                        request_scope,
+                    )
+                else:
+                    handler_result = handler_plan.invoke_sync(
                         req,
                         res,
                         ctx,

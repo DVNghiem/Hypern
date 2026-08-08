@@ -15,7 +15,7 @@ use crate::middleware::{
 use crate::routing::router::Router as HypernRouter;
 use crate::socket::SocketHeld;
 use crate::{
-    core::global::{get_event_loop, set_global_runtime},
+    core::global::{get_event_loop, get_global_runtime, set_global_runtime},
     http::response::response_404,
 };
 
@@ -376,8 +376,7 @@ pub fn run_worker(
     let rm_for_signal = reload_manager.clone();
     let rm_for_drain = reload_manager.clone();
 
-    // Setup signal handler for Python event loop to stop on SIGTERM/SIGINT/SIGUSR1/SIGUSR2
-    let loop_for_signal = ev_loop.clone().unbind();
+    // Setup signal handling for SIGTERM/SIGINT/SIGUSR1/SIGUSR2.
     let shutdown_tx_clone = shutdown_tx.clone();
     std::thread::spawn(move || {
         use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
@@ -420,24 +419,18 @@ pub fn run_worker(
         log::info!("Worker {} initiating shutdown (signal={})", worker_id, sig);
 
         #[cfg(unix)]
-        {
-            // SIGUSR1 = graceful: drain in-flight first
-            if sig == libc::SIGUSR1 {
-                rm_for_signal.start_drain();
-                // We don't block the signal thread; the async runtime handles drain.
-                // Just give it a brief moment, then signal shutdown.
-                std::thread::sleep(std::time::Duration::from_secs(
-                    rm_for_signal.config().drain_timeout_secs,
-                ));
-            } else if sig == libc::SIGUSR2 {
-                // Hot reload: immediate
-                rm_for_signal.signal_hot_reload();
-            } else {
-                // SIGINT/SIGTERM: normal shutdown with brief drain
-                rm_for_signal.start_drain();
-                std::thread::sleep(std::time::Duration::from_secs(2));
-            }
-        }
+        let drain_completed = if sig == libc::SIGUSR2 {
+            rm_for_signal.signal_hot_reload();
+            false
+        } else {
+            rm_for_signal.start_drain();
+            get_global_runtime()
+                .handler()
+                .block_on(rm_for_signal.wait_for_drain())
+        };
+
+        #[cfg(not(unix))]
+        let drain_completed = false;
 
         // Signal the async runtime to shutdown
         if let Ok(mut tx) = shutdown_tx_clone.lock() {
@@ -445,12 +438,11 @@ pub fn run_worker(
                 let _ = sender.send(());
             }
         }
-
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        Python::attach(|py| {
-            let loop_ref = loop_for_signal.bind(py);
-            let _ = loop_ref.call_method0("stop");
-        });
+        if !drain_completed {
+            // Timed-out or immediate shutdowns cancel active Python work so
+            // Axum's graceful-shutdown future can finish within a bound.
+            get_global_runtime().shutdown_python_workers();
+        }
     });
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -469,6 +461,7 @@ pub fn run_worker(
     // Mark healthy after startup grace period
     let rm_startup = reload_manager.clone();
     let startup_grace = reload_manager.config().startup_grace_secs;
+    let loop_for_server = ev_loop.clone().unbind();
     rt.spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(startup_grace)).await;
         rm_startup.health().mark_healthy();
@@ -496,20 +489,29 @@ pub fn run_worker(
         log::info!("Axum worker {} started", worker_id);
 
         // Serve with Axum
-        axum::serve(listener, app)
+        let server_result = axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 shutdown_rx.await.ok();
             })
-            .await
-            .expect("Server error");
+            .await;
+        if let Err(error) = server_result {
+            log::error!("Axum worker {} failed: {}", worker_id, error);
+        }
 
         log::info!("Worker {} Axum server stopped", worker_id);
+        Python::attach(|py| {
+            let loop_ref = loop_for_server.bind(py);
+            if let Ok(stop) = loop_ref.getattr("stop") {
+                let _ = loop_ref.call_method1("call_soon_threadsafe", (stop,));
+            }
+        });
     });
 
     log::info!("Worker {} started", worker_id);
 
     // Keep event loop alive in this worker process until stopped by signal
     let _ = ev_loop.call_method0("run_forever");
+    py.detach(|| get_global_runtime().shutdown_python_workers());
 
     log::info!("Worker {} stopped", worker_id);
     Ok(())

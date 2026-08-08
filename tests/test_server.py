@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import sys
+import threading
 import time
 from typing import Dict, Any, Optional
 
@@ -154,6 +155,7 @@ def create_test_app() -> Hypern:
     """Create and configure the test application with all features."""
     
     app = Hypern(debug=True)
+    app.setup_reload(drain_timeout_secs=1)
     
     # ========================================================================
     # Global Middleware Configuration
@@ -1136,6 +1138,22 @@ def create_test_app() -> Hypern:
         data = req.json()
         time.sleep(0.01)  # Simulate async operation
         res.json({"processed": data, "async": True})
+
+    @app.get("/async/loop-identity")
+    async def async_loop_identity():
+        await asyncio.sleep(0.001)
+        return {
+            "thread_id": threading.get_ident(),
+            "loop_id": id(asyncio.get_running_loop()),
+        }
+
+    @app.get("/async/cancellation-resistant")
+    async def cancellation_resistant():
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            while True:
+                await asyncio.sleep(30)
     
     # ========================================================================
     # CRUD Operations (Users)

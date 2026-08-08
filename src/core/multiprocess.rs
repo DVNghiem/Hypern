@@ -81,10 +81,14 @@ pub fn spawn_workers(
 
 #[cfg(unix)]
 pub fn wait_for_workers(pids: &[libc::pid_t]) {
+    wait_for_workers_timeout(pids, std::time::Duration::from_secs(5));
+}
+
+#[cfg(unix)]
+pub fn wait_for_workers_timeout(pids: &[libc::pid_t], timeout: std::time::Duration) {
     use std::time::{Duration, Instant};
 
     let start = Instant::now();
-    let timeout = Duration::from_secs(5); // 5 second timeout
 
     for &pid in pids {
         let remaining = timeout.saturating_sub(start.elapsed());

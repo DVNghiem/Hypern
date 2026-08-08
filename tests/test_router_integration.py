@@ -14,6 +14,8 @@ Tests cover:
 
 import asyncio
 import functools
+import threading
+import time
 from types import SimpleNamespace
 
 import httpx
@@ -22,7 +24,8 @@ import pytest
 
 from hypern import Hypern, Router
 from hypern._hypern import Route as RustRoute
-from hypern.injection import Inject, InjectionConfigurationError, Json, Path
+from hypern.injection import HandlerPlan, Inject, InjectionConfigurationError, Json, Path
+from tests.conftest import TestServerProcess as _TestServerProcess
 
 
 class _CreateItem(msgspec.Struct):
@@ -118,6 +121,30 @@ def test_mounted_router_binds_sync_handler_and_isolates_request_scope() -> None:
         {"id": 9, "service": 1},
         {"id": 9, "service": 2},
     ]
+
+
+def test_sync_route_pipeline_uses_direct_handler_plan_fast_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = Hypern()
+    app.provide("value", "direct")
+
+    @app.get("/direct-plan")
+    def handler(value: str = Inject("value")) -> str:
+        return value
+
+    app._freeze_registration()
+    route = app.router.get_route("/direct-plan", "GET")
+    assert route is not None
+
+    async def unexpected_async_invoke(*args: object, **kwargs: object) -> object:
+        pytest.fail("synchronous route must not create a HandlerPlan invocation coroutine")
+
+    monkeypatch.setattr(HandlerPlan, "invoke", unexpected_async_invoke)
+    response = _BindingResponse()
+    asyncio.run(route.function(_BindingRequest("", b""), response))
+
+    assert response.payload == "direct"
 
 
 def test_app_route_builder_uses_compiled_parameter_binding() -> None:
@@ -235,6 +262,68 @@ def test_compiled_binding_runs_through_http_server(client: httpx.Client) -> None
 
     assert response.status_code == 200
     assert response.json() == {"id": 7, "name": "book", "service": "request"}
+
+
+def test_rust_workers_reuse_event_loops_across_suspending_requests(
+    client: httpx.Client,
+) -> None:
+    identities = []
+    for _ in range(32):
+        response = client.get("/async/loop-identity")
+        assert response.status_code == 200
+        identities.append(response.json())
+
+    loops_by_thread: dict[int, set[int]] = {}
+    for identity in identities:
+        loops_by_thread.setdefault(identity["thread_id"], set()).add(identity["loop_id"])
+
+    assert len(identities) > len(loops_by_thread)
+    assert all(len(loop_ids) == 1 for loop_ids in loops_by_thread.values())
+
+
+def test_shutdown_rejects_queued_and_stops_active_async_handlers() -> None:
+    server = _TestServerProcess(port=8767)
+    request_finished = [threading.Event() for _ in range(24)]
+    responses: list[tuple[int, str]] = []
+    responses_lock = threading.Lock()
+
+    def request_slow_handler(index: int) -> None:
+        try:
+            response = httpx.get(
+                f"{server.base_url}/async/cancellation-resistant",
+                timeout=10,
+            )
+            with responses_lock:
+                responses.append((response.status_code, response.text))
+        except httpx.RequestError:
+            pass
+        finally:
+            request_finished[index].set()
+
+    server.start()
+    request_threads = [
+        threading.Thread(target=request_slow_handler, args=(index,))
+        for index in range(len(request_finished))
+    ]
+    for request_thread in request_threads:
+        request_thread.start()
+    time.sleep(0.5)
+    assert server.process is not None
+    started_at = time.monotonic()
+    server.process.terminate()
+    try:
+        server.process.wait(timeout=4.5)
+    finally:
+        if server.process.poll() is None:
+            server.process.kill()
+            server.process.wait(timeout=1)
+        server.process = None
+    for request_thread in request_threads:
+        request_thread.join(timeout=2)
+
+    assert time.monotonic() - started_at < 4.5
+    assert all(finished.is_set() for finished in request_finished)
+    assert (503, "Service Unavailable") in responses
 
 
 class TestRouterWithBodyValidation:

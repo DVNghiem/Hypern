@@ -1,4 +1,4 @@
-use crate::core::blocking::BlockingRunner;
+use crate::core::blocking::{BlockingRunner, BlockingRunnerError};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use std::future::Future;
@@ -19,9 +19,10 @@ pub trait Runtime: Send + 'static {
     where
         F: Future<Output = ()> + Send + 'static;
 
-    fn spawn_blocking<F>(&self, task: F)
+    fn spawn_blocking<F, C>(&self, task: F, completion: C) -> Result<(), BlockingRunnerError>
     where
-        F: FnOnce(Python) + Send + 'static;
+        F: FnOnce(Python) + Send + 'static,
+        C: FnOnce(Result<(), BlockingRunnerError>) + Send + 'static;
 }
 
 pub trait ContextExt: Runtime {
@@ -55,6 +56,10 @@ impl RuntimeWrapper {
             self.br.clone(),
             self.pr.clone(),
         )
+    }
+
+    pub fn shutdown_python_workers(&self) {
+        self.br.shutdown();
     }
 }
 
@@ -100,11 +105,12 @@ impl Runtime for RuntimeRef {
     }
 
     #[inline]
-    fn spawn_blocking<F>(&self, task: F)
+    fn spawn_blocking<F, C>(&self, task: F, completion: C) -> Result<(), BlockingRunnerError>
     where
         F: FnOnce(Python) + Send + 'static,
+        C: FnOnce(Result<(), BlockingRunnerError>) + Send + 'static,
     {
-        _ = self.innerb.run(task);
+        self.innerb.run(task, completion)
     }
 }
 
@@ -135,99 +141,66 @@ pub(crate) fn init_runtime_mt(
 }
 
 #[inline]
-pub fn future_into_py<F, C>(rt: &RuntimeRef, is_async: bool, args_builder: F, on_complete: C)
+pub fn future_into_py<F, C>(
+    rt: &RuntimeRef,
+    is_async: bool,
+    args_builder: F,
+    on_complete: C,
+) -> Result<(), BlockingRunnerError>
 where
     F: FnOnce(Python) -> (Py<PyAny>, Py<PyTuple>) + Send + 'static,
-    C: FnOnce() + Send + 'static,
+    C: FnOnce(Result<(), BlockingRunnerError>) + Send + 'static,
 {
     if is_async {
-        // For async handlers: call and step coroutine on blocking thread
-        rt.spawn_blocking(move |py| {
-            let (handler, args) = args_builder(py);
+        // Run async handlers on the event loop owned by this blocking worker.
+        rt.spawn_blocking(
+            move |py| {
+                let (handler, args) = args_builder(py);
 
-            // Call handler to get coroutine using raw C API for minimum overhead
-            let coro_ptr = unsafe {
-                pyo3::ffi::PyObject_Call(handler.as_ptr(), args.as_ptr(), std::ptr::null_mut())
-            };
-
-            if coro_ptr.is_null() {
-                unsafe {
-                    pyo3::ffi::PyErr_Print();
-                }
-                on_complete();
-                return;
-            }
-
-            // Cache the send method pointer - don't look it up every iteration
-            let send_method = unsafe {
-                pyo3::ffi::PyObject_GetAttrString(
-                    coro_ptr,
-                    b"send\0".as_ptr() as *const std::os::raw::c_char,
-                )
-            };
-            if send_method.is_null() {
-                unsafe {
-                    pyo3::ffi::PyErr_Print();
-                    pyo3::ffi::Py_DECREF(coro_ptr);
-                }
-                on_complete();
-                return;
-            }
-
-            let none_ptr = unsafe { pyo3::ffi::Py_None() };
-
-            // Step coroutine to completion
-            // Most handlers complete in 1-2 steps; optimize for that case
-            loop {
-                let result_ptr = unsafe {
-                    pyo3::ffi::PyObject_CallFunctionObjArgs(
-                        send_method,
-                        none_ptr,
-                        std::ptr::null_mut::<pyo3::ffi::PyObject>(),
-                    )
+                // Call the handler to get its coroutine with minimum overhead.
+                let coro_ptr = unsafe {
+                    pyo3::ffi::PyObject_Call(handler.as_ptr(), args.as_ptr(), std::ptr::null_mut())
                 };
 
-                if result_ptr.is_null() {
-                    // Check if it's StopIteration (normal completion)
+                if coro_ptr.is_null() {
                     unsafe {
-                        if pyo3::ffi::PyErr_ExceptionMatches(pyo3::ffi::PyExc_StopIteration) != 0 {
-                            pyo3::ffi::PyErr_Clear();
-                        } else {
-                            pyo3::ffi::PyErr_Print();
-                        }
+                        pyo3::ffi::PyErr_Print();
                     }
-                    break;
+                    return;
                 }
 
-                unsafe {
-                    pyo3::ffi::Py_DECREF(result_ptr);
+                let coroutine = unsafe { Bound::from_owned_ptr(py, coro_ptr) };
+                let result = py
+                    .import("asyncio")
+                    .and_then(|asyncio| asyncio.call_method0("get_event_loop"))
+                    .and_then(|event_loop| {
+                        event_loop.call_method1("run_until_complete", (&coroutine,))
+                    });
+                if let Err(error) = result {
+                    error.print(py);
                 }
-
-                // Yield to other threads without sleep - just a CPU hint
-                // This is ~1000x faster than sleep(1μs)
-                std::thread::yield_now();
-            }
-
-            unsafe {
-                pyo3::ffi::Py_DECREF(send_method);
-                pyo3::ffi::Py_DECREF(coro_ptr);
-            }
-            on_complete();
-        });
+            },
+            on_complete,
+        )
     } else {
-        // For sync handlers: run directly on blocking thread using raw C API
-        rt.spawn_blocking(move |py| {
-            let (handler, args) = args_builder(py);
-            unsafe {
-                let result =
-                    pyo3::ffi::PyObject_Call(handler.as_ptr(), args.as_ptr(), std::ptr::null_mut());
-                if result.is_null() {
-                    pyo3::ffi::PyErr_Print();
-                } else {
-                    pyo3::ffi::Py_DECREF(result);
+        // Run sync handlers directly on the blocking worker.
+        rt.spawn_blocking(
+            move |py| {
+                let (handler, args) = args_builder(py);
+                unsafe {
+                    let result = pyo3::ffi::PyObject_Call(
+                        handler.as_ptr(),
+                        args.as_ptr(),
+                        std::ptr::null_mut(),
+                    );
+                    if result.is_null() {
+                        pyo3::ffi::PyErr_Print();
+                    } else {
+                        pyo3::ffi::Py_DECREF(result);
+                    }
                 }
-            }
-            on_complete();
-        });
+            },
+            on_complete,
+        )
     }
 }

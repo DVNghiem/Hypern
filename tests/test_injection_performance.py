@@ -78,6 +78,28 @@ def _compile_empty_case():
     return registry, compile_handler(handler, path_parameter_names=frozenset(), registry=registry)
 
 
+def _compile_sync_case():
+    registry = ProviderRegistry()
+    registry.provide(_Repository, _Repository, scope="request")
+    registry.provide(_NestedService, _NestedService, scope="request")
+    registry.freeze()
+
+    def handler(service: _NestedService = Inject()) -> object:
+        return service.repository
+
+    return registry, compile_handler(handler, path_parameter_names=frozenset(), registry=registry)
+
+
+def _compile_sync_empty_case():
+    registry = ProviderRegistry()
+    registry.freeze()
+
+    def handler() -> str:
+        return "ok"
+
+    return registry, compile_handler(handler, path_parameter_names=frozenset(), registry=registry)
+
+
 def _disable_reflection(monkeypatch: pytest.MonkeyPatch) -> None:
     def reflection_used(*args: object, **kwargs: object) -> None:
         pytest.fail("compiled invocation must not inspect signatures or type hints")
@@ -146,3 +168,42 @@ def test_compiled_invocation_avoids_reflection_for_hot_path_cases(
             f"{name} warm invocation exceeded 25x empty-handler baseline: "
             f"{diagnostics[name]['warm_ns']}ns vs {empty_warm_ns}ns"
         )
+
+
+def test_sync_handler_plan_fast_path_diagnostic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, plan = _compile_sync_case()
+    empty_registry, empty_plan = _compile_sync_empty_case()
+    _disable_reflection(monkeypatch)
+    scope = RequestScope(registry)
+    empty_scope = RequestScope(empty_registry)
+    request = _Request()
+    iterations = 1_000
+
+    assert plan.requires_async is False
+    assert plan.invoke_sync(request, object(), object(), scope) is not None
+    samples: list[int] = []
+    empty_samples: list[int] = []
+    for _ in range(5):
+        started_at = time.perf_counter_ns()
+        for _ in range(iterations):
+            assert plan.invoke_sync(request, object(), object(), scope) is not None
+        samples.append((time.perf_counter_ns() - started_at) // iterations)
+
+        started_at = time.perf_counter_ns()
+        for _ in range(iterations):
+            assert empty_plan.invoke_sync(request, object(), object(), empty_scope) == "ok"
+        empty_samples.append((time.perf_counter_ns() - started_at) // iterations)
+
+    warm_ns = int(statistics.median(samples))
+    empty_warm_ns = int(statistics.median(empty_samples))
+    print(
+        "sync handler plan fast-path diagnostic (ns): "
+        f"nested={warm_ns}, empty={empty_warm_ns}"
+    )
+    assert warm_ns > 0
+    assert warm_ns <= empty_warm_ns * 10, (
+        "sync nested-provider invocation exceeded 10x empty-handler baseline: "
+        f"{warm_ns}ns vs {empty_warm_ns}ns"
+    )

@@ -59,7 +59,7 @@ pub async fn http_execute(route_hash: u64, request: Request) -> axum::response::
     let rt_ref = get_global_runtime().handler();
 
     // Direct call to blocking runner - minimized GIL scope
-    future_into_py(
+    let enqueue_result = future_into_py(
         &rt_ref,
         is_async,
         move |py| {
@@ -89,15 +89,37 @@ pub async fn http_execute(route_hash: u64, request: Request) -> axum::response::
                 (handler, args)
             }
         },
-        move || {
-            // Reset the thread-local arena after each request
-            reset_arena();
-            let _ = tx.send(());
+        move |result| {
+            if result.is_ok() {
+                // The arena belongs to the worker thread and is only used by
+                // tasks that actually started executing.
+                reset_arena();
+            }
+            let _ = tx.send(result);
         },
     );
+    if let Err(error) = enqueue_result {
+        log::warn!("Python worker rejected request: {:?}", error);
+    }
 
-    // Wait for completion via oneshot
-    let _ = rx.await;
+    // Accepted work can still be rejected while queued during shutdown, so
+    // completion must carry the runner result rather than merely wake us.
+    match rx.await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            log::warn!(
+                "Python worker stopped before executing request: {:?}",
+                error
+            );
+            response_slot.set_status(503);
+            response_slot.set_body(b"Service Unavailable".to_vec());
+        }
+        Err(error) => {
+            log::warn!("Python worker completion channel closed: {}", error);
+            response_slot.set_status(503);
+            response_slot.set_body(b"Service Unavailable".to_vec());
+        }
+    }
 
     response_slot.into_response()
 }

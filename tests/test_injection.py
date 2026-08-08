@@ -171,30 +171,24 @@ def test_async_request_provider_is_created_once_for_concurrent_resolves() -> Non
     assert calls == 1
 
 
-def test_async_singleton_provider_is_created_once_for_concurrent_resolves() -> None:
+def test_loop_affine_async_singleton_is_rejected_during_freeze() -> None:
     calls = 0
 
-    async def factory() -> object:
+    class LoopAffineValue:
+        def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+            self.loop = loop
+
+    async def factory() -> LoopAffineValue:
         nonlocal calls
         calls += 1
-        await asyncio.sleep(0)
-        return object()
-
-    async def resolve_twice(registry: ProviderRegistry) -> tuple[object, object]:
-        first, second = await asyncio.gather(
-            RequestScope(registry).resolve("value"),
-            RequestScope(registry).resolve("value"),
-        )
-        return first, second
+        return LoopAffineValue(asyncio.get_running_loop())
 
     registry = ProviderRegistry()
     registry.provide("value", factory, scope="singleton")
-    registry.freeze()
 
-    first, second = asyncio.run(resolve_twice(registry))
-
-    assert first is second
-    assert calls == 1
+    with pytest.raises(InjectionConfigurationError, match="async singleton"):
+        registry.freeze()
+    assert calls == 0
 
 
 async def _cancelled_waiter_keeps_completed_provider_value(scope_name: str) -> int:
@@ -232,10 +226,6 @@ async def _cancelled_waiter_keeps_completed_provider_value(scope_name: str) -> i
 
 def test_cancelled_request_waiter_keeps_completed_provider_value() -> None:
     assert asyncio.run(_cancelled_waiter_keeps_completed_provider_value("request")) == 1
-
-
-def test_cancelled_singleton_waiter_keeps_completed_provider_value() -> None:
-    assert asyncio.run(_cancelled_waiter_keeps_completed_provider_value("singleton")) == 1
 
 
 def test_provider_cycle_fails_during_freeze() -> None:
@@ -316,41 +306,19 @@ def test_async_provider_resolves_without_a_running_event_loop() -> None:
     assert completed.value.value == "ready"
 
 
-def test_async_singleton_is_created_once_across_threads_and_event_loops() -> None:
-    calls = 0
-    calls_lock = threading.Lock()
-    start = threading.Barrier(2)
-    value = object()
+def test_singleton_with_async_dependency_is_rejected_during_freeze() -> None:
+    async def dependency() -> object:
+        return object()
 
-    async def factory() -> object:
-        nonlocal calls
-        with calls_lock:
-            calls += 1
-        await asyncio.sleep(0.01)
+    def factory(value: object = Inject("dependency")) -> object:
         return value
 
     registry = ProviderRegistry()
+    registry.provide("dependency", dependency, scope="request")
     registry.provide("value", factory, scope="singleton")
-    registry.freeze()
-    results: list[object] = []
-    errors: list[BaseException] = []
 
-    def resolve() -> None:
-        start.wait()
-        try:
-            results.append(asyncio.run(RequestScope(registry).resolve("value")))
-        except BaseException as error:
-            errors.append(error)
-
-    threads = [threading.Thread(target=resolve) for _ in range(2)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-
-    assert errors == []
-    assert results == [value, value]
-    assert calls == 1
+    with pytest.raises(InjectionConfigurationError, match="async singleton"):
+        registry.freeze()
 
 
 def test_sync_singleton_is_created_once_across_threads() -> None:
@@ -453,6 +421,47 @@ def test_handler_plan_binds_markers_and_dependency() -> None:
     result = asyncio.run(plan.invoke(request, "response", "context", RequestScope(registry)))
 
     assert result == (request, "response", "context", 7, "abc", service)
+
+
+def test_sync_handler_plan_invokes_without_creating_an_awaitable() -> None:
+    registry = ProviderRegistry()
+    registry.provide(Database, Database, scope="request")
+    registry.provide(Service, Service, scope="request")
+    registry.freeze()
+
+    def handler(service: Service = Inject()) -> Database:
+        return service.database
+
+    plan = compile_handler(handler, path_parameter_names=frozenset(), registry=registry)
+    result = plan.invoke_sync(_Request(), object(), object(), RequestScope(registry))
+
+    assert plan.requires_async is False
+    assert isinstance(result, Database)
+    assert inspect.isawaitable(result) is False
+
+
+def test_async_provider_keeps_handler_plan_on_async_invocation_path() -> None:
+    registry = ProviderRegistry()
+
+    async def create_database() -> Database:
+        await asyncio.sleep(0)
+        return Database()
+
+    registry.provide(Database, create_database, scope="request")
+    registry.freeze()
+
+    def handler(database: Database = Inject()) -> Database:
+        return database
+
+    plan = compile_handler(handler, path_parameter_names=frozenset(), registry=registry)
+
+    assert plan.requires_async is True
+    with pytest.raises(RuntimeError, match="asynchronous handler plan"):
+        plan.invoke_sync(_Request(), object(), object(), RequestScope(registry))
+    assert isinstance(
+        asyncio.run(plan.invoke(_Request(), object(), object(), RequestScope(registry))),
+        Database,
+    )
 
 
 def test_json_requires_annotation() -> None:

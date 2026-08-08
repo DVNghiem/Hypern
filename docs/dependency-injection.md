@@ -24,6 +24,8 @@ The supported scopes are:
 - `request`: at most one value in each request scope.
 - `transient`: a new value for each resolution.
 
+Asynchronous factories must use `request` or `transient` scope. Hypern rejects an async singleton, including a synchronous singleton that depends on an async provider, because its value could retain one worker's event loop and then be used from another worker loop.
+
 `provide()` returns the application, so registrations may be chained. Providers may depend on other registered providers through type annotations or `Inject()`.
 
 ## Type-keyed injection
