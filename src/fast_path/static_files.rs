@@ -16,6 +16,13 @@ pub struct CachedFile {
     pub etag: String,
 }
 
+struct StaticCache {
+    files: AHashMap<String, Arc<CachedFile>>,
+    bytes: usize,
+}
+
+const DEFAULT_MAX_CACHE_BYTES: usize = 64 * 1024 * 1024;
+
 impl CachedFile {
     pub fn as_bytes(&self) -> &[u8] {
         &self.data[..]
@@ -26,8 +33,9 @@ impl CachedFile {
 #[pyclass]
 pub struct StaticFileHandler {
     root_path: PathBuf,
-    cache: RwLock<AHashMap<String, Arc<CachedFile>>>,
+    cache: RwLock<StaticCache>,
     max_cache_size: usize,
+    max_cache_bytes: usize,
     max_file_size: usize,
     /// URL prefix for this handler
     prefix: String,
@@ -43,8 +51,12 @@ impl StaticFileHandler {
     pub fn new(root_path: impl AsRef<Path>) -> Self {
         Self {
             root_path: root_path.as_ref().to_path_buf(),
-            cache: RwLock::new(AHashMap::new()),
+            cache: RwLock::new(StaticCache {
+                files: AHashMap::new(),
+                bytes: 0,
+            }),
             max_cache_size: 1000,
+            max_cache_bytes: DEFAULT_MAX_CACHE_BYTES,
             max_file_size: 50 * 1024 * 1024, // 50MB max
             prefix: "/static".to_string(),
             index_file: "index.html".to_string(),
@@ -56,6 +68,12 @@ impl StaticFileHandler {
     pub fn with_limits(mut self, max_cache_size: usize, max_file_size: usize) -> Self {
         self.max_cache_size = max_cache_size;
         self.max_file_size = max_file_size;
+        self
+    }
+
+    /// Cap the total size of memory-mapped files retained by this handler.
+    pub fn with_cache_memory_limit(mut self, max_cache_bytes: usize) -> Self {
+        self.max_cache_bytes = max_cache_bytes;
         self
     }
 
@@ -80,7 +98,7 @@ impl StaticFileHandler {
         let clean_path = self.normalize_path(path)?;
 
         // Check cache
-        if let Some(cached) = self.cache.read().get(&clean_path) {
+        if let Some(cached) = self.cache.read().files.get(&clean_path) {
             return Ok(cached.clone());
         }
 
@@ -88,8 +106,14 @@ impl StaticFileHandler {
         let file = self.load_file(&clean_path)?;
 
         // Cache if within limits
-        if self.cache.read().len() < self.max_cache_size {
-            self.cache.write().insert(clean_path, file.clone());
+        if file.size <= self.max_cache_bytes {
+            let mut cache = self.cache.write();
+            if cache.files.len() < self.max_cache_size
+                && cache.bytes.saturating_add(file.size) <= self.max_cache_bytes
+            {
+                cache.bytes += file.size;
+                cache.files.insert(clean_path, file.clone());
+            }
         }
 
         Ok(file)
@@ -186,7 +210,9 @@ impl StaticFileHandler {
 
     /// Clear the cache
     pub fn clear_cache(&self) {
-        self.cache.write().clear();
+        let mut cache = self.cache.write();
+        cache.files.clear();
+        cache.bytes = 0;
     }
 }
 
@@ -223,13 +249,14 @@ impl StaticFileHandler {
     ///     spa: Enable SPA fallback mode (default: false)
     ///     cache_max_age: Cache-Control max-age in seconds (optional)
     #[new]
-    #[pyo3(signature = (directory, prefix="/static", index="index.html", spa=false, cache_max_age=None))]
+    #[pyo3(signature = (directory, prefix="/static", index="index.html", spa=false, cache_max_age=None, cache_max_bytes=None))]
     pub fn py_new(
         directory: &str,
         prefix: &str,
         index: &str,
         spa: bool,
         cache_max_age: Option<u32>,
+        cache_max_bytes: Option<usize>,
     ) -> PyResult<Self> {
         let root = PathBuf::from(directory);
         if !root.exists() || !root.is_dir() {
@@ -240,8 +267,12 @@ impl StaticFileHandler {
         }
         Ok(Self {
             root_path: root,
-            cache: RwLock::new(AHashMap::new()),
+            cache: RwLock::new(StaticCache {
+                files: AHashMap::new(),
+                bytes: 0,
+            }),
             max_cache_size: 1000,
+            max_cache_bytes: cache_max_bytes.unwrap_or(DEFAULT_MAX_CACHE_BYTES),
             max_file_size: 50 * 1024 * 1024,
             prefix: prefix.to_string(),
             index_file: index.to_string(),

@@ -580,58 +580,43 @@ impl Response {
         generator: &Bound<'_, pyo3::PyAny>,
     ) -> PyResult<PyRef<'py, Self>> {
         let (tx, rx) = mpsc::channel::<Bytes>(128);
+        let iterator = generator.clone().unbind();
 
-        // Collect generator items eagerly while we hold the GIL
-        let mut event_bytes_list: Vec<Bytes> = Vec::new();
-        let py_iter = generator.try_iter()?;
-        for item in py_iter {
-            let item = item?;
-            let formatted = if let Ok(event) = item.extract::<crate::http::streaming::SSEEvent>() {
-                Bytes::from(event.format().into_bytes())
-            } else if let Ok(s) = item.extract::<String>() {
-                let event = crate::http::streaming::SSEEvent::data(s);
-                Bytes::from(event.format().into_bytes())
-            } else if let Ok(dict) = item.cast::<pyo3::types::PyDict>() {
-                let data = dict
-                    .get_item("data")?
-                    .map(|v| v.extract::<String>())
-                    .transpose()?
-                    .unwrap_or_default();
-                let event_type = dict
-                    .get_item("event")?
-                    .map(|v| v.extract::<String>())
-                    .transpose()?;
-                let id = dict
-                    .get_item("id")?
-                    .map(|v| v.extract::<String>())
-                    .transpose()?;
-                let retry = dict
-                    .get_item("retry")?
-                    .map(|v| v.extract::<u64>())
-                    .transpose()?;
-                let event = crate::http::streaming::SSEEvent {
-                    id,
-                    event: event_type,
-                    data,
-                    retry,
-                };
-                Bytes::from(event.format().into_bytes())
-            } else {
-                let data_str = item.str()?.to_string();
-                let event = crate::http::streaming::SSEEvent::data(data_str);
-                Bytes::from(event.format().into_bytes())
-            };
-            event_bytes_list.push(formatted);
-        }
+        // Advance exactly one Python item between awaits. The bounded channel
+        // is the memory bound: a slow client applies backpressure instead of
+        // causing the complete generator output to accumulate in a Vec.
+        crate::core::global::get_global_runtime()
+            .inner
+            .spawn(async move {
+                loop {
+                    let next = Python::attach(|py| {
+                        let iterator = iterator.bind(py);
+                        match iterator.call_method0("__next__") {
+                            Ok(item) => crate::http::streaming::format_sse_item(&item).map(Some),
+                            Err(error)
+                                if error
+                                    .is_instance_of::<pyo3::exceptions::PyStopIteration>(py) =>
+                            {
+                                Ok(None)
+                            }
+                            Err(error) => Err(error),
+                        }
+                    });
 
-        // Spawn a task to send events through the channel
-        tokio::spawn(async move {
-            for event_bytes in event_bytes_list {
-                if tx.send(event_bytes).await.is_err() {
-                    break;
+                    match next {
+                        Ok(Some(event)) => {
+                            if tx.send(event).await.is_err() {
+                                break;
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(error) => {
+                            Python::attach(|py| error.print(py));
+                            break;
+                        }
+                    }
                 }
-            }
-        });
+            });
 
         pyself
             .slot

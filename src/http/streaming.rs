@@ -8,8 +8,6 @@ use futures_core::Stream;
 use pyo3::prelude::*;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-use crate::memory::arena::with_arena;
-
 /// SSE Event structure
 #[pyclass(from_py_object)]
 #[derive(Clone, Debug)]
@@ -418,6 +416,69 @@ impl Default for SSEGenerator {
     }
 }
 
+/// Format one Python generator item as an SSE frame without retaining any
+/// previous item. This is shared by eager collection and the live stream
+/// producer so their wire format stays identical.
+pub fn format_sse_item(item: &Bound<'_, PyAny>) -> PyResult<Bytes> {
+    if let Ok(event) = item.extract::<SSEEvent>() {
+        return Ok(Bytes::from(event.format()));
+    }
+
+    if let Ok(dict) = item.cast::<pyo3::types::PyDict>() {
+        let data = dict
+            .get_item("data")?
+            .map(|v| v.extract::<String>())
+            .transpose()?
+            .unwrap_or_default();
+        let event = SSEEvent {
+            id: dict
+                .get_item("id")?
+                .map(|v| v.extract::<String>())
+                .transpose()?,
+            event: dict
+                .get_item("event")?
+                .map(|v| v.extract::<String>())
+                .transpose()?,
+            data,
+            retry: dict
+                .get_item("retry")?
+                .map(|v| v.extract::<u64>())
+                .transpose()?,
+        };
+        return Ok(Bytes::from(event.format()));
+    }
+
+    if let Ok(s) = item.extract::<String>() {
+        return Ok(Bytes::from(SSEEvent::data(s).format()));
+    }
+
+    if let Ok(data) = item.getattr("data") {
+        let event = SSEEvent {
+            id: item
+                .getattr("id")
+                .ok()
+                .and_then(|v| v.extract::<Option<String>>().ok())
+                .flatten(),
+            event: item
+                .getattr("event")
+                .ok()
+                .and_then(|v| v.extract::<Option<String>>().ok())
+                .flatten(),
+            data: data.extract::<String>()?,
+            retry: item
+                .getattr("retry")
+                .ok()
+                .and_then(|v| v.extract::<Option<u64>>().ok())
+                .flatten(),
+        };
+        return Ok(Bytes::from(event.format()));
+    }
+
+    Ok(Bytes::from(
+        SSEEvent::data(item.str()?.to_string()).format(),
+    ))
+}
+
 /// Converts a Python iterator/generator into SSE-formatted bytes.
 /// Uses arena allocation for efficient string building.
 ///
@@ -437,80 +498,7 @@ pub fn collect_sse_from_generator(
     for item in py_iter {
         let item = item?;
 
-        // Try to extract as SSEEvent first
-        if let Ok(event) = item.extract::<SSEEvent>() {
-            // Use arena for efficient string formatting
-            let formatted = with_arena(|arena| {
-                let formatted_str = event.format();
-                arena.alloc_str(&formatted_str).to_string()
-            });
-            events.push(Bytes::from(formatted));
-        }
-        // Try as dict with data/event/id/retry keys
-        else if let Ok(dict) = item.cast::<pyo3::types::PyDict>() {
-            let data = dict
-                .get_item("data")?
-                .map(|v| v.extract::<String>())
-                .transpose()?
-                .unwrap_or_default();
-            let event_type = dict
-                .get_item("event")?
-                .map(|v| v.extract::<String>())
-                .transpose()?;
-            let id = dict
-                .get_item("id")?
-                .map(|v| v.extract::<String>())
-                .transpose()?;
-            let retry = dict
-                .get_item("retry")?
-                .map(|v| v.extract::<u64>())
-                .transpose()?;
-
-            let event = SSEEvent {
-                id,
-                event: event_type,
-                data,
-                retry,
-            };
-            events.push(Bytes::from(event.format()));
-        }
-        // Try as string (simple data event)
-        else if let Ok(s) = item.extract::<String>() {
-            let event = SSEEvent::data(s);
-            events.push(Bytes::from(event.format()));
-        }
-        // Try extracting data attribute (duck typing)
-        else if let Ok(data) = item.getattr("data") {
-            let data_str = data.extract::<String>()?;
-            let event_type = item
-                .getattr("event")
-                .ok()
-                .and_then(|v| v.extract::<Option<String>>().ok())
-                .flatten();
-            let id = item
-                .getattr("id")
-                .ok()
-                .and_then(|v| v.extract::<Option<String>>().ok())
-                .flatten();
-            let retry = item
-                .getattr("retry")
-                .ok()
-                .and_then(|v| v.extract::<Option<u64>>().ok())
-                .flatten();
-
-            let event = SSEEvent {
-                id,
-                event: event_type,
-                data: data_str,
-                retry,
-            };
-            events.push(Bytes::from(event.format()));
-        } else {
-            // Last resort: convert to string
-            let s = item.str()?.to_string();
-            let event = SSEEvent::data(s);
-            events.push(Bytes::from(event.format()));
-        }
+        events.push(format_sse_item(&item)?);
 
         // Allow Python to handle signals/cancellation periodically
         py.check_signals()?;
