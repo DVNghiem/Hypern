@@ -29,8 +29,8 @@ app = Hypern(debug=config.DEBUG)
 # Wire CQRS dependencies
 write_store = InMemoryWriteStore()
 read_store = InMemoryReadStore()
-app.singleton("query_handler", ExampleQueryHandler(read_store))
-app.singleton("command_handler", CreateExampleHandler(write_store))
+app.provide("query_handler", ExampleQueryHandler(read_store))
+app.provide("command_handler", CreateExampleHandler(write_store))
 
 app.use("/", health_router)
 app.use("/api", example_router)
@@ -227,7 +227,7 @@ class InMemoryReadStore:
     files["api/controllers/example_controller.py"] = '''\
 """Example CQRS controller – separate read/write endpoints."""
 
-from hypern import Router, Request, Response, inject
+from hypern import Inject, Router, Request, Response
 from queries.models.example_query import ListExamplesQuery
 from commands.models.example_command import CreateExampleCommand
 
@@ -235,18 +235,16 @@ example_router = Router(prefix="/examples")
 
 
 @example_router.get("/")
-@inject("query_handler")
-async def query_examples(request: Request, response: Response, ctx, query_handler) -> Response:
+async def query_examples(req: Request, res: Response, ctx, query_handler=Inject("query_handler")) -> Response:
     """Read side – uses query handler."""
     items = await query_handler.list_all(ListExamplesQuery())
     return Response(status_code=200, description=items)
 
 
 @example_router.post("/")
-@inject("command_handler")
-async def command_create_example(request: Request, response: Response, ctx, command_handler) -> Response:
+async def command_create_example(req: Request, res: Response, ctx, command_handler=Inject("command_handler")) -> Response:
     """Write side – uses command handler."""
-    data = request.json()
+    data = req.json()
     cmd = CreateExampleCommand(name=data.get("name", ""), description=data.get("description", ""))
     result = await command_handler.handle(cmd)
     return Response(status_code=201, description=result)

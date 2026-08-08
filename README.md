@@ -399,37 +399,43 @@ async def delete_user(req, res, ctx):
     res.json({"deleted": True})
 ```
 
-### Request Validation
+### Request Binding and Validation
 
 ```python
-from hypern import Hypern
-from hypern.validation import validate_body, validate_query, validate_params
+import msgspec
+
+from hypern import Body, Header, Hypern, Json, Path, Query
 
 app = Hypern()
 
-# Body validation
-@app.post("/users")
-@validate_body({
-    "name": {"type": "string", "required": True, "min_length": 3},
-    "email": {"type": "string", "required": True, "pattern": r"^[\w\.-]+@[\w\.-]+\.\w+$"},
-    "age": {"type": "integer", "min": 18, "max": 120}
-})
-async def create_user(req, res, ctx):
-    # Body is automatically validated
-    body = req.json()
-    res.status(201).json(body)
+class CreateUser(msgspec.Struct):
+    name: str
+    email: str
+    age: int
 
-# Query parameter validation
+class SearchQuery(msgspec.Struct):
+    q: str
+    limit: int = 10
+
+@app.post("/users/:user_id")
+async def create_user(
+    res,
+    user_id: int = Path(),
+    payload: CreateUser = Json(),
+    request_id: str | None = Header("X-Request-ID"),
+):
+    res.status(201).json({"id": user_id, "name": payload.name, "request_id": request_id})
+
 @app.get("/search")
-@validate_query({
-    "q": {"type": "string", "required": True},
-    "limit": {"type": "integer", "min": 1, "max": 100, "default": 10}
-})
-async def search(req, res, ctx):
-    query = req.query("q")
-    limit = req.query("limit", 10)
-    res.json({"query": query, "limit": limit})
+async def search(res, query: SearchQuery = Query()):
+    res.json({"query": query.q, "limit": query.limit})
+
+@app.post("/events")
+async def receive_event(res, raw_body: bytes = Body()):
+    res.json({"size": len(raw_body)})
 ```
+
+`Json()`, `Query()`, `Path()`, and `Header()` coerce values using their type annotations. Invalid JSON, missing required values, and failed coercions flow through Hypern's normal validation error handling. `Body()` supplies raw `bytes` without parsing JSON.
 
 ### Router Mounting
 
@@ -495,7 +501,7 @@ async def upload_file(req, res, ctx):
 ### Dependency Injection
 
 ```python
-from hypern import Hypern
+from hypern import Hypern, Inject
 
 app = Hypern()
 
@@ -504,25 +510,30 @@ class CatalogService:
     def list_items(self):
         return [{"id": 1, "name": "John"}]
 
-app.singleton("catalog_service", CatalogService())
+app.provide(CatalogService, CatalogService())
 
-# Register factory (new instance per request)
+# Register a provider once per request
 class RequestLogger:
     def log(self, message):
         print(f"LOG: {message}")
 
-app.factory("logger", lambda: RequestLogger())
+app.provide(RequestLogger, RequestLogger, scope="request")
 
 # Use dependencies in routes
 @app.get("/data")
-async def get_data(req, res, ctx):
-    catalog_service = ctx.get("catalog_service")
-    logger = ctx.get("logger")
-    
+async def get_data(
+    res,
+    catalog_service: CatalogService = Inject(),
+    logger: RequestLogger = Inject(),
+):
     logger.log("Fetching data")
     data = catalog_service.list_items()
     res.json(data)
 ```
+
+`app.provide(key, provider, scope=...)` accepts existing values, classes, synchronous factories, and asynchronous factories. The scopes are `singleton` (the default, shared for the app lifetime), `request` (cached for one request), and `transient` (created for every resolution). `Inject()` uses the annotation as its key; use `Inject("name")` for an explicit key. An unsupported scope fails immediately with `InjectionConfigurationError`. Calling the public `app.provide()` after application registration has frozen fails immediately with `RuntimeError`; calling `ProviderRegistry.provide()` after its registry is frozen raises `InjectionConfigurationError`. Missing provider dependencies and dependency cycles fail when Hypern freezes the provider graph; invalid handler marker declarations fail when Hypern compiles the handler plan.
+
+Each handler parameter declares its own source: `Inject()`, `Json()`, `Query()`, `Header(name)`, `Path(name)`, or `Body()`. This means binding does not depend on decorator order. The older DI and validation decorators are not part of this API.
 
 ### Error Handling
 
@@ -589,6 +600,7 @@ For more detailed documentation, visit:
 - [WebSocket](docs/websocket.md)
 - [Task Scheduling](docs/scheduling.md)
 - [Request Validation](docs/validation.md)
+- [Dependency Injection](docs/dependency-injection.md)
 
 ## 🤝 Contributing
 

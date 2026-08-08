@@ -531,8 +531,7 @@ def manual_sse(req, res, ctx):
 
 ```python
 import msgspec
-from hypern import Hypern
-from hypern.validation import validate, validate_body, validate_query
+from hypern import Hypern, Inject, Json, Query
 
 app = Hypern()
 
@@ -549,8 +548,7 @@ class QueryParams(msgspec.Struct):
 
 # Validate request body
 @app.post("/users")
-@validate_body(CreateUserInput)
-def create_user(req, res, ctx, body: CreateUserInput):
+def create_user(req, res, ctx, body: CreateUserInput = Json()):
     res.json({
         "name": body.name,
         "email": body.email,
@@ -559,8 +557,7 @@ def create_user(req, res, ctx, body: CreateUserInput):
 
 # Validate query parameters
 @app.get("/users")
-@validate_query(QueryParams)
-def list_users(req, res, ctx, query: QueryParams):
+def list_users(req, res, ctx, query: QueryParams = Query()):
     res.json({
         "page": query.page,
         "limit": query.limit,
@@ -569,8 +566,13 @@ def list_users(req, res, ctx, query: QueryParams):
 
 # Validate both body and query
 @app.post("/search")
-@validate(body=CreateUserInput, query=QueryParams)
-async def search(req, res, ctx, body: CreateUserInput, query: QueryParams):
+async def search(
+    req,
+    res,
+    ctx,
+    body: CreateUserInput = Json(),
+    query: QueryParams = Query(),
+):
     res.json({"body": body, "query": query})
 ```
 
@@ -589,8 +591,7 @@ class UserProfile(msgspec.Struct):
     tags: list[str] = []
 
 @app.post("/profiles")
-@validate_body(UserProfile)
-def create_profile(req, res, ctx, body: UserProfile):
+def create_profile(req, res, ctx, body: UserProfile = Json()):
     res.json({
         "name": body.name,
         "city": body.address.city
@@ -600,14 +601,14 @@ def create_profile(req, res, ctx, body: UserProfile):
 ### Manual Validation
 
 ```python
-from hypern.validation import Validator
+import msgspec
 
-validator = Validator(CreateUserInput)
+decoder = msgspec.json.Decoder(CreateUserInput)
 
 @app.post("/users")
 def create_user(req, res, ctx):
     try:
-        body = validator.validate(req.json())
+        body = decoder.decode(req.body_bytes())
         res.json({"valid": True, "data": body})
     except Exception as e:
         res.status(400).json({"error": str(e)})
@@ -624,31 +625,34 @@ from hypern import Hypern
 
 app = Hypern()
 
-# Singleton - shared instance
-app.singleton("config", {
+# Singleton provider - shared instance
+app.provide("config", {
     "debug": True,
     "service_endpoint": "https://api.example.com"
 })
 
-# Factory - new instance each time
+# Request-scoped factory - one instance per request
 def create_request_id():
     return "request-id"
 
-app.factory("request_id", create_request_id)
+app.provide("request_id", create_request_id, scope="request")
 ```
 
 ### Injecting Dependencies
 
 ```python
 @app.get("/config")
-@app.inject("config")
-def get_config(req, res, ctx, config):
+def get_config(req, res, ctx, config: dict = Inject("config")):
     res.json(config)
 
 @app.get("/data")
-@app.inject("request_id")
-@app.inject("config")
-def get_data(req, res, ctx, request_id, config):
+def get_data(
+    req,
+    res,
+    ctx,
+    request_id: str = Inject("request_id"),
+    config: dict = Inject("config"),
+):
     res.json({
         "request_id": request_id,
         "debug": config["debug"]
@@ -997,8 +1001,7 @@ app.mount(users)
 ```python
 # Always validate input
 @app.post("/users")
-@validate_body(CreateUserInput)
-def create_user(req, res, body):
+def create_user(req, res, body: CreateUserInput = Json()):
     try:
         user = create_user_in_db(body)
         res.status(201).json(user)
@@ -1048,10 +1051,8 @@ class Hypern:
     def use(middleware: Callable)
     def mount(router: Router)
     
-    # DI
-    def singleton(name: str, value: Any)
-    def factory(name: str, factory: Callable)
-    def inject(name: str)
+    # Providers
+    def provide(key: object, provider: object, *, scope: str = "singleton")
     
     # SSE/Streaming
     def sse(buffer_size: int = 100) -> SSEStream

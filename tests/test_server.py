@@ -4,6 +4,7 @@ Standalone test server for Hypern framework tests.
 This server runs in a separate process to avoid threading issues with signals.
 """
 
+import asyncio
 import json
 import os
 import sys
@@ -16,16 +17,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import msgspec
 
 from hypern import (
-    Hypern, 
-    Router, 
+    Hypern,
+    Router,
     SSEEvent,
-    NotFound, 
-    BadRequest, 
+    NotFound,
+    BadRequest,
     Unauthorized,
     HTTPException,
-    inject,
+    Inject,
+    Json,
+    Path,
+    Query,
 )
-from hypern.validation import validate, validate_body, validate_query
 from hypern.middleware import (
     CorsMiddleware, RateLimitMiddleware, SecurityHeadersMiddleware, CompressionMiddleware,
     RequestIdMiddleware, BasicAuthMiddleware
@@ -55,6 +58,18 @@ class QueryParamsSchema(msgspec.Struct):
     page: int = 1
     limit: int = 10
     search: str = ""
+
+
+class CompiledCreateItem(msgspec.Struct):
+    """Payload used by the compiled HTTP binding integration route."""
+
+    name: str
+
+
+class CompiledRequestService:
+    """Request-scoped service used by the compiled HTTP binding integration route."""
+
+    identifier = "request"
 
 
 class NestedAddressSchema(msgspec.Struct):
@@ -160,20 +175,29 @@ def create_test_app() -> Hypern:
     # Dependency Injection Setup
     # ========================================================================
     
-    # Register singleton dependencies
-    app.singleton("config", {
+    # Register providers for the compiled injection registry.
+    app.provide("config", {
         "app_name": "Hypern Test App",
         "debug": True,
         "store_url": "memory://test",
         "secret_key": "test-secret-key-123",
     })
-    app.singleton("store", test_store)
+    app.provide("store", test_store)
     
     # Register factory dependencies
     def create_request_logger():
         return {"logs": [], "created_at": time.time()}
     
-    app.factory("request_logger", create_request_logger)
+    app.provide("request_logger", create_request_logger, scope="request")
+    async def create_compiled_request_service() -> CompiledRequestService:
+        await asyncio.sleep(0.001)
+        return CompiledRequestService()
+
+    app.provide(
+        CompiledRequestService,
+        create_compiled_request_service,
+        scope="request",
+    )
     
     # ========================================================================
     # Basic Routes - HTTP Methods
@@ -192,6 +216,18 @@ def create_test_app() -> Hypern:
         """Echo back the request body."""
         body = req.json()
         res.json({"echo": body})
+
+    @app.post("/compiled/items/:item_id")
+    async def compiled_create_item(
+        item_id: int = Path(),
+        payload: CompiledCreateItem = Json(),
+        service: CompiledRequestService = Inject(),
+    ) -> dict[str, object]:
+        return {
+            "id": item_id,
+            "name": payload.name,
+            "service": service.identifier,
+        }
     
     @app.put("/echo")
     def echo_put(req, res, ctx):
@@ -513,8 +549,7 @@ def create_test_app() -> Hypern:
     # ========================================================================
     
     @app.post("/validated/user")
-    @validate_body(CreateUserSchema)
-    def create_validated_user(req, res, ctx, body: CreateUserSchema):
+    def create_validated_user(req, res, ctx, body: CreateUserSchema = Json()):
         user = test_store.create_user({
             "name": body.name,
             "email": body.email,
@@ -523,8 +558,7 @@ def create_test_app() -> Hypern:
         res.status(201).json(user)
     
     @app.get("/validated/search")
-    @validate_query(QueryParamsSchema)
-    def validated_search(req, res, ctx, query: QueryParamsSchema):
+    def validated_search(req, res, ctx, query: QueryParamsSchema = Query()):
         users = test_store.get_all_users()
         
         # Apply search filter
@@ -544,16 +578,20 @@ def create_test_app() -> Hypern:
         })
     
     @app.post("/validated/combined")
-    @validate(body=CreateUserSchema, query=QueryParamsSchema)
-    def validated_combined(req, res, ctx, body: CreateUserSchema, query: QueryParamsSchema):
+    def validated_combined(
+        req,
+        res,
+        ctx,
+        body: CreateUserSchema = Json(),
+        query: QueryParamsSchema = Query(),
+    ):
         res.json({
             "body": {"name": body.name, "email": body.email, "age": body.age},
             "query": {"page": query.page, "limit": query.limit, "search": query.search}
         })
     
     @app.post("/validated/nested")
-    @validate_body(NestedUserSchema)
-    def create_nested_user(req, res, ctx, body: NestedUserSchema):
+    def create_nested_user(req, res, ctx, body: NestedUserSchema = Json()):
         res.status(201).json({
             "name": body.name,
             "email": body.email,
@@ -569,27 +607,29 @@ def create_test_app() -> Hypern:
     # ========================================================================
     
     @app.get("/di/config")
-    @app.inject("config")
-    def get_config(req, res, ctx, config):
+    def get_config(req, res, ctx, config: dict = Inject("config")):
         res.json(config)
     
     @app.get("/di/store")
-    @inject("store")
-    def get_store_users(req, res, ctx, store):
+    def get_store_users(req, res, ctx, store: MockStore = Inject("store")):
         users = store.get_all_users()
         res.json({"users": users})
     
     @app.get("/di/factory")
-    @inject("request_logger")
-    def get_logger(req, res, ctx, request_logger):
+    def get_logger(req, res, ctx, request_logger: dict = Inject("request_logger")):
         res.json({
             "logger_created": True,
             "has_logs": isinstance(request_logger.get("logs"), list)
         })
     
     @app.get("/di/multi")
-    @inject("store", "config")
-    def get_multi_inject(req, res, ctx, store, config):
+    def get_multi_inject(
+        req,
+        res,
+        ctx,
+        store: MockStore = Inject("store"),
+        config: dict = Inject("config"),
+    ):
         users = store.get_all_users()
         res.json({
             "user_count": len(users),
@@ -597,25 +637,28 @@ def create_test_app() -> Hypern:
         })
 
     # ========================================================================
-    # Dependency Injection via Router (standalone @inject + Router)
+    # Dependency injection through compiled Router handler markers
     # ========================================================================
 
     router_di = Router(prefix="/router-di")
 
     @router_di.get("/config")
-    @inject("config")
-    def router_get_config(req, res, ctx, config):
+    def router_get_config(req, res, ctx, config: dict = Inject("config")):
         res.json(config)
 
     @router_di.get("/store")
-    @inject("store")
-    def router_get_store(req, res, ctx, store):
+    def router_get_store(req, res, ctx, store: MockStore = Inject("store")):
         users = store.get_all_users()
         res.json({"users": users})
 
     @router_di.get("/multi")
-    @inject("store", "config")
-    def router_get_multi(req, res, ctx, store, config):
+    def router_get_multi(
+        req,
+        res,
+        ctx,
+        store: MockStore = Inject("store"),
+        config: dict = Inject("config"),
+    ):
         users = store.get_all_users()
         res.json({
             "user_count": len(users),
@@ -623,9 +666,13 @@ def create_test_app() -> Hypern:
         })
 
     @router_di.get("/stacked")
-    @inject("config")
-    @inject("store")
-    def router_get_stacked(req, res, ctx, store, config):
+    def router_get_stacked(
+        req,
+        res,
+        ctx,
+        store: MockStore = Inject("store"),
+        config: dict = Inject("config"),
+    ):
         users = store.get_all_users()
         res.json({
             "stacked": True,
@@ -636,7 +683,7 @@ def create_test_app() -> Hypern:
     app.mount(router_di)
 
     # ========================================================================
-    # Inject + Validator combinations
+    # Injection and request-binding combinations
     # ========================================================================
 
     class DiValidateBodySchema(msgspec.Struct):
@@ -649,44 +696,58 @@ def create_test_app() -> Hypern:
         limit: int = 10
         active: bool = True
 
-    # @inject (outer) + @validate_body (inner)
     @app.post("/di-validate/body")
-    @inject("config")
-    @validate_body(DiValidateBodySchema)
-    def div_inject_then_body(req, res, ctx, body: DiValidateBodySchema, config):
+    def div_inject_then_body(
+        req,
+        res,
+        ctx,
+        body: DiValidateBodySchema = Json(),
+        config: dict = Inject("config"),
+    ):
         res.json({
             "name": body.name,
             "value": body.value,
             "app_name": config.get("app_name"),
         })
 
-    # @validate_body (outer) + @inject (inner)  – reversed decorator order
     @app.post("/di-validate/body-reversed")
-    @validate_body(DiValidateBodySchema)
-    @inject("config")
-    def div_body_then_inject(req, res, ctx, body: DiValidateBodySchema, config):
+    def div_body_then_inject(
+        req,
+        res,
+        ctx,
+        config: dict = Inject("config"),
+        body: DiValidateBodySchema = Json(),
+    ):
         res.json({
             "name": body.name,
             "value": body.value,
             "app_name": config.get("app_name"),
         })
 
-    # @inject (outer) + @validate_query (inner)
     @app.get("/di-validate/query")
-    @inject("config")
-    @validate_query(DiValidateQuerySchema)
-    def div_inject_then_query(req, res, ctx, query: DiValidateQuerySchema, config):
+    def div_inject_then_query(
+        req,
+        res,
+        ctx,
+        query: DiValidateQuerySchema = Query(),
+        config: dict = Inject("config"),
+    ):
         res.json({
             "limit": query.limit,
             "active": query.active,
             "app_name": config.get("app_name"),
         })
 
-    # @inject multi + @validate(body+query) combined
     @app.post("/di-validate/body-query")
-    @inject("store", "config")
-    @validate(body=DiValidateBodySchema, query=DiValidateQuerySchema)
-    def div_inject_body_query(req, res, ctx, body: DiValidateBodySchema, query: DiValidateQuerySchema, store, config):
+    def div_inject_body_query(
+        req,
+        res,
+        ctx,
+        body: DiValidateBodySchema = Json(),
+        query: DiValidateQuerySchema = Query(),
+        store: MockStore = Inject("store"),
+        config: dict = Inject("config"),
+    ):
         users = store.get_all_users()
         res.json({
             "name": body.name,
@@ -697,13 +758,18 @@ def create_test_app() -> Hypern:
             "app_name": config.get("app_name"),
         })
 
-    # Router-level: @inject + @validate_body
+    # Router-level compiled parameter binding
     router_di_validate = Router(prefix="/router-di-validate")
 
     @router_di_validate.post("/create")
-    @inject("store", "config")
-    @validate_body(DiValidateBodySchema)
-    def router_div_create(req, res, ctx, body: DiValidateBodySchema, store, config):
+    def router_div_create(
+        req,
+        res,
+        ctx,
+        body: DiValidateBodySchema = Json(),
+        store: MockStore = Inject("store"),
+        config: dict = Inject("config"),
+    ):
         res.status(201).json({
             "name": body.name,
             "value": body.value,
@@ -712,9 +778,13 @@ def create_test_app() -> Hypern:
         })
 
     @router_di_validate.get("/search")
-    @inject("config")
-    @validate_query(DiValidateQuerySchema)
-    def router_div_search(req, res, ctx, query: DiValidateQuerySchema, config):
+    def router_div_search(
+        req,
+        res,
+        ctx,
+        query: DiValidateQuerySchema = Query(),
+        config: dict = Inject("config"),
+    ):
         res.json({
             "limit": query.limit,
             "active": query.active,
@@ -722,9 +792,14 @@ def create_test_app() -> Hypern:
         })
 
     @router_di_validate.post("/combined")
-    @inject("config")
-    @validate(body=DiValidateBodySchema, query=DiValidateQuerySchema)
-    def router_div_combined(req, res, ctx, body: DiValidateBodySchema, query: DiValidateQuerySchema, config):
+    def router_div_combined(
+        req,
+        res,
+        ctx,
+        body: DiValidateBodySchema = Json(),
+        query: DiValidateQuerySchema = Query(),
+        config: dict = Inject("config"),
+    ):
         res.status(201).json({
             "name": body.name,
             "value": body.value,
@@ -929,7 +1004,7 @@ def create_test_app() -> Hypern:
     app.mount(api_v2)
     
     # ========================================================================
-    # Router with Validation (tests Router + @validate_body together)
+    # Router routes with compiled validation markers
     # ========================================================================
     
     class RouterSearchSchema(msgspec.Struct):
@@ -954,8 +1029,7 @@ def create_test_app() -> Hypern:
     router_validated = Router(prefix="/router-validated")
     
     @router_validated.post("/search")
-    @validate_body(RouterSearchSchema)
-    def router_search(req, res, ctx, body: RouterSearchSchema):
+    def router_search(req, res, ctx, body: RouterSearchSchema = Json()):
         res.json({
             "query": body.q,
             "page": body.page,
@@ -964,8 +1038,7 @@ def create_test_app() -> Hypern:
         })
     
     @router_validated.post("/items")
-    @validate_body(RouterCreateItemSchema)
-    def router_create_item(req, res, ctx, body: RouterCreateItemSchema):
+    def router_create_item(req, res, ctx, body: RouterCreateItemSchema = Json()):
         res.status(201).json({
             "name": body.name,
             "price": body.price,
@@ -973,8 +1046,7 @@ def create_test_app() -> Hypern:
         })
     
     @router_validated.get("/items")
-    @validate_query(RouterQuerySchema)
-    def router_list_items(req, res, ctx, query: RouterQuerySchema):
+    def router_list_items(req, res, ctx, query: RouterQuerySchema = Query()):
         res.json({
             "page": query.page,
             "limit": query.limit,
@@ -982,8 +1054,13 @@ def create_test_app() -> Hypern:
         })
     
     @router_validated.post("/items-with-query")
-    @validate(body=RouterCreateItemSchema, query=RouterQuerySchema)
-    def router_create_with_query(req, res, ctx, body: RouterCreateItemSchema, query: RouterQuerySchema):
+    def router_create_with_query(
+        req,
+        res,
+        ctx,
+        body: RouterCreateItemSchema = Json(),
+        query: RouterQuerySchema = Query(),
+    ):
         res.status(201).json({
             "item": {"name": body.name, "price": body.price, "category": body.category},
             "query": {"page": query.page, "limit": query.limit},
@@ -1029,8 +1106,7 @@ def create_test_app() -> Hypern:
     @router_docs.post("/create")
     @tags("users", "docs-test")
     @summary("Create User (Router)")
-    @validate_body(CreateUserSchema)
-    def router_docs_create_user(req, res, ctx, body: CreateUserSchema):
+    def router_docs_create_user(req, res, ctx, body: CreateUserSchema = Json()):
         """Create a user with validation and API doc decorators."""
         user = test_store.create_user({
             "name": body.name,

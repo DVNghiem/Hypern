@@ -57,7 +57,7 @@ def upload_multiple(req, res, ctx):
 ## File Upload with Validation
 
 ```python
-from hypern.validation import validate_body, validate_files
+from hypern import Json
 import msgspec
 
 class UploadRequest(msgspec.Struct):
@@ -67,8 +67,7 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 @app.post("/upload-with-metadata")
-@validate_body(UploadRequest)
-def upload_with_metadata(req, res, ctx, body: UploadRequest):
+def upload_with_metadata(req, res, ctx, body: UploadRequest = Json()):
     files = req.files()
     
     if "file" not in files:

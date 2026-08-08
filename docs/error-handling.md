@@ -7,22 +7,21 @@ Hypern provides comprehensive error handling capabilities with custom exceptions
 Hypern defines several built-in exception classes for common scenarios:
 
 ```python
-from hypern.exceptions import (
-    RequestError,           # General request errors
+from hypern import (
+    BadRequest,             # General request errors
     ValidationError,        # Validation failures
-    NotFoundError,         # Resource not found
-    UnauthorizedError,     # Authentication required
-    ForbiddenError,        # Access denied
-    ConflictError,         # Resource conflict
-    InternalServerError,   # Server errors
+    NotFound,               # Resource not found
+    Unauthorized,           # Authentication required
+    Forbidden,              # Access denied
+    Conflict,               # Resource conflict
+    InternalServerError,    # Server errors
 )
 ```
 
 ## Basic Error Handling
 
 ```python
-from hypern import Hypern
-from hypern.exceptions import NotFoundError, ValidationError
+from hypern import Hypern, NotFound, ValidationError
 
 app = Hypern()
 
@@ -33,7 +32,7 @@ def get_user(req, res, ctx):
     # Check if user exists
     user = find_user_by_id(user_id)
     if not user:
-        raise NotFoundError(f"User {user_id} not found")
+        raise NotFound(f"User {user_id} not found")
     
     res.json(user)
 
@@ -141,8 +140,7 @@ Provide detailed validation error information:
 
 ```python
 import msgspec
-from hypern.validation import validate_body
-from hypern.exceptions import ValidationError
+from hypern import Json, ValidationError
 
 class UserSchema(msgspec.Struct):
     name: str
@@ -150,8 +148,7 @@ class UserSchema(msgspec.Struct):
     age: int
 
 @app.post("/users")
-@validate_body(UserSchema)
-def create_user(req, res, ctx, body: UserSchema):
+def create_user(req, res, ctx, body: UserSchema = Json()):
     # Additional validation
     if body.age < 18:
         raise ValidationError("User must be at least 18 years old")
@@ -165,7 +162,7 @@ def create_user(req, res, ctx, body: UserSchema):
 ## Persistence Error Handling
 
 ```python
-from hypern import Hypern
+from hypern import Hypern, Inject
 from hypern.exceptions import InternalServerError, ConflictError
 
 app = Hypern()
@@ -175,11 +172,15 @@ class ProductRepository:
         # The application's persistence adapter owns this operation.
         return {"id": "new-product", **product}
 
-app.singleton("product_repository", ProductRepository())
+app.provide(ProductRepository, ProductRepository())
 
 @app.post("/products")
-@app.inject("product_repository")
-def create_product(req, res, ctx, product_repository):
+def create_product(
+    req,
+    res,
+    ctx,
+    product_repository: ProductRepository = Inject(),
+):
     body = req.json()
     
     try:

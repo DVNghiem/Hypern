@@ -3,33 +3,13 @@ Test cases for dependency injection and context in Hypern framework.
 
 Tests cover:
 - Singleton dependencies
-- Factory dependencies
-- Dependency injection via @inject decorator
+- Request-scoped dependencies
+- Compiled dependency injection markers
 - Request context (set, get, has)
 - Context elapsed time
 """
 
-import asyncio
-
 import httpx
-
-from hypern import Hypern
-
-
-def test_app_inject_resolves_generic_singleton() -> None:
-    app = Hypern()
-    store = object()
-    app.singleton("store", store)
-    resolved: list[object] = []
-
-    @app.inject("store")
-    async def handler(req, res, ctx, store):
-        resolved.append(store)
-
-    context = app.di.create_context()
-    asyncio.run(handler(None, None, context))
-
-    assert resolved == [store]
 
 
 class TestSingletonDependencies:
@@ -75,11 +55,11 @@ class TestSingletonDependencies:
         assert "Singleton Test" in names
 
 
-class TestFactoryDependencies:
-    """Test factory dependency injection."""
+class TestRequestScopedDependencies:
+    """Test request-scoped dependency injection."""
     
-    def test_factory_creates_new_instance(self, client: httpx.Client):
-        """Test factory creates new instance per injection."""
+    def test_request_provider_creates_an_instance(self, client: httpx.Client):
+        """Test that the request provider creates an injected instance."""
         response = client.get("/di/factory")
         assert response.status_code == 200
         data = response.json()
@@ -117,22 +97,22 @@ class TestRequestContext:
 class TestDependencyInjectionIntegration:
     """Test dependency injection integration scenarios."""
     
-    def test_standalone_inject_store(self, client: httpx.Client):
-        """Test standalone @inject decorator works for store."""
+    def test_explicit_store_marker(self, client: httpx.Client):
+        """Test explicit-key marker injection for the store."""
         response = client.get("/di/store")
         assert response.status_code == 200
         data = response.json()
         assert "users" in data
 
-    def test_standalone_inject_factory(self, client: httpx.Client):
-        """Test standalone @inject decorator works for factory deps."""
+    def test_request_scoped_marker(self, client: httpx.Client):
+        """Test marker injection for a request-scoped provider."""
         response = client.get("/di/factory")
         assert response.status_code == 200
         data = response.json()
         assert data["logger_created"] is True
 
-    def test_multi_inject(self, client: httpx.Client):
-        """Test @inject with multiple dependency names."""
+    def test_multiple_injected_parameters(self, client: httpx.Client):
+        """Test multiple explicitly keyed injection markers."""
         response = client.get("/di/multi")
         assert response.status_code == 200
         data = response.json()
@@ -203,10 +183,10 @@ class TestContextIsolation:
 
 
 class TestRouterInject:
-    """Test standalone @inject decorator works with Router-mounted routes."""
+    """Test compiled injection markers with Router-mounted routes."""
 
     def test_router_inject_single_config(self, client: httpx.Client):
-        """Test @inject('config') on a Router route resolves correctly."""
+        """Test explicit config injection on a Router route."""
         response = client.get("/router-di/config")
         assert response.status_code == 200
         data = response.json()
@@ -214,7 +194,7 @@ class TestRouterInject:
         assert data["debug"] is True
 
     def test_router_inject_single_store(self, client: httpx.Client):
-        """Test @inject('store') on a Router route resolves correctly."""
+        """Test explicit store injection on a Router route."""
         response = client.get("/router-di/store")
         assert response.status_code == 200
         data = response.json()
@@ -222,7 +202,7 @@ class TestRouterInject:
         assert isinstance(data["users"], list)
 
     def test_router_inject_multi(self, client: httpx.Client):
-        """Test @inject with multiple names on a Router route."""
+        """Test multiple injection markers on a Router route."""
         response = client.get("/router-di/multi")
         assert response.status_code == 200
         data = response.json()
@@ -232,7 +212,7 @@ class TestRouterInject:
         assert isinstance(data["user_count"], int)
 
     def test_router_inject_stacked(self, client: httpx.Client):
-        """Test stacked @inject decorators on a Router route."""
+        """Test that marker order does not affect Router binding."""
         response = client.get("/router-di/stacked")
         assert response.status_code == 200
         data = response.json()
@@ -242,14 +222,14 @@ class TestRouterInject:
 
 
 class TestInjectWithValidator:
-    """Test @inject combined with @validate_body / @validate_query / @validate."""
+    """Test compiled injection and validation markers together."""
 
     # ------------------------------------------------------------------
     # App-level routes
     # ------------------------------------------------------------------
 
-    def test_inject_outer_validate_body_inner(self, client: httpx.Client):
-        """@inject outer + @validate_body inner: body then injected dep."""
+    def test_json_then_injected_dependency(self, client: httpx.Client):
+        """Bind a JSON payload before an injected dependency."""
         response = client.post(
             "/di-validate/body",
             json={"name": "widget", "value": 42},
@@ -260,16 +240,16 @@ class TestInjectWithValidator:
         assert data["value"] == 42
         assert data["app_name"] == "Hypern Test App"
 
-    def test_inject_outer_validate_body_inner_invalid(self, client: httpx.Client):
-        """@inject outer + @validate_body inner: validation error still handled."""
+    def test_json_then_injected_dependency_invalid(self, client: httpx.Client):
+        """Return a validation response for an invalid JSON payload."""
         response = client.post(
             "/di-validate/body",
             json={"value": 1},  # missing required field 'name'
         )
         assert response.status_code == 400
 
-    def test_validate_body_outer_inject_inner(self, client: httpx.Client):
-        """@validate_body outer + @inject inner (reversed): same argument order."""
+    def test_injected_dependency_before_json(self, client: httpx.Client):
+        """Bind an injected dependency before a JSON payload."""
         response = client.post(
             "/di-validate/body-reversed",
             json={"name": "gadget", "value": 7},
@@ -280,8 +260,8 @@ class TestInjectWithValidator:
         assert data["value"] == 7
         assert data["app_name"] == "Hypern Test App"
 
-    def test_inject_outer_validate_query_inner(self, client: httpx.Client):
-        """@inject outer + @validate_query inner: query then injected dep."""
+    def test_query_then_injected_dependency(self, client: httpx.Client):
+        """Bind a query structure before an injected dependency."""
         response = client.get("/di-validate/query", params={"limit": "5", "active": "true"})
         assert response.status_code == 200
         data = response.json()
@@ -289,8 +269,8 @@ class TestInjectWithValidator:
         assert data["active"] is True
         assert data["app_name"] == "Hypern Test App"
 
-    def test_inject_outer_validate_query_defaults(self, client: httpx.Client):
-        """@inject outer + @validate_query inner: query defaults still applied."""
+    def test_query_defaults_with_injected_dependency(self, client: httpx.Client):
+        """Apply query defaults alongside an injected dependency."""
         response = client.get("/di-validate/query")
         assert response.status_code == 200
         data = response.json()
@@ -298,8 +278,8 @@ class TestInjectWithValidator:
         assert data["active"] is True
         assert data["app_name"] == "Hypern Test App"
 
-    def test_inject_multi_validate_body_query(self, client: httpx.Client):
-        """@inject multi + @validate(body+query): all args in correct order."""
+    def test_multiple_injections_with_json_and_query(self, client: httpx.Client):
+        """Bind JSON, query, and multiple injected values in declaration order."""
         response = client.post(
             "/di-validate/body-query",
             params={"limit": "3", "active": "false"},
@@ -318,8 +298,8 @@ class TestInjectWithValidator:
     # Router-level routes
     # ------------------------------------------------------------------
 
-    def test_router_inject_validate_body(self, client: httpx.Client):
-        """Router + @inject + @validate_body: validated body + injected deps."""
+    def test_router_inject_json(self, client: httpx.Client):
+        """Bind a validated JSON body and injected dependencies on a Router."""
         response = client.post(
             "/router-di-validate/create",
             json={"name": "thing", "value": 10},
@@ -331,16 +311,16 @@ class TestInjectWithValidator:
         assert data["debug"] is True
         assert data["has_users"] is True
 
-    def test_router_inject_validate_body_invalid(self, client: httpx.Client):
-        """Router + @inject + @validate_body: validation error still returned."""
+    def test_router_inject_json_invalid(self, client: httpx.Client):
+        """Return a validation response for invalid Router JSON input."""
         response = client.post(
             "/router-di-validate/create",
             json={"value": 10},  # missing 'name'
         )
         assert response.status_code == 400
 
-    def test_router_inject_validate_query(self, client: httpx.Client):
-        """Router + @inject + @validate_query: validated query + injected dep."""
+    def test_router_inject_query(self, client: httpx.Client):
+        """Bind a query structure and an injected dependency on a Router."""
         response = client.get(
             "/router-di-validate/search",
             params={"limit": "20", "active": "false"},
@@ -352,7 +332,7 @@ class TestInjectWithValidator:
         assert data["app_name"] == "Hypern Test App"
 
     def test_router_inject_validate_combined(self, client: httpx.Client):
-        """Router + @inject + @validate(body+query): all resolved correctly."""
+        """Bind Router JSON, query, and injected parameters together."""
         response = client.post(
             "/router-di-validate/combined",
             params={"limit": "8"},

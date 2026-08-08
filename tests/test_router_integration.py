@@ -2,9 +2,9 @@
 Test cases for Router integration with validators and OpenAPI decorators.
 
 Tests cover:
-- Router + validate_body decorator
-- Router + validate_query decorator
-- Router + combined validate decorator
+- Router + Json marker
+- Router + Query marker
+- Router + combined Json and Query markers
 - Router + api_tags / api_doc / deprecated decorators
 - Router + validation + api_doc (stacked decorators)
 - app.mount() functionality
@@ -12,14 +12,235 @@ Tests cover:
 - Validation error responses from router routes
 """
 
+import asyncio
+import functools
+from types import SimpleNamespace
+
 import httpx
+import msgspec
 import pytest
+
+from hypern import Hypern, Router
+from hypern._hypern import Route as RustRoute
+from hypern.injection import Inject, InjectionConfigurationError, Json, Path
+
+
+class _CreateItem(msgspec.Struct):
+    name: str
+
+
+class _RequestService:
+    next_identifier = 0
+
+    def __init__(self) -> None:
+        type(self).next_identifier += 1
+        self.identifier = type(self).next_identifier
+
+
+class _BindingRequest:
+    def __init__(self, item_id: str, body: bytes) -> None:
+        self._item_id = item_id
+        self._body = body
+
+    def param(self, name: str) -> str | None:
+        return self._item_id if name == "item_id" else None
+
+    def body_bytes(self) -> bytes:
+        return self._body
+
+
+class _BindingResponse(SimpleNamespace):
+    def __init__(self) -> None:
+        super().__init__(finished=False, payload=None)
+
+    def json(self, payload: object) -> None:
+        self.payload = payload
+        self.finished = True
+
+    def send(self, payload: object) -> None:
+        self.json(payload)
+
+
+def test_app_route_binds_path_json_and_request_provider() -> None:
+    _RequestService.next_identifier = 0
+    app = Hypern()
+    assert app.provide(_RequestService, _RequestService, scope="request") is app
+
+    @app.post("/items/:item_id")
+    async def create_item(
+        item_id: int = Path(),
+        payload: _CreateItem = Json(),
+        service: _RequestService = Inject(),
+    ) -> dict[str, object]:
+        return {"id": item_id, "name": payload.name, "service": service.identifier}
+
+    app._freeze_registration()
+    route = app.router.get_route("/items/:item_id", "POST")
+    assert route is not None
+    response = _BindingResponse()
+
+    asyncio.run(
+        route.function(
+            _BindingRequest("7", b'{"name":"book"}'),
+            response,
+        )
+    )
+
+    assert response.payload == {"id": 7, "name": "book", "service": 1}
+
+
+def test_mounted_router_binds_sync_handler_and_isolates_request_scope() -> None:
+    _RequestService.next_identifier = 0
+    app = Hypern()
+    router = Router()
+    app.provide(_RequestService, _RequestService, scope="request")
+
+    @router.get("/services/:item_id")
+    def get_service(
+        res: object,
+        item_id: int = Path(),
+        first: _RequestService = Inject(),
+        second: _RequestService = Inject(),
+    ) -> None:
+        assert first is second
+        res.json({"id": item_id, "service": first.identifier})
+
+    app.mount("/api", router)
+    app._freeze_registration()
+    route = app.router.get_route("/api/services/:item_id", "GET")
+    assert route is not None
+
+    responses = [_BindingResponse(), _BindingResponse()]
+    for response in responses:
+        asyncio.run(route.function(_BindingRequest("9", b""), response))
+
+    assert [response.payload for response in responses] == [
+        {"id": 9, "service": 1},
+        {"id": 9, "service": 2},
+    ]
+
+
+def test_app_route_builder_uses_compiled_parameter_binding() -> None:
+    app = Hypern()
+    app.provide("value", "builder")
+
+    def handler(res: object, value: str = Inject("value")) -> None:
+        res.json({"value": value})
+
+    app.route("/builder").get(handler)
+    app._freeze_registration()
+    route = app.router.get_route("/builder", "GET")
+    assert route is not None
+    response = _BindingResponse()
+
+    asyncio.run(route.function(_BindingRequest("", b""), response))
+
+    assert response.payload == {"value": "builder"}
+
+
+def test_add_route_uses_compiled_parameter_binding() -> None:
+    app = Hypern()
+    app.provide("value", "direct")
+
+    def handler(res: object, value: str = Inject("value")) -> None:
+        res.json({"value": value})
+
+    app.add_route("GET", "/direct", handler)
+    app._freeze_registration()
+    route = app.router.get_route("/direct", "GET")
+    assert route is not None
+    response = _BindingResponse()
+
+    asyncio.run(route.function(_BindingRequest("", b""), response))
+
+    assert response.payload == {"value": "direct"}
+
+
+def test_router_route_added_after_mount_is_compiled_before_freeze() -> None:
+    app = Hypern()
+    router = Router()
+    app.provide("value", "late-router")
+    app.mount("/api", router)
+
+    @router.get("/late")
+    def handler(res: object, value: str = Inject("value")) -> None:
+        res.json({"value": value})
+
+    app._freeze_registration()
+    route = app.router.get_route("/api/late", "GET")
+    assert route is not None
+    response = _BindingResponse()
+
+    asyncio.run(route.function(_BindingRequest("", b""), response))
+
+    assert response.payload == {"value": "late-router"}
+
+
+def test_ordinary_decorator_does_not_bypass_handler_binding_validation() -> None:
+    app = Hypern()
+
+    def ordinary_decorator(handler):
+        @functools.wraps(handler)
+        def wrapped(*args, **kwargs):
+            return handler(*args, **kwargs)
+
+        return wrapped
+
+    @app.get("/invalid-decorated")
+    @ordinary_decorator
+    def handler(req, res, ctx, unsupported):
+        res.finished = True
+
+    with pytest.raises(InjectionConfigurationError, match="unsupported source"):
+        app._freeze_registration()
+
+
+def test_constructor_routes_use_compiled_parameter_binding() -> None:
+    def handler(res: object, value: str = Inject("value")) -> None:
+        res.json({"value": value})
+
+    app = Hypern(
+        routes=[RustRoute(path="/constructor", function=handler, method="GET")]
+    )
+    app.provide("value", "constructor")
+    app._freeze_registration()
+    route = app.router.get_route("/constructor", "GET")
+    assert route is not None
+    response = _BindingResponse()
+
+    asyncio.run(route.function(_BindingRequest("", b""), response))
+
+    assert response.payload == {"value": "constructor"}
+
+
+def test_app_route_builder_all_preserves_five_method_contract() -> None:
+    app = Hypern()
+
+    def handler(req, res):
+        res.finished = True
+
+    app.route("/five-methods").all(handler)
+
+    for method in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
+        assert app.router.get_route("/five-methods", method) is not None
+    assert app.router.get_route("/five-methods", "OPTIONS") is None
+    assert app.router.get_route("/five-methods", "HEAD") is None
+
+
+def test_compiled_binding_runs_through_http_server(client: httpx.Client) -> None:
+    response = client.post(
+        "/compiled/items/7",
+        json={"name": "book"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"id": 7, "name": "book", "service": "request"}
 
 
 class TestRouterWithBodyValidation:
-    """Test Router routes with @validate_body decorator."""
+    """Test Router routes with the Json marker."""
 
-    def test_router_validate_body_valid(self, client: httpx.Client):
+    def test_router_json_valid(self, client: httpx.Client):
         """Test valid body passes validation on router route."""
         response = client.post(
             "/router-validated/search",
@@ -33,7 +254,7 @@ class TestRouterWithBodyValidation:
         assert data["limit"] == 10
         assert data["sort"] == "asc"
 
-    def test_router_validate_body_defaults(self, client: httpx.Client):
+    def test_router_json_defaults(self, client: httpx.Client):
         """Test default values are applied for optional fields."""
         response = client.post(
             "/router-validated/search",
@@ -47,7 +268,7 @@ class TestRouterWithBodyValidation:
         assert data["limit"] == 20  # default
         assert data["sort"] == "desc"  # default
 
-    def test_router_validate_body_missing_required(self, client: httpx.Client):
+    def test_router_json_missing_required(self, client: httpx.Client):
         """Test missing required field returns 400."""
         response = client.post(
             "/router-validated/search",
@@ -55,7 +276,7 @@ class TestRouterWithBodyValidation:
         )
         assert response.status_code in [400, 422]
 
-    def test_router_validate_body_wrong_type(self, client: httpx.Client):
+    def test_router_json_wrong_type(self, client: httpx.Client):
         """Test wrong type for field returns validation error."""
         response = client.post(
             "/router-validated/search",
@@ -63,7 +284,7 @@ class TestRouterWithBodyValidation:
         )
         assert response.status_code in [400, 422]
 
-    def test_router_validate_body_invalid_json(self, client: httpx.Client):
+    def test_router_json_invalid_json(self, client: httpx.Client):
         """Test invalid JSON body returns error."""
         response = client.post(
             "/router-validated/search",
@@ -72,7 +293,7 @@ class TestRouterWithBodyValidation:
         )
         assert response.status_code in [400, 422]
 
-    def test_router_validate_body_create_item(self, client: httpx.Client):
+    def test_router_json_create_item(self, client: httpx.Client):
         """Test creating an item with validated body on router."""
         response = client.post(
             "/router-validated/items",
@@ -85,7 +306,7 @@ class TestRouterWithBodyValidation:
         assert data["price"] == 9.99
         assert data["category"] == "general"  # default
 
-    def test_router_validate_body_create_item_all_fields(self, client: httpx.Client):
+    def test_router_json_create_item_all_fields(self, client: httpx.Client):
         """Test creating item with all fields provided."""
         response = client.post(
             "/router-validated/items",
@@ -98,7 +319,7 @@ class TestRouterWithBodyValidation:
         assert data["price"] == 49.99
         assert data["category"] == "electronics"
 
-    def test_router_validate_body_missing_required_name(self, client: httpx.Client):
+    def test_router_json_missing_required_name(self, client: httpx.Client):
         """Test missing required 'name' field returns error."""
         response = client.post(
             "/router-validated/items",
@@ -106,7 +327,7 @@ class TestRouterWithBodyValidation:
         )
         assert response.status_code in [400, 422]
 
-    def test_router_validate_body_missing_required_price(self, client: httpx.Client):
+    def test_router_json_missing_required_price(self, client: httpx.Client):
         """Test missing required 'price' field returns error."""
         response = client.post(
             "/router-validated/items",
@@ -116,9 +337,9 @@ class TestRouterWithBodyValidation:
 
 
 class TestRouterWithQueryValidation:
-    """Test Router routes with @validate_query decorator."""
+    """Test Router routes with the Query marker."""
 
-    def test_router_validate_query_valid(self, client: httpx.Client):
+    def test_router_query_valid(self, client: httpx.Client):
         """Test valid query params on router route."""
         response = client.get(
             "/router-validated/items",
@@ -131,7 +352,7 @@ class TestRouterWithQueryValidation:
         assert data["limit"] == 25
         assert data["search"] == "widget"
 
-    def test_router_validate_query_defaults(self, client: httpx.Client):
+    def test_router_query_defaults(self, client: httpx.Client):
         """Test query params use defaults when not provided."""
         response = client.get("/router-validated/items")
         assert response.status_code == 200
@@ -141,7 +362,7 @@ class TestRouterWithQueryValidation:
         assert data["limit"] == 10
         assert data["search"] == ""
 
-    def test_router_validate_query_partial(self, client: httpx.Client):
+    def test_router_query_partial(self, client: httpx.Client):
         """Test partial query params with defaults for missing."""
         response = client.get(
             "/router-validated/items",
@@ -156,7 +377,7 @@ class TestRouterWithQueryValidation:
 
 
 class TestRouterWithCombinedValidation:
-    """Test Router routes with @validate(body=..., query=...) decorator."""
+    """Test Router routes with Json and Query markers together."""
 
     def test_router_combined_valid(self, client: httpx.Client):
         """Test valid body and query together on router route."""

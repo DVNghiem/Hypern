@@ -51,12 +51,12 @@ from use_cases.delete_example import DeleteExampleInteractor
 def wire_dependencies(app) -> None:
     repo = InMemoryExampleRepository()
 
-    app.singleton("example_repository", repo)
-    app.singleton("create_example", CreateExampleInteractor(gateway=repo))
-    app.singleton("list_examples", ListExamplesInteractor(gateway=repo))
-    app.singleton("get_example", GetExampleInteractor(gateway=repo))
-    app.singleton("update_example", UpdateExampleInteractor(gateway=repo))
-    app.singleton("delete_example", DeleteExampleInteractor(gateway=repo))
+    app.provide("example_repository", repo)
+    app.provide("create_example", CreateExampleInteractor(gateway=repo))
+    app.provide("list_examples", ListExamplesInteractor(gateway=repo))
+    app.provide("get_example", GetExampleInteractor(gateway=repo))
+    app.provide("update_example", UpdateExampleInteractor(gateway=repo))
+    app.provide("delete_example", DeleteExampleInteractor(gateway=repo))
 '''
 
     # ══════════════════════════════════════════════════════════════

@@ -26,7 +26,7 @@ app = Hypern(debug=config.DEBUG)
 
 # Wire dependencies (Ports & Adapters)
 repository = InMemoryExampleRepository()
-app.singleton("use_case", ExampleService(repository))
+app.provide("use_case", ExampleService(repository))
 
 # Mount adapters
 app.use("/", health_router)
@@ -135,22 +135,20 @@ class ExampleService(ExampleUseCase):
     files["adapters/inbound/api/example_controller.py"] = '''\
 """Example API adapter – drives the application via inbound port."""
 
-from hypern import Router, Request, Response, inject
+from hypern import Inject, Router, Request, Response
 
 example_router = Router(prefix="/examples")
 
 
 @example_router.get("/")
-@inject("use_case")
-async def list_examples(request: Request, response: Response, ctx, use_case) -> Response:
+async def list_examples(req: Request, res: Response, ctx, use_case=Inject("use_case")) -> Response:
     items = await use_case.get_all()
     return Response(status_code=200, description=items)
 
 
 @example_router.post("/")
-@inject("use_case")
-async def create_example(request: Request, response: Response, ctx, use_case) -> Response:
-    data = request.json()
+async def create_example(req: Request, res: Response, ctx, use_case=Inject("use_case")) -> Response:
+    data = req.json()
     result = await use_case.create(name=data.get("name", ""), description=data.get("description", ""))
     return Response(status_code=201, description=result)
 '''

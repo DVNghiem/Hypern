@@ -7,7 +7,7 @@ use parking_lot::RwLock;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 
-/// A type-erased value that can be stored in the DI context
+/// A type-erased value stored in request context state.
 pub enum DIValue {
     /// A string value
     String(String),
@@ -255,86 +255,5 @@ impl Context {
 
     pub fn set_bool(&self, key: impl Into<String>, value: bool) {
         self.set_value(key, DIValue::Bool(value));
-    }
-}
-
-#[pyclass(from_py_object)]
-#[derive(Clone)]
-pub struct DIContainer {
-    /// Singleton instances
-    singletons: Arc<DashMap<String, DIValue>>,
-    /// Factory functions (stored as Python callables)
-    factories: Arc<DashMap<String, Py<PyAny>>>,
-}
-
-impl Default for DIContainer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[pymethods]
-impl DIContainer {
-    #[new]
-    pub fn new() -> Self {
-        Self {
-            singletons: Arc::new(DashMap::new()),
-            factories: Arc::new(DashMap::new()),
-        }
-    }
-
-    pub fn singleton(&self, name: String, value: &Bound<'_, PyAny>) -> PyResult<()> {
-        let di_value = DIValue::from_py(value)?;
-        self.singletons.insert(name, di_value);
-        Ok(())
-    }
-
-    pub fn factory(&self, name: String, factory: Py<PyAny>) {
-        self.factories.insert(name, factory);
-    }
-
-    pub fn get_singleton(&self, py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
-        match self.singletons.get(name) {
-            Some(entry) => entry.value().clone().into_py(py),
-            None => Ok(py.None()),
-        }
-    }
-
-    pub fn create_context(&self, py: Python<'_>) -> PyResult<Context> {
-        let ctx = Context::new();
-
-        // Inject singletons
-        for entry in self.singletons.iter() {
-            ctx.values
-                .insert(entry.key().clone(), entry.value().clone());
-        }
-
-        // Call factories and inject results
-        for entry in self.factories.iter() {
-            let factory = entry.value();
-            let result = factory.call0(py)?;
-            let di_value = DIValue::from_py(result.bind(py))?;
-            ctx.values.insert(entry.key().clone(), di_value);
-        }
-
-        Ok(ctx)
-    }
-
-    pub fn has(&self, name: &str) -> bool {
-        self.singletons.contains_key(name) || self.factories.contains_key(name)
-    }
-
-    pub fn remove(&self, name: &str) -> bool {
-        self.singletons.remove(name).is_some() || self.factories.remove(name).is_some()
-    }
-}
-
-impl DIContainer {
-    pub fn set_singleton(&self, name: impl Into<String>, value: DIValue) {
-        self.singletons.insert(name.into(), value);
-    }
-
-    pub fn get_singleton_value(&self, name: &str) -> Option<DIValue> {
-        self.singletons.get(name).map(|e| e.value().clone())
     }
 }

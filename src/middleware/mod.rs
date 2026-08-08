@@ -14,9 +14,8 @@ pub use chain::{
 pub use builtin::{
     BasicAuthMiddleware, CacheConfig, CacheMiddleware, CircuitBreakerConfig,
     CircuitBreakerMiddleware, CircuitState, CompressionMiddleware, CorsConfig, CorsMiddleware,
-    MethodMiddleware, PathMiddleware,
-    RateLimitAlgorithm, RateLimitConfig, RateLimitMiddleware, RequestIdMiddleware,
-    SecurityHeadersConfig, SecurityHeadersMiddleware, TimeoutMiddleware,
+    MethodMiddleware, PathMiddleware, RateLimitAlgorithm, RateLimitConfig, RateLimitMiddleware,
+    RequestIdMiddleware, SecurityHeadersConfig, SecurityHeadersMiddleware, TimeoutMiddleware,
 };
 
 /// Convert a MiddlewareResponse to a hyper Response - optimized

@@ -9,13 +9,20 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, Self, TypeVar
 
+import msgspec
 from typing_extensions import Doc
 
-from hypern._hypern import DIContainer, HealthCheck, ReloadConfig, ReloadManager, Server, SSEStream, StreamingResponse, TaskExecutor, TaskResult
+from hypern._hypern import Context, HealthCheck, ReloadConfig, ReloadManager, Server, SSEStream, StreamingResponse, TaskExecutor, TaskResult
 from hypern._hypern import Route as RustRoute
 from hypern._hypern import Router as RustRouter
-from hypern.di import inject as _standalone_inject
 from hypern.exceptions import ExceptionHandler
+from hypern.injection import (
+    HandlerPlan,
+    ProviderRegistry,
+    RequestScope,
+    Scope,
+    compile_handler,
+)
 from hypern.logfmt import config_basic_logging
 from hypern.middleware import normalize_middleware
 from hypern.router import Router
@@ -98,6 +105,10 @@ class Hypern:
         
         # Exception handling
         self._exception_handler = ExceptionHandler()
+        self._exception_handler.add_handler(
+            msgspec.ValidationError,
+            self._handle_validation_error,
+        )
         
         # Lifecycle handlers
         self._startup_handlers: list[Callable] = []
@@ -107,7 +118,7 @@ class Hypern:
         self._settings: dict[str, Any] = {}
         self.debug = debug
         
-        self._di = DIContainer()
+        self._providers = ProviderRegistry()
         
         self._tasks = TaskExecutor(task_workers, task_queue_size)
         
@@ -141,13 +152,20 @@ class Hypern:
         self._reload_manager: ReloadManager | None = None
         
         if routes is not None:
-            self._router.extend_route(routes)
+            for route in routes:
+                wrapped = self._wrap_handler(
+                    route.function,
+                    route_path=route.path,
+                )
+                self._router.add_route(
+                    route=RustRoute(
+                        path=route.path,
+                        function=wrapped,
+                        method=route.method,
+                        doc=route.doc,
+                    )
+                )
   
-    @property
-    def di(self) -> DIContainer | None:
-        """Access the dependency injection container."""
-        return self._di
-    
     @property
     def tasks(self) -> TaskExecutor | None:
         """Access the background task executor."""
@@ -196,44 +214,17 @@ class Hypern:
         """Check if a setting is disabled."""
         return not self.enabled(key)
     
-    def singleton(self, name: str, value: Any) -> Hypern:
-        """
-        Register a singleton dependency (shared across all requests).
-        
-        Example:
-            app.singleton("database", db_connection)
-            app.singleton("config", app_config)
-        """
-        if self._di is not None:
-            self._di.singleton(name, value)
+    def provide(
+        self,
+        key: object,
+        provider: object,
+        *,
+        scope: Scope = "singleton",
+    ) -> Hypern:
+        """Register a provider for compiled handler injection."""
+        self._assert_registration_open()
+        self._providers.provide(key, provider, scope=scope)
         return self
-    
-    def factory(self, name: str, factory_fn: Callable) -> Hypern:
-        """
-        Register a factory dependency (created for each request).
-        
-        Example:
-            app.factory("user_service", lambda: UserService())
-        """
-        if self._di is not None:
-            self._di.factory(name, factory_fn)
-        return self
-    
-    def inject(self, *names: str) -> Callable:
-        """
-        Decorator to inject dependencies by name.
-        
-        Delegates to the standalone :func:`hypern.inject` decorator so that
-        ``@app.inject("database")`` and ``@inject("database")`` are
-        interchangeable.
-        
-        Example:
-            @app.inject("database")
-            async def get_users(req, res, ctx, database):
-                users = await database.query("SELECT * FROM users")
-                res.json(users)
-        """
-        return _standalone_inject(*names)
     
     def background(
         self, 
@@ -599,6 +590,18 @@ class Hypern:
         
         return self
     
+    def _add_route(self, method: str, endpoint: str, handler: Callable[..., Any]) -> None:
+        """Register an application-owned route wrapper with the Rust router."""
+        self._assert_registration_open()
+
+        if endpoint and not endpoint.startswith("/"):
+            endpoint = "/" + endpoint
+        if not endpoint:
+            endpoint = "/"
+
+        route = RustRoute(path=endpoint, function=handler, method=method.upper())
+        self._router.add_route(route=route)
+
     def add_route(self, method: str, endpoint: str, handler: Callable[..., Any]):
         """
         Add a route to the router.
@@ -608,16 +611,8 @@ class Hypern:
             endpoint: The endpoint path (e.g., "/users/:id")
             handler: The function that handles requests
         """
-        self._assert_registration_open()
-
-        # Normalize path to start with /
-        if endpoint and not endpoint.startswith("/"):
-            endpoint = "/" + endpoint
-        if not endpoint:
-            endpoint = "/"
-        
-        route = RustRoute(path=endpoint, function=handler, method=method.upper())
-        self._router.add_route(route=route)
+        wrapped = self._wrap_handler(handler, route_path=endpoint)
+        self._add_route(method, endpoint, wrapped)
     
     def get_routes(self) -> list:
         """
@@ -648,7 +643,7 @@ class Hypern:
         """
         def decorator(handler: Callable[..., Any]):
             wrapped = self._wrap_handler(handler, middleware, route_path=path)
-            self.add_route("GET", path, wrapped)
+            self._add_route("GET", path, wrapped)
             return handler
         return decorator
     
@@ -664,7 +659,7 @@ class Hypern:
         """
         def decorator(handler: Callable[..., Any]):
             wrapped = self._wrap_handler(handler, middleware, route_path=path)
-            self.add_route("POST", path, wrapped)
+            self._add_route("POST", path, wrapped)
             return handler
         return decorator
     
@@ -672,7 +667,7 @@ class Hypern:
         """Register a PUT route."""
         def decorator(handler: Callable[..., Any]):
             wrapped = self._wrap_handler(handler, middleware, route_path=path)
-            self.add_route("PUT", path, wrapped)
+            self._add_route("PUT", path, wrapped)
             return handler
         return decorator
     
@@ -680,7 +675,7 @@ class Hypern:
         """Register a DELETE route."""
         def decorator(handler: Callable[..., Any]):
             wrapped = self._wrap_handler(handler, middleware, route_path=path)
-            self.add_route("DELETE", path, wrapped)
+            self._add_route("DELETE", path, wrapped)
             return handler
         return decorator
     
@@ -688,7 +683,7 @@ class Hypern:
         """Register a PATCH route."""
         def decorator(handler: Callable[..., Any]):
             wrapped = self._wrap_handler(handler, middleware, route_path=path)
-            self.add_route("PATCH", path, wrapped)
+            self._add_route("PATCH", path, wrapped)
             return handler
         return decorator
     
@@ -696,7 +691,7 @@ class Hypern:
         """Register an OPTIONS route."""
         def decorator(handler: Callable[..., Any]):
             wrapped = self._wrap_handler(handler, middleware, route_path=path)
-            self.add_route("OPTIONS", path, wrapped)
+            self._add_route("OPTIONS", path, wrapped)
             return handler
         return decorator
     
@@ -704,7 +699,7 @@ class Hypern:
         """Register a HEAD route."""
         def decorator(handler: Callable[..., Any]):
             wrapped = self._wrap_handler(handler, middleware, route_path=path)
-            self.add_route("HEAD", path, wrapped)
+            self._add_route("HEAD", path, wrapped)
             return handler
         return decorator
     
@@ -720,7 +715,7 @@ class Hypern:
         def decorator(handler: Callable[..., Any]):
             wrapped = self._wrap_handler(handler, middleware, route_path=path)
             for method in ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]:
-                self.add_route(method, path, wrapped)
+                self._add_route(method, path, wrapped)
             return handler
         return decorator
     
@@ -740,28 +735,32 @@ class Hypern:
                 self_rb.path = path
             
             def get(self_rb, handler):
-                self_rb.app.add_route("GET", self_rb.path, handler)
+                self_rb.app.get(self_rb.path)(handler)
                 return self_rb
             
             def post(self_rb, handler):
-                self_rb.app.add_route("POST", self_rb.path, handler)
+                self_rb.app.post(self_rb.path)(handler)
                 return self_rb
             
             def put(self_rb, handler):
-                self_rb.app.add_route("PUT", self_rb.path, handler)
+                self_rb.app.put(self_rb.path)(handler)
                 return self_rb
             
             def delete(self_rb, handler):
-                self_rb.app.add_route("DELETE", self_rb.path, handler)
+                self_rb.app.delete(self_rb.path)(handler)
                 return self_rb
             
             def patch(self_rb, handler):
-                self_rb.app.add_route("PATCH", self_rb.path, handler)
+                self_rb.app.patch(self_rb.path)(handler)
                 return self_rb
             
             def all(self_rb, handler):
+                wrapped = self_rb.app._wrap_handler(
+                    handler,
+                    route_path=self_rb.path,
+                )
                 for method in ["GET", "POST", "PUT", "DELETE", "PATCH"]:
-                    self_rb.app.add_route(method, self_rb.path, handler)
+                    self_rb.app._add_route(method, self_rb.path, wrapped)
                 return self_rb
         
         return AppRouteBuilder(self, path)
@@ -943,19 +942,29 @@ class Hypern:
         """Mount a router at a path prefix."""
         self._assert_registration_open()
         self._routers.append((prefix, router))
-        router._register_change_listener(self._refresh_pipeline_descriptors)
-        
-        # The application owns the only Python wrapper for mounted routes. The
-        # router contributes raw handlers plus its scope and route metadata.
-        for route in router._routes:
-            full_path = prefix + route.path if prefix else route.path
-            wrapped = self._wrap_handler(
-                route.handler,
-                route.middleware,
-                router=router,
-                route_path=full_path,
-            )
-            self.add_route(route.method, full_path, wrapped)
+        mounted_route_count = 0
+
+        def sync_router_registration() -> None:
+            nonlocal mounted_route_count
+            self._assert_registration_open()
+
+            # The application owns the only Python wrapper for mounted routes.
+            # A router may add routes after mounting while registration is open.
+            for route in router._routes[mounted_route_count:]:
+                full_path = prefix + route.path if prefix else route.path
+                wrapped = self._wrap_handler(
+                    route.handler,
+                    route.middleware,
+                    router=router,
+                    route_path=full_path,
+                    path_parameter_names=route.path_parameter_names,
+                )
+                self._add_route(route.method, full_path, wrapped)
+            mounted_route_count = len(router._routes)
+            self._refresh_pipeline_descriptors()
+
+        router._register_change_listener(sync_router_registration)
+        sync_router_registration()
     
     def on_startup(self, handler: Callable) -> Callable:
         """
@@ -965,7 +974,7 @@ class Hypern:
             @app.on_startup
             async def startup():
                 service = await create_service()
-                app.singleton("service", service)
+                await service.start()
         """
         self._assert_registration_open()
         self._startup_handlers.append(handler)
@@ -976,11 +985,11 @@ class Hypern:
         Register a shutdown handler.
         
         Example:
+            service = ApplicationService()
+
             @app.on_shutdown
             async def shutdown():
-                service = app.di.get_singleton("service") if app.di else None
-                if service is not None:
-                    await service.aclose()
+                await service.aclose()
         """
         self._assert_registration_open()
         self._shutdown_handlers.append(handler)
@@ -1028,18 +1037,11 @@ class Hypern:
         if self._registration_frozen:
             return
 
+        self._providers.freeze()
         self._refresh_pipeline_descriptors()
         for _, router in self._routers:
             router._freeze_registration()
         self._registration_frozen = True
-
-    @staticmethod
-    async def _invoke_callable(callable_: Callable, *args: Any) -> Any:
-        """Invoke a sync or async hook/handler and await returned awaitables."""
-        result = callable_(*args)
-        if inspect.isawaitable(result):
-            return await result
-        return result
 
     @staticmethod
     def _response_is_terminal(res: Any) -> bool:
@@ -1050,6 +1052,13 @@ class Hypern:
         if is_sent is not None:
             return bool(is_sent)
         return bool(getattr(res, "finished", False))
+
+    @staticmethod
+    def _handle_validation_error(req: Any, res: Any, error: Exception) -> None:
+        """Render request-binding validation failures as bad requests."""
+        to_dict = getattr(error, "to_dict", None)
+        payload = to_dict() if callable(to_dict) else {"message": str(error)}
+        res.status(400).json(payload)
 
     def _python_middleware_for(self, route_path: str) -> tuple[Callable, ...]:
         """Compile Python middleware for a registered route path."""
@@ -1140,22 +1149,32 @@ class Hypern:
 
     async def _execute_python_pipeline(
         self,
-        handler: Callable,
+        handler_plan: HandlerPlan,
         scopes: tuple[_PipelineScope, ...],
         req: Any,
         res: Any,
         ctx: Any,
-    ) -> None:
+        request_scope: RequestScope,
+    ) -> Any:
         """Execute the canonical app -> router -> route Python pipeline."""
+        handler_result: Any = None
+
         async def execute_scope(index: int) -> None:
+            nonlocal handler_result
             scope = scopes[index]
             async def continue_inward() -> None:
+                nonlocal handler_result
                 if self._response_is_terminal(res):
                     return
                 if index + 1 < len(scopes):
                     await execute_scope(index + 1)
                 else:
-                    await self._invoke_callable(handler, req, res, ctx)
+                    handler_result = await handler_plan.invoke(
+                        req,
+                        res,
+                        ctx,
+                        request_scope,
+                    )
 
             await self._run_middleware_chain(
                 scope.middleware,
@@ -1166,6 +1185,7 @@ class Hypern:
             )
 
         await execute_scope(0)
+        return handler_result
 
     def _wrap_handler(
         self,
@@ -1174,37 +1194,56 @@ class Hypern:
         *,
         router: Router | None = None,
         route_path: str = "/",
+        path_parameter_names: frozenset[str] | None = None,
     ) -> Callable:
         """Create the application-owned wrapper for one Python route pipeline."""
         self._assert_registration_open()
         route_middleware = tuple(middleware or ())
         scopes: tuple[_PipelineScope, ...] = ()
+        handler_plan: HandlerPlan | None = None
+        parameter_names = Router._path_parameter_names(route_path)
+        if path_parameter_names is not None:
+            parameter_names |= path_parameter_names
 
         def compile_descriptor() -> None:
-            nonlocal scopes
+            nonlocal handler_plan, scopes
             scopes = self._compile_pipeline_scopes(
                 route_middleware,
                 router=router,
                 route_path=route_path,
             )
+            if self._providers._frozen:
+                handler_plan = compile_handler(
+                    handler,
+                    path_parameter_names=parameter_names,
+                    registry=self._providers,
+                )
 
         compile_descriptor()
         self._pipeline_compilers.append(compile_descriptor)
 
-        @functools.wraps(handler)
-        async def wrapped(req, res):
-            ctx = self._di.create_context() if self._di else None
+        async def execute_with_loop(req: Any, res: Any) -> Any:
+            if handler_plan is None:
+                raise RuntimeError(
+                    "application registration must be frozen before handling requests"
+                )
+            ctx = Context()
+            request_scope = RequestScope(self._providers)
+            result: Any = None
             unhandled_error: Exception | None = None
             exception_handler_error: Exception | None = None
 
             try:
-                await self._execute_python_pipeline(
-                    handler,
+                result = await self._execute_python_pipeline(
+                    handler_plan,
                     scopes,
                     req,
                     res,
                     ctx,
+                    request_scope,
                 )
+                if result is not None and not self._response_is_terminal(res):
+                    res.send(result)
             except Exception as exc:  # noqa: BLE001
                 response_was_terminal = self._response_is_terminal(res)
                 try:
@@ -1218,6 +1257,15 @@ class Hypern:
                         unhandled_error = exc
             if unhandled_error is not None:
                 raise unhandled_error.with_traceback(unhandled_error.__traceback__) from exception_handler_error
+            return result
+
+        @functools.wraps(handler)
+        async def wrapped(req, res):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(execute_with_loop(req, res))
+            return await execute_with_loop(req, res)
         
         return wrapped
     
@@ -1301,6 +1349,7 @@ class Hypern:
             max_blocking_threads: Max blocking threads for Python handlers
             max_connections: Max concurrent connections
         """
+        self._freeze_registration()
         self._running = True
         self._setup_signal_handlers()
         

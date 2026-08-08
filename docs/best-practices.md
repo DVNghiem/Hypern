@@ -134,7 +134,7 @@ from config import settings
 
 def init_persistence(app):
     repository = UserRepository(settings.DATABASE_URL)
-    app.singleton("user_repository", repository)
+    app.provide(UserRepository, repository)
 
     # The application configures its driver, pool, and migrations.
     migrate(repository)
@@ -163,8 +163,12 @@ Your application owns its persistence lifecycle. Inject a repository or service 
 
 ```python
 @app.get("/users/:id")
-@app.inject("user_repository")
-def get_user(req, res, ctx, user_repository):
+def get_user(
+    req,
+    res,
+    ctx,
+    user_repository: UserRepository = Inject(),
+):
     user = user_repository.find_by_id(req.param("id"))
     res.json(user)
 ```
@@ -181,23 +185,22 @@ class UserService:
         return self.user_repository.find_by_id(user_id)
 
 # main.py - Setup DI
-from hypern import Hypern
+from hypern import Hypern, Inject
 from services import UserService
 
 app = Hypern()
 
 # Register an application-owned repository
 user_repository = UserRepository()
-app.singleton("user_repository", user_repository)
+app.provide(UserRepository, user_repository)
 
 # Register services
 user_service = UserService(user_repository)
-app.singleton("user_service", user_service)
+app.provide(UserService, user_service)
 
 # routes/users.py
 @app.get("/users/:id")
-@app.inject("user_service")
-def get_user(req, res, ctx, user_service):
+def get_user(req, res, ctx, user_service: UserService = Inject()):
     user = user_service.get_by_id(req.param("id"))
     res.json(user)
 ```
@@ -225,13 +228,16 @@ class UserResponse(msgspec.Struct):
     created_at: str
 
 # routes/users.py
-from hypern.validation import validate_body
+from hypern import Inject, Json
 from models.schemas import UserCreate, UserResponse
+from services import UserService
 
 @app.post("/users")
-@validate_body(UserCreate)
-def create_user(req, res, ctx, body: UserCreate):
-    user_service = ctx.services.user
+def create_user(
+    res,
+    body: UserCreate = Json(),
+    user_service: UserService = Inject(),
+):
     user = user_service.create(body)
     res.status(201).json(user)
 ```
@@ -283,10 +289,16 @@ def send_welcome_email(user_email: str, user_name: str):
     )
 
 # routes/users.py
+from hypern import Inject, Json
+from services import UserService
+
 @app.post("/users")
-@validate_body(UserCreate)
-def create_user(req, res, ctx, body: UserCreate):
-    user = ctx.services.user.create(body)
+def create_user(
+    res,
+    body: UserCreate = Json(),
+    user_service: UserService = Inject(),
+):
+    user = user_service.create(body)
     
     # Queue background task
     send_welcome_email.queue(user.email, user.name)
@@ -298,7 +310,7 @@ def create_user(req, res, ctx, body: UserCreate):
 
 ```python
 # routes/files.py
-from hypern.exceptions import ValidationError
+from hypern import ValidationError
 import os
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf", ".doc", ".docx"}

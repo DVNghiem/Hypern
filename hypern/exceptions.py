@@ -195,7 +195,11 @@ class ExceptionHandler:
     
     def _default_exception_response(self, req, res, exc: Exception) -> None:
         """Default exception response."""
-        if isinstance(exc, HTTPException):
+        from hypern.validation import ValidationError
+
+        if isinstance(exc, ValidationError):
+            res.status(400).json(exc.to_dict())
+        elif isinstance(exc, HTTPException):
             for key, value in exc.headers.items():
                 res.header(key, value)
             res.status(exc.status_code).json(exc.to_dict())

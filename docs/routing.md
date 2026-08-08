@@ -1,11 +1,13 @@
 # Routing
 
+Route handlers can bind path values directly with `Path()` rather than reading them manually from `req`. Hypern compiles those bindings during registration, so their declaration order is independent of injection and validation markers.
+
 ## HTTP Methods
 
 Hypern supports all standard HTTP methods:
 
 ```python
-from hypern import Hypern
+from hypern import Hypern, Path
 
 app = Hypern()
 
@@ -47,16 +49,19 @@ Use `:param` syntax for dynamic path segments:
 
 ```python
 @app.get("/users/:user_id")
-def get_user(req, res, ctx):
-    user_id = req.param("user_id")
+def get_user(res, user_id: int = Path()):
     res.json({"user_id": user_id})
 
 @app.get("/users/:user_id/posts/:post_id")
-def get_user_post(req, res, ctx):
-    user_id = req.param("user_id")
-    post_id = req.param("post_id")
+def get_user_post(
+    res,
+    user_id: int = Path(),
+    post_id: int = Path(),
+):
     res.json({"user_id": user_id, "post_id": post_id})
 ```
+
+`Path()` uses the Python parameter name by default, or accepts an explicit route name such as `Path("user_id")`. A missing path value or failed type coercion is a normal validation error; a `Path()` name that is not declared by the route fails during registration.
 
 ## Wildcard Routes
 

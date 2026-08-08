@@ -70,7 +70,7 @@ def wire_dependencies(app) -> None:
         inventory_client=inventory_client,
         notification_client=notification_client,
     )
-    app.singleton("order_service", service)
+    app.provide("order_service", service)
 '''
 
     # ══════════════════════════════════════════════════════════════

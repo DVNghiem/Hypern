@@ -190,7 +190,6 @@ impl Server {
                     .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok()
                 {
-
                     log::info!("Received SIGUSR1: graceful reload – draining workers...");
                     reload_manager.signal_graceful_reload();
 

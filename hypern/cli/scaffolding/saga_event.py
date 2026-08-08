@@ -100,9 +100,9 @@ def wire_dependencies(app) -> None:
         notification_client=StubNotificationClient(),
     )
 
-    app.singleton("example_service", example_service)
-    app.singleton("order_service", order_service)
-    app.singleton("example_projection", projection)
+    app.provide("example_service", example_service)
+    app.provide("order_service", order_service)
+    app.provide("example_projection", projection)
 '''
 
     # ── Domain (merge both) ──────────────────────────────────────

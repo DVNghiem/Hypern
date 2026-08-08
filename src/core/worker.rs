@@ -1,8 +1,8 @@
 use axum::body::HttpBody;
 use axum::{body::Body, extract::State, http::Request, response::IntoResponse, Router};
 use pyo3::prelude::*;
-use std::sync::{Arc, LazyLock};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock};
 use tokio::net::TcpListener;
 
 use crate::core::interpreter::http_execute;
@@ -20,8 +20,7 @@ use crate::{
 };
 
 static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
-static REQUEST_ID_PREFIX: LazyLock<u64> =
-    LazyLock::new(|| uuid::Uuid::new_v4().as_u128() as u64);
+static REQUEST_ID_PREFIX: LazyLock<u64> = LazyLock::new(|| uuid::Uuid::new_v4().as_u128() as u64);
 
 /// Shared application state for Axum handlers
 #[derive(Clone)]
@@ -178,7 +177,7 @@ async fn handle_request(State(state): State<AppState>, req: Request<Body>) -> im
                 *REQUEST_ID_PREFIX ^ NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
             )
         });
-    
+
     let method_str = req.method().to_string();
     let path_str = req.uri().path().to_string();
     let body_size = req.body().size_hint().upper().unwrap_or(0);
@@ -219,7 +218,7 @@ async fn handle_request(State(state): State<AppState>, req: Request<Body>) -> im
 
     match status {
         200..=399 => log::info!(
-            "Request handled {} {} {} {} in {}ms", 
+            "Request handled {} {} {} {} in {}ms",
             request_id,
             method_str,
             path_str,

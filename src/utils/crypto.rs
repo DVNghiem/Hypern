@@ -51,7 +51,8 @@ pub fn hmac_sha256_hex(key: &str, data: &str) -> String {
     type HmacSha256 = Hmac<Sha256>;
 
     // hmac::Hmac::new was removed; use new_from_slice which returns a Result
-    let mut mac = HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC can take key of any length");
+    let mut mac =
+        HmacSha256::new_from_slice(key.as_bytes()).expect("HMAC can take key of any length");
     mac.update(data.as_bytes());
     hex_encode(&mac.finalize().into_bytes())
 }

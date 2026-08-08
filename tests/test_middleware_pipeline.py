@@ -4,11 +4,90 @@ import asyncio
 import inspect
 from types import SimpleNamespace
 
+import msgspec
 import pytest
 
 from hypern import Hypern, Middleware, Router
 from hypern import application as application_module
 from hypern.middleware import middleware
+from hypern.injection import Inject, Json
+
+
+class _PipelinePayload(msgspec.Struct):
+    quantity: int
+
+
+class _PipelineRequest(SimpleNamespace):
+    def body_bytes(self) -> bytes:
+        return self.body
+
+
+class _PipelineResponse(SimpleNamespace):
+    def __init__(self) -> None:
+        super().__init__(finished=False, status_code=200, payload=None)
+
+    def status(self, status_code: int) -> "_PipelineResponse":
+        self.status_code = status_code
+        return self
+
+    def json(self, payload: object) -> None:
+        self.payload = payload
+        self.finished = True
+
+
+def test_compiled_binding_runs_inside_existing_middleware_pipeline() -> None:
+    events: list[str] = []
+    app = Hypern()
+    app.provide("value", "bound")
+
+    async def pipeline_middleware(req, res, ctx, next_fn):
+        events.append("before")
+        await next_fn()
+        events.append("after")
+
+    app.use(pipeline_middleware)
+
+    @app.get("/bound")
+    def handler(res: object, value: str = Inject("value")) -> None:
+        events.append(value)
+        res.json({"value": value})
+
+    app._freeze_registration()
+    route = app.router.get_route("/bound", "GET")
+    assert route is not None
+    response = _PipelineResponse()
+
+    asyncio.run(route.function(_PipelineRequest(body=b""), response))
+
+    assert events == ["before", "bound", "after"]
+    assert response.payload == {"value": "bound"}
+
+
+def test_marker_validation_error_uses_existing_exception_pipeline() -> None:
+    app = Hypern()
+
+    @app.errorhandler(msgspec.ValidationError)
+    def handle_validation(req, res, error):
+        res.status(422).json({"error": str(error)})
+
+    @app.post("/payload")
+    def handler(res: object, payload: _PipelinePayload = Json()) -> None:
+        res.json({"quantity": payload.quantity})
+
+    app._freeze_registration()
+    route = app.router.get_route("/payload", "POST")
+    assert route is not None
+    response = _PipelineResponse()
+
+    asyncio.run(
+        route.function(
+            _PipelineRequest(body=b'{"quantity":"invalid"}'),
+            response,
+        )
+    )
+
+    assert response.status_code == 422
+    assert "quantity" in response.payload["error"]
 
 
 def test_legacy_request_hook_apis_are_not_exposed():
@@ -78,6 +157,9 @@ def test_start_does_not_register_python_middleware_with_rust_server(monkeypatch)
     app.use(python_middleware)
     app.start(host="127.0.0.1", port=0)
 
+    with pytest.raises(RuntimeError, match="registration is frozen after listen"):
+        app.provide("late", object())
+
 
 def test_listen_compiles_pipeline_descriptors_before_requests(monkeypatch):
     events: list[str] = []
@@ -134,6 +216,8 @@ def test_listen_freezes_app_and_mounted_router_registration(monkeypatch):
         app.get("/late")(handler)
     with pytest.raises(RuntimeError, match="registration is frozen after listen"):
         app.mount(Router())
+    with pytest.raises(RuntimeError, match="registration is frozen after listen"):
+        app.provide("late", object())
 
     with pytest.raises(RuntimeError, match="registration is frozen after listen"):
         router.use(middleware)
@@ -487,6 +571,7 @@ def test_preterminal_failure_is_not_handled_by_a_noop_error_handler():
         res.finished = True
 
     app.mount(router)
+    app._freeze_registration()
     route = app.router.get_route("/unhandled", "GET")
     assert route is not None
 
@@ -549,6 +634,7 @@ def test_middleware_receives_context_and_awaitable_next():
         events.append("handler")
         res.finished = True
 
+    app._freeze_registration()
     route = app.router.get_route("/ctx", "GET")
     assert route is not None
     asyncio.run(route.function(SimpleNamespace(path="/ctx"), SimpleNamespace(finished=False)))
@@ -572,6 +658,7 @@ def test_middleware_omitting_next_does_not_enter_downstream_scope():
         events.append("handler")
         res.finished = True
 
+    app._freeze_registration()
     route = app.router.get_route("/omitted", "GET")
     assert route is not None
     asyncio.run(route.function(SimpleNamespace(path="/omitted"), SimpleNamespace(finished=False)))
@@ -595,6 +682,7 @@ def test_middleware_double_next_raises_after_first_downstream_entry():
         events.append("handler")
         res.finished = True
 
+    app._freeze_registration()
     route = app.router.get_route("/double-next", "GET")
     assert route is not None
     with pytest.raises(RuntimeError, match="may only be awaited once"):

@@ -1,7 +1,6 @@
 from ._hypern import (
     BlockingExecutor,
     Context,
-    DIContainer,
     FormData,
     # Reload / Health
     HealthCheck,
@@ -44,9 +43,6 @@ from .blocking import (
     set_default_executor,
 )
 
-# Dependency Injection - standalone decorator
-from .di import inject
-
 # Exceptions
 from .exceptions import (
     BadRequest,
@@ -63,6 +59,16 @@ from .exceptions import (
     UnprocessableEntity,
     error_boundary,
     exception_handler,
+)
+from .injection import (
+    Body,
+    DependencyCycleError,
+    Header,
+    Inject,
+    InjectionConfigurationError,
+    Json,
+    Path,
+    Query,
 )
 
 # Middleware (Rust-based)
@@ -130,14 +136,7 @@ from .tasks import (
     set_task_executor,
     submit_task,
 )
-from .validation import (
-    ValidationError,
-    Validator,
-    validate,
-    validate_body,
-    validate_params,
-    validate_query,
-)
+from .validation import ValidationError
 
 # WebSocket module
 from .websocket import (
@@ -158,6 +157,7 @@ __all__ = [
     "BackpressurePolicy",
     "BadRequest",
     "BasicAuthMiddleware",
+    "Body",
     # Blocking Executor
     "BlockingExecutor",
     "BroadcastConfig",
@@ -173,7 +173,7 @@ __all__ = [
     # Middleware (Rust-based)
     "CorsMiddleware",
     "CronExpression",
-    "DIContainer",
+    "DependencyCycleError",
     "ExceptionHandler",
     "Forbidden",
     # File Uploads
@@ -182,15 +182,19 @@ __all__ = [
     "HTTPException",
     # Reload / Health
     "HealthCheck",
+    "Header",
     "HeartbeatConfig",
     "HeartbeatMonitor",
     "HeartbeatStats",
     # Core
     "Hypern",
+    "Inject",
+    "InjectionConfigurationError",
     "InternalServerError",
     # Auth
     "JWTAuth",
     "JWTError",
+    "Json",
     "MethodNotAllowed",
     # Middleware utilities
     "Middleware",
@@ -200,10 +204,12 @@ __all__ = [
     "OpenAPIGenerator",
     # Utils
     "PageInfo",
+    "Path",
     "PresenceDiff",
     "PresenceInfo",
     "PresenceTracker",
     "RBACPolicy",
+    "Query",
     "RateLimitMiddleware",
     "RealtimeBroadcast",
     "RealtimeHub",
@@ -242,7 +248,6 @@ __all__ = [
     "UploadedFile",
     # Validation
     "ValidationError",
-    "Validator",
     # WebSocket
     "WebSocket",
     "WebSocketDisconnect",
@@ -266,7 +271,6 @@ __all__ = [
     "get_task",
     "get_task_executor",
     "hypern",
-    "inject",
     "middleware",
     "paginate",
     "periodic",
@@ -276,8 +280,4 @@ __all__ = [
     "set_task_executor",
     "setup_openapi_routes",
     "submit_task",
-    "validate",
-    "validate_body",
-    "validate_params",
-    "validate_query",
 ]

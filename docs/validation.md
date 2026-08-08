@@ -1,256 +1,125 @@
-# Validation
+# Request Binding and Validation
 
-Hypern provides high-performance request validation using [msgspec](https://jcristharif.com/msgspec/).
+Hypern validates request data through typed handler parameters. Binding plans are compiled when application registration freezes, so request handling performs no signature inspection.
 
-## Basic Validation
+Each non-transport handler parameter declares exactly one source:
+
+| Marker | Source |
+| --- | --- |
+| `Json()` | JSON request body, decoded with the parameter annotation. |
+| `Query(name=None)` | A `msgspec.Struct` query object or one scalar query value. |
+| `Header(name)` | A request header. |
+| `Path(name=None)` | A declared route parameter. |
+| `Body()` | The raw request body as `bytes`. |
+| `Inject(key=None)` | A provider registered with `app.provide()`. |
+
+`req`, `res`, and `ctx` are reserved transport parameters and may appear anywhere in a handler signature.
+
+## JSON bodies
 
 ```python
-from hypern import Hypern
-from hypern.validation import validate_body
 import msgspec
+
+from hypern import Hypern, Json
 
 app = Hypern()
 
-class UserSchema(msgspec.Struct):
+
+class UserInput(msgspec.Struct):
     name: str
     email: str
     age: int
 
+
 @app.post("/users")
-@validate_body(UserSchema)
-def create_user(req, res, ctx, body: UserSchema):
-    # body is validated UserSchema instance
+def create_user(res, payload: UserInput = Json()):
     res.status(201).json({
-        "name": body.name,
-        "email": body.email,
-        "age": body.age
+        "name": payload.name,
+        "email": payload.email,
+        "age": payload.age,
     })
 ```
 
-## Schema Definition
+Malformed JSON, missing fields, and invalid field types produce a `400 Bad Request` response through the normal exception pipeline.
 
-### Using msgspec.Struct
+## Query parameters
 
-```python
-import msgspec
-from typing import Optional
-
-class ProductSchema(msgspec.Struct):
-    # Required fields
-    name: str
-    price: float
-    
-    # Optional with default
-    description: Optional[str] = None
-    quantity: int = 0
-    
-    # List of items
-    tags: list[str] = []
-```
-
-## Query Parameter Validation
+Use `Query()` with a `msgspec.Struct` to bind the complete query string. String values are coerced to the declared field types and omitted fields use struct defaults.
 
 ```python
-import msgspec
-from hypern.validation import validate_query
+from hypern import Query
 
-class SearchParams(msgspec.Struct):
-    q: str
+
+class SearchQuery(msgspec.Struct):
+    q: str = ""
     page: int = 1
     limit: int = 20
-    sort: str = "desc"
+
 
 @app.get("/search")
-@validate_query(SearchParams)
-def search(req, res, ctx, query: SearchParams):
-    res.json({
-        "query": query.q,
-        "page": query.page,
-        "limit": query.limit,
-        "sort": query.sort
-    })
+def search(res, query: SearchQuery = Query()):
+    res.json({"q": query.q, "page": query.page, "limit": query.limit})
 ```
 
-## Path Parameter Validation
+For one scalar query parameter, provide its external name when it differs from the Python parameter name:
 
 ```python
-import msgspec
-from hypern.validation import validate_params
+@app.get("/items")
+def list_items(res, page_size: int = Query("limit")):
+    res.json({"limit": page_size})
+```
 
-class UserParams(msgspec.Struct):
-    user_id: str
+## Path parameters and headers
+
+```python
+from hypern import Header, Path
+
 
 @app.get("/users/:user_id")
-@validate_params(UserParams)
-def get_user(req, res, ctx, params: UserParams):
-    res.json({"user_id": params.user_id})
+def get_user(
+    res,
+    user_id: int = Path(),
+    request_id: str | None = Header("X-Request-ID"),
+):
+    res.json({"user_id": user_id, "request_id": request_id})
 ```
 
-## Combined Validation
+`Path()` uses the Python parameter name by default. Both `Path(name)` and `Query(name)` accept an explicit external name. Missing required values and coercion failures are validation errors; optional header annotations accept missing headers.
+
+## Raw request bodies
+
+Use `Body()` when parsing and validation belong to the application:
 
 ```python
-import msgspec
-from hypern.validation import validate
+from hypern import Body
 
-class CreateOrderBody(msgspec.Struct):
-    items: list[dict]
-    shipping_address: str
 
-class CreateOrderQuery(msgspec.Struct):
-    express: bool = False
+@app.post("/events")
+def receive_event(res, payload: bytes = Body()):
+    res.json({"size": len(payload)})
+```
+
+## Combining sources
+
+Every parameter declares its own source, so declaration order does not couple dependency injection to validation:
+
+```python
+from hypern import Inject, Json, Query
+
 
 @app.post("/orders")
-@validate(body=CreateOrderBody, query=CreateOrderQuery)
-def create_order(req, res, ctx, body: CreateOrderBody, query: CreateOrderQuery):
-    res.json({
-        "items": body.items,
-        "express": query.express
-    })
+async def create_order(
+    payload: OrderInput = Json(),
+    service: OrderService = Inject(),
+    options: OrderQuery = Query(),
+):
+    return await service.create(payload, options)
 ```
 
-## Nested Schemas
+`req`, `res`, and `ctx` remain reserved transport parameters and may appear anywhere in the handler signature.
 
-```python
-import msgspec
+## Errors and marker composition
 
-class AddressSchema(msgspec.Struct):
-    street: str
-    city: str
-    country: str
-    zip_code: str
+Malformed JSON, invalid field types, and missing required query, header, or path values are request-time validation errors. They are handled by Hypern's normal exception pipeline and produce the configured validation response (the default is `400 Bad Request`). Invalid marker declarations, such as `Json()` without an annotation, `Body()` with a non-`bytes` annotation, or a `Path()` name absent from the route, fail when the handler plan is compiled.
 
-class CustomerSchema(msgspec.Struct):
-    name: str
-    email: str
-    billing_address: AddressSchema
-    shipping_address: Optional[AddressSchema] = None
-
-@app.post("/customers")
-@validate_body(CustomerSchema)
-def create_customer(req, res, ctx, body: CustomerSchema):
-    res.json({
-        "name": body.name,
-        "city": body.billing_address.city
-    })
-```
-
-## Error Handling
-
-Validation errors return 400 status with details:
-
-```json
-{
-    "message": "Expected `str`, got `int`",
-    "errors": [
-        {
-            "type": "validation_error",
-            "msg": "Expected `str`, got `int`"
-        }
-    ]
-}
-```
-
-### Custom Error Response
-
-```python
-from hypern.validation import Validator, ValidationError
-
-validator = Validator(UserSchema)
-
-@app.post("/users")
-def create_user(req, res, ctx):
-    try:
-        body = validator.validate(req.body_bytes())
-        res.json({"valid": True, "data": body})
-    except ValidationError as e:
-        res.status(400).json(e.to_dict())
-```
-
-## Manual Validation
-
-Use the `Validator` class for manual validation:
-
-```python
-from hypern.validation import Validator
-import msgspec
-
-class UserSchema(msgspec.Struct):
-    name: str
-    email: str
-    age: int
-
-validator = Validator(UserSchema)
-
-@app.post("/users")
-def create_user(req, res, ctx):
-    try:
-        # Validate JSON body
-        user = validator.validate(req.body_bytes())
-        
-        # Use validated data
-        res.json({
-            "name": user.name,
-            "email": user.email
-        })
-    except Exception as e:
-        res.status(400).json({"error": str(e)})
-```
-
-## Type Coercion for Query/Path Parameters
-
-Query and path parameters come as strings. The validation decorators automatically coerce them to the expected types:
-
-```python
-class QueryParams(msgspec.Struct):
-    page: int = 1
-    limit: int = 10
-
-@app.get("/items")
-@validate_query(QueryParams)
-def list_items(req, res, ctx, query: QueryParams):
-    # query.page and query.limit are automatically converted to int
-    res.json({
-        "page": query.page,
-        "limit": query.limit
-    })
-```
-
-## Important Notes
-
-### Handler Signature with ctx Parameter
-
-All route handlers in Hypern receive three parameters: `req`, `res`, and `ctx`. When using validation decorators, you **must** include the `ctx` parameter in your handler signature:
-
-```python
-# ✅ Correct - includes ctx parameter
-@app.post("/users")
-@validate_body(UserSchema)
-def create_user(req, res, ctx, body: UserSchema):
-    res.json({"name": body.name})
-
-# ❌ Wrong - missing ctx parameter
-@app.post("/users")
-@validate_body(UserSchema)
-def create_user(req, res, body: UserSchema):  # This will cause errors!
-    res.json({"name": body.name})
-```
-
-The validation decorators pass validated data as additional parameters **after** `ctx`:
-
-```python
-# Body validation: (req, res, ctx, body)
-@validate_body(Schema)
-def handler(req, res, ctx, body: Schema):
-    pass
-
-# Query validation: (req, res, ctx, query)
-@validate_query(Schema)
-def handler(req, res, ctx, query: Schema):
-    pass
-
-# Combined validation: (req, res, ctx, body, query)
-@validate(body=BodySchema, query=QuerySchema)
-def handler(req, res, ctx, body: BodySchema, query: QuerySchema):
-    pass
-```
-
+Markers compose by parameter rather than by decorator wrapping. You can reorder parameters without changing where they are read from, and no DI or validation decorator order affects binding. The legacy decorator-based validation API is removed.

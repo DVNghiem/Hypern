@@ -81,8 +81,8 @@ def wire_dependencies(app) -> None:
         projection=projection,
     )
 
-    app.singleton("example_service", service)
-    app.singleton("example_projection", projection)
+    app.provide("example_service", service)
+    app.provide("example_projection", projection)
 '''
 
     # ══════════════════════════════════════════════════════════════

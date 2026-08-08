@@ -16,6 +16,7 @@ class _RouteDefinition:
     method: str
     path: str
     handler: Callable
+    path_parameter_names: frozenset[str] = frozenset()
     middleware: tuple[Callable, ...] = ()
     options: dict[str, Any] = field(default_factory=dict)
 
@@ -83,6 +84,15 @@ class Router:
         Express: /users/:id -> Hypern: /users/:id (same format)
         """
         return path
+
+    @staticmethod
+    def _path_parameter_names(path: str) -> frozenset[str]:
+        """Return the named parameters declared by a route path."""
+        return frozenset(
+            segment[1:]
+            for segment in path.split("/")
+            if segment.startswith(":") and len(segment) > 1
+        )
     
     def route(self, path: str) -> RouteBuilder:
         """
@@ -116,6 +126,7 @@ class Router:
                 method=method,
                 path=converted_path,
                 handler=handler,
+                path_parameter_names=self._path_parameter_names(converted_path),
                 middleware=tuple(middleware or ()),
                 options=options,
             )

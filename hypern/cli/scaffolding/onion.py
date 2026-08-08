@@ -37,7 +37,7 @@ config = get_config()
 
 app = Hypern(debug=config.DEBUG)
 
-# Wire DI
+# Register compiled providers
 wire_dependencies(app)
 
 # Middleware (outermost ring)
@@ -62,12 +62,12 @@ from application.services.example_service import ExampleAppService
 
 
 def wire_dependencies(app) -> None:
-    """Register singletons / factories in the DI container."""
+    """Register providers used by compiled handler binding."""
     repo: IExampleRepository = InMemoryExampleRepository()
     service = ExampleAppService(repository=repo)
 
-    app.singleton("example_repository", repo)
-    app.singleton("example_service", service)
+    app.provide("example_repository", repo)
+    app.provide("example_service", service)
 '''
 
     # ══════════════════════════════════════════════════════════════
@@ -392,52 +392,62 @@ class DatabaseConfig:
     files["presentation/controllers/example_controller.py"] = '''\
 """Example controller – outermost ring, depends on application services."""
 
-from hypern import Router, Request, Response
+from hypern import Inject, Json, Path, Query, Router
 
 example_router = Router(prefix="/examples")
 
 
 @example_router.get("/")
-async def list_examples(request: Request) -> Response:
+async def list_examples(
+    active_only: bool | None = Query("active"),
+    service: object = Inject("example_service"),
+) -> list:
     """List all examples (optionally filter active only via ?active=true)."""
-    # service: ExampleAppService = request.app.resolve("example_service")
-    # active_only = request.query.get("active") == "true"
     # items = await service.get_all(active_only=active_only)
-    return Response(status_code=200, description=[])
+    return []
 
 
 @example_router.get("/:id")
-async def get_example(request: Request) -> Response:
+async def get_example(
+    item_id: str = Path("id"),
+    service: object = Inject("example_service"),
+) -> dict:
     """Get a single example by ID."""
-    # service = request.app.resolve("example_service")
-    # item = await service.get_by_id(request.params["id"])
-    return Response(status_code=200, description={})
+    # item = await service.get_by_id(item_id)
+    return {}
 
 
 @example_router.post("/")
-async def create_example(request: Request) -> Response:
+async def create_example(
+    payload: dict = Json(),
+    service: object = Inject("example_service"),
+) -> dict:
     """Create a new example."""
-    # service = request.app.resolve("example_service")
-    # dto = CreateExampleDTO(**request.json())
+    # dto = CreateExampleDTO(**payload)
     # result = await service.create(dto)
-    return Response(status_code=201, description={"created": True})
+    return {"created": True}
 
 
 @example_router.put("/:id")
-async def update_example(request: Request) -> Response:
+async def update_example(
+    item_id: str = Path("id"),
+    payload: dict = Json(),
+    service: object = Inject("example_service"),
+) -> dict:
     """Update an existing example."""
-    # service = request.app.resolve("example_service")
-    # dto = UpdateExampleDTO(**request.json())
-    # result = await service.update(request.params["id"], dto)
-    return Response(status_code=200, description={"updated": True})
+    # dto = UpdateExampleDTO(**payload)
+    # result = await service.update(item_id, dto)
+    return {"updated": True}
 
 
 @example_router.delete("/:id")
-async def delete_example(request: Request) -> Response:
+async def delete_example(
+    item_id: str = Path("id"),
+    service: object = Inject("example_service"),
+) -> None:
     """Delete an example by ID."""
-    # service = request.app.resolve("example_service")
-    # await service.delete(request.params["id"])
-    return Response(status_code=204, description="")
+    # await service.delete(item_id)
+    return None
 '''
 
     # ── Middleware ────────────────────────────────────────────────

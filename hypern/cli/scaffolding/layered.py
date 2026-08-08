@@ -25,7 +25,7 @@ config = get_config()
 app = Hypern(debug=config.DEBUG)
 
 # Register dependencies
-app.singleton("example_service", ExampleService())
+app.provide("example_service", ExampleService())
 
 # Register middleware
 app.use(LoggingMiddleware())
@@ -45,29 +45,26 @@ if __name__ == "__main__":
     files["controllers/example.py"] = '''\
 """Example controller – thin HTTP layer."""
 
-from hypern import Router, Request, Response, inject
+from hypern import Inject, Router, Request, Response
 
 example_router = Router(prefix="/examples")
 
 
 @example_router.get("/")
-@inject("example_service")
-async def list_examples(request: Request, response: Response, ctx, example_service) -> Response:
+async def list_examples(req: Request, res: Response, ctx, example_service=Inject("example_service")) -> Response:
     items = await example_service.get_all()
     return Response(status_code=200, description=items)
 
 
 @example_router.get("/:id")
-@inject("example_service")
-async def get_example(request: Request, response: Response, ctx, example_service) -> Response:
-    item = await example_service.get_by_id(request.params.get("id"))
+async def get_example(req: Request, res: Response, ctx, example_service=Inject("example_service")) -> Response:
+    item = await example_service.get_by_id(req.params.get("id"))
     return Response(status_code=200, description=item or {})
 
 
 @example_router.post("/")
-@inject("example_service")
-async def create_example(request: Request, response: Response, ctx, example_service) -> Response:
-    data = request.json()
+async def create_example(req: Request, res: Response, ctx, example_service=Inject("example_service")) -> Response:
+    data = req.json()
     result = await example_service.create(data)
     return Response(status_code=201, description=result)
 '''

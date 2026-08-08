@@ -28,7 +28,7 @@ if __name__ == "__main__":
 | [SSE & Streaming](sse.md) | Server-Sent Events and streaming responses |
 | [Zero-Downtime Reloads](zero-downtime.md) | Graceful/hot reloads with health probes |
 | [Validation](validation.md) | Request validation and schema definition |
-| [Dependency Injection](dependency-injection.md) | DI container and service registration |
+| [Dependency Injection](dependency-injection.md) | Compiled providers and marker-based parameter binding |
 | [Authentication](auth.md) | JWT, API keys, and RBAC authorization |
 | [WebSocket](websocket.md) | Real-time WebSocket connections and rooms |
 | [Background Tasks](tasks.md) | Background job processing |

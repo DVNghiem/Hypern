@@ -39,7 +39,7 @@ pub use crate::routing::cache::RouteCache;
 pub use crate::routing::route::Route;
 pub use crate::routing::router::Router;
 
-pub use crate::core::context::{Context, DIContainer};
+pub use crate::core::context::Context;
 
 pub use crate::core::tasks::{TaskExecutor, TaskResult, TaskStatus};
 
@@ -88,9 +88,8 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<FormData>()?;
     module.add_class::<UploadedFile>()?;
 
-    // Dependency Injection
+    // Request context
     module.add_class::<Context>()?;
-    module.add_class::<DIContainer>()?;
 
     // Background Tasks
     module.add_class::<TaskExecutor>()?;
