@@ -9,7 +9,27 @@ Tests cover:
 - Context elapsed time
 """
 
+import asyncio
+
 import httpx
+
+from hypern import Hypern
+
+
+def test_app_inject_resolves_generic_singleton() -> None:
+    app = Hypern()
+    store = object()
+    app.singleton("store", store)
+    resolved: list[object] = []
+
+    @app.inject("store")
+    async def handler(req, res, ctx, store):
+        resolved.append(store)
+
+    context = app.di.create_context()
+    asyncio.run(handler(None, None, context))
+
+    assert resolved == [store]
 
 
 class TestSingletonDependencies:
@@ -23,18 +43,18 @@ class TestSingletonDependencies:
         
         assert data["app_name"] == "Hypern Test App"
         assert data["debug"] is True
-        assert data["database_url"] == "memory://test"
+        assert data["store_url"] == "memory://test"
         assert data["secret_key"] == "test-secret-key-123"
     
-    def test_database_singleton(self, client: httpx.Client):
-        """Test database singleton is injected correctly."""
-        response = client.get("/di/database")
+    def test_store_singleton(self, client: httpx.Client):
+        """Test store singleton is injected correctly."""
+        response = client.get("/di/store")
         assert response.status_code == 200
         data = response.json()
         
         assert "users" in data
         assert isinstance(data["users"], list)
-        # Should have initial users from test database
+        # Should have initial users from test store
         assert len(data["users"]) >= 2
     
     def test_singleton_persistence(self, client: httpx.Client):
@@ -47,7 +67,7 @@ class TestSingletonDependencies:
         assert create_response.status_code == 201
         
         # Second request - verify user exists
-        list_response = client.get("/di/database")
+        list_response = client.get("/di/store")
         assert list_response.status_code == 200
         users = list_response.json()["users"]
         
@@ -97,9 +117,9 @@ class TestRequestContext:
 class TestDependencyInjectionIntegration:
     """Test dependency injection integration scenarios."""
     
-    def test_standalone_inject_database(self, client: httpx.Client):
-        """Test standalone @inject decorator works for database."""
-        response = client.get("/di/database")
+    def test_standalone_inject_store(self, client: httpx.Client):
+        """Test standalone @inject decorator works for store."""
+        response = client.get("/di/store")
         assert response.status_code == 200
         data = response.json()
         assert "users" in data
@@ -129,11 +149,11 @@ class TestDependencyInjectionIntegration:
         # Config should have expected keys
         assert "app_name" in data
         assert "debug" in data
-        assert "database_url" in data
+        assert "store_url" in data
     
-    def test_database_operations_through_di(self, client: httpx.Client):
-        """Test database operations work through DI."""
-        # Create via CRUD (uses DI database)
+    def test_store_operations_through_di(self, client: httpx.Client):
+        """Test store operations work through DI."""
+        # Create via CRUD (uses DI store)
         create_resp = client.post(
             "/crud/users",
             json={"name": "DI Test User", "email": "di@test.com", "age": 28}
@@ -142,7 +162,7 @@ class TestDependencyInjectionIntegration:
         user = create_resp.json()
         
         # Read via DI endpoint
-        di_resp = client.get("/di/database")
+        di_resp = client.get("/di/store")
         assert di_resp.status_code == 200
         users = di_resp.json()["users"]
         
@@ -193,9 +213,9 @@ class TestRouterInject:
         assert data["app_name"] == "Hypern Test App"
         assert data["debug"] is True
 
-    def test_router_inject_single_database(self, client: httpx.Client):
-        """Test @inject('database') on a Router route resolves correctly."""
-        response = client.get("/router-di/database")
+    def test_router_inject_single_store(self, client: httpx.Client):
+        """Test @inject('store') on a Router route resolves correctly."""
+        response = client.get("/router-di/store")
         assert response.status_code == 200
         data = response.json()
         assert "users" in data

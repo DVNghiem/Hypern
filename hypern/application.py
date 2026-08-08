@@ -14,12 +14,10 @@ from typing_extensions import Doc
 from hypern._hypern import DIContainer, HealthCheck, ReloadConfig, ReloadManager, Server, SSEStream, StreamingResponse, TaskExecutor, TaskResult
 from hypern._hypern import Route as RustRoute
 from hypern._hypern import Router as RustRouter
-from hypern._hypern import get_db as _get_db
-from hypern.database import Database as _Database
-from hypern.database import finalize_db as _finalize_db
 from hypern.di import inject as _standalone_inject
 from hypern.exceptions import ExceptionHandler
 from hypern.logfmt import config_basic_logging
+from hypern.middleware import normalize_middleware
 from hypern.router import Router
 from hypern.tasks import set_task_executor
 
@@ -42,9 +40,7 @@ class _PipelineScope:
     """One immutable scope in a compiled Python request pipeline."""
 
     name: str
-    before: tuple[Callable, ...]
     middleware: tuple[Callable, ...]
-    after: tuple[Callable, ...]
 
 
 class Hypern:
@@ -99,8 +95,6 @@ class Hypern:
         self._middleware: list[Callable | object | tuple] = []
         
         # Request lifecycle handlers
-        self._before_handlers: list[Callable] = []
-        self._after_handlers: list[Callable] = []
         
         # Exception handling
         self._exception_handler = ExceptionHandler()
@@ -904,20 +898,9 @@ class Hypern:
         """Register middleware or hook, optionally with a path."""
         self._assert_registration_open()
 
-        # Legacy hook decorators are classified once at registration so the
-        # request executor never needs callable signature or marker inspection.
-        is_before_hook = bool(getattr(target, "_before_request", False))
-        is_after_hook = bool(getattr(target, "_after_request", False))
-
-        if is_before_hook:
-            self._before_handlers.append(target)
-
-        if is_after_hook:
-            self._after_handlers.append(target)
-
-        if is_before_hook or is_after_hook:
-            self._refresh_pipeline_descriptors()
-            return
+        descriptor = normalize_middleware(target)
+        if descriptor is not None:
+            target = descriptor
 
         if path:
             self._middleware.append((path, target))
@@ -971,8 +954,6 @@ class Hypern:
                 route.middleware,
                 router=router,
                 route_path=full_path,
-                route_before=route.before_hooks,
-                route_after=route.after_hooks,
             )
             self.add_route(route.method, full_path, wrapped)
     
@@ -983,8 +964,8 @@ class Hypern:
         Example:
             @app.on_startup
             async def startup():
-                print("Server starting...")
-                await init_database()
+                service = await create_service()
+                app.singleton("service", service)
         """
         self._assert_registration_open()
         self._startup_handlers.append(handler)
@@ -997,39 +978,12 @@ class Hypern:
         Example:
             @app.on_shutdown
             async def shutdown():
-                print("Server shutting down...")
-                await close_database()
+                service = app.di.get_singleton("service") if app.di else None
+                if service is not None:
+                    await service.aclose()
         """
         self._assert_registration_open()
         self._shutdown_handlers.append(handler)
-        return handler
-    
-    def before_request(self, handler: Callable) -> Callable:
-        """
-        Register a before-request handler.
-        
-        Example:
-            @app.before_request
-            async def log_request(req, res, ctx):
-                print(f"Request: {req.method} {req.path}")
-        """
-        self._assert_registration_open()
-        self._before_handlers.append(handler)
-        self._refresh_pipeline_descriptors()
-        return handler
-    
-    def after_request(self, handler: Callable) -> Callable:
-        """
-        Register an after-request handler.
-        
-        Example:
-            @app.after_request
-            async def add_headers(req, res, ctx):
-                res.header("X-Server", "Hypern")
-        """
-        self._assert_registration_open()
-        self._after_handlers.append(handler)
-        self._refresh_pipeline_descriptors()
         return handler
     
     def errorhandler(self, exc_class: type[Exception]) -> Callable:
@@ -1119,33 +1073,25 @@ class Hypern:
         *,
         router: Router | None,
         route_path: str,
-        route_before: tuple[Callable, ...],
-        route_after: tuple[Callable, ...],
     ) -> tuple[_PipelineScope, ...]:
         """Build one immutable descriptor for a registered route."""
         scopes = [
             _PipelineScope(
                 name="app",
-                before=tuple(self._before_handlers),
                 middleware=self._python_middleware_for(route_path),
-                after=tuple(self._after_handlers),
             )
         ]
         if router is not None:
             scopes.append(
                 _PipelineScope(
                     name="router",
-                    before=tuple(router._before_handlers),
                     middleware=tuple(router._middleware),
-                    after=tuple(router._after_handlers),
                 )
             )
         scopes.append(
             _PipelineScope(
                 name="route",
-                before=route_before,
                 middleware=middleware,
-                after=route_after,
             )
         )
         return tuple(scopes)
@@ -1186,7 +1132,7 @@ class Hypern:
                     return
                 raise TypeError(
                     "Python middleware must return an awaitable and use "
-                    "(req, res, ctx, next_fn)"
+                    "(req, res, ctx, next)"
                 )
             await result
 
@@ -1196,31 +1142,13 @@ class Hypern:
         self,
         handler: Callable,
         scopes: tuple[_PipelineScope, ...],
-        entered_scopes: list[_PipelineScope],
         req: Any,
         res: Any,
         ctx: Any,
     ) -> None:
         """Execute the canonical app -> router -> route Python pipeline."""
-        route_scope = scopes[-1]
-
-        # App and router before hooks precede every Python middleware stage.
-        for scope in scopes[:-1]:
-            entered_scopes.append(scope)
-            for before_handler in scope.before:
-                await self._invoke_callable(before_handler, req, res, ctx)
-                if self._response_is_terminal(res):
-                    return
-
         async def execute_scope(index: int) -> None:
             scope = scopes[index]
-            if scope is route_scope:
-                entered_scopes.append(scope)
-                for before_handler in scope.before:
-                    await self._invoke_callable(before_handler, req, res, ctx)
-                    if self._response_is_terminal(res):
-                        return
-
             async def continue_inward() -> None:
                 if self._response_is_terminal(res):
                     return
@@ -1239,32 +1167,6 @@ class Hypern:
 
         await execute_scope(0)
 
-    def _mark_database_error(self, ctx: Any) -> None:
-        """Mark an active request database session for rollback."""
-        if not ctx:
-            return
-        try:
-            if _Database.is_configured():
-                session = _get_db(ctx.request_id)
-                session.set_error()
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to mark the request database session as errored")
-
-    async def _run_after_hooks(
-        self,
-        entered_scopes: list[_PipelineScope],
-        req: Any,
-        res: Any,
-        ctx: Any,
-    ) -> None:
-        """Unwind entered scopes and suppress observer hook failures."""
-        for scope in reversed(entered_scopes):
-            for after_handler in reversed(scope.after):
-                try:
-                    await self._invoke_callable(after_handler, req, res, ctx)
-                except Exception:  # noqa: BLE001
-                    logger.exception("%s after hook failed", scope.name)
-    
     def _wrap_handler(
         self,
         handler: Callable,
@@ -1272,14 +1174,10 @@ class Hypern:
         *,
         router: Router | None = None,
         route_path: str = "/",
-        route_before: tuple[Callable, ...] = (),
-        route_after: tuple[Callable, ...] = (),
     ) -> Callable:
         """Create the application-owned wrapper for one Python route pipeline."""
         self._assert_registration_open()
         route_middleware = tuple(middleware or ())
-        route_before = tuple(route_before)
-        route_after = tuple(route_after)
         scopes: tuple[_PipelineScope, ...] = ()
 
         def compile_descriptor() -> None:
@@ -1288,8 +1186,6 @@ class Hypern:
                 route_middleware,
                 router=router,
                 route_path=route_path,
-                route_before=route_before,
-                route_after=route_after,
             )
 
         compile_descriptor()
@@ -1298,7 +1194,6 @@ class Hypern:
         @functools.wraps(handler)
         async def wrapped(req, res):
             ctx = self._di.create_context() if self._di else None
-            entered_scopes: list[_PipelineScope] = []
             unhandled_error: Exception | None = None
             exception_handler_error: Exception | None = None
 
@@ -1306,13 +1201,11 @@ class Hypern:
                 await self._execute_python_pipeline(
                     handler,
                     scopes,
-                    entered_scopes,
                     req,
                     res,
                     ctx,
                 )
             except Exception as exc:  # noqa: BLE001
-                self._mark_database_error(ctx)
                 response_was_terminal = self._response_is_terminal(res)
                 try:
                     await self._exception_handler.handle_exception(req, res, exc)
@@ -1323,15 +1216,6 @@ class Hypern:
                     response_is_terminal = self._response_is_terminal(res)
                     if response_was_terminal or not response_is_terminal:
                         unhandled_error = exc
-            finally:
-                await self._run_after_hooks(entered_scopes, req, res, ctx)
-                if ctx:
-                    try:
-                        if _Database.is_configured():
-                            _finalize_db(ctx)
-                    except Exception:  # noqa: BLE001
-                        logger.exception("Failed to finalize the request database session")
-
             if unhandled_error is not None:
                 raise unhandled_error.with_traceback(unhandled_error.__traceback__) from exception_handler_error
         

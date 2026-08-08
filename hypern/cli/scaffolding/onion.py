@@ -336,7 +336,7 @@ class ExampleAppService:
     files["infrastructure/persistence/in_memory_example_repository.py"] = '''\
 """In-memory implementation of IExampleRepository.
 
-Replace with a real database adapter (e.g. PostgreSQL via Hypern\'s Database).
+Replace with a real database adapter (e.g. PostgreSQL via your application's persistence adapter).
 """
 
 from typing import List, Optional

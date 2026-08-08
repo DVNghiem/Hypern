@@ -34,12 +34,9 @@ nav:
       - HTTP Client: http-client.md
       - Metrics: metrics.md
       - Redis: redis.md
-      - GraphQL: graphql.md
-      - gRPC: grpc.md
       - Utilities: utils.md
   - Best Practices: best-practices.md
   - Advanced:
-      - Database: database.md
       - Performance Optimization: performance-optimization-plan.md
   - User Guide: user-guide.md
 

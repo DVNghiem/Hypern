@@ -21,9 +21,7 @@ pub use crate::core::socket;
 // Core performance modules
 pub mod client;
 pub mod core;
-pub mod database;
 pub mod fast_path;
-pub mod grpc;
 pub mod http;
 pub mod memory;
 pub mod middleware;
@@ -55,8 +53,6 @@ pub use crate::telemetry::MetricsRegistry;
 
 pub use crate::redis::RedisPool;
 
-pub use crate::grpc::{GrpcConfig, GrpcServer};
-
 pub use crate::http::streaming::{SSEEvent, SSEGenerator, SSEStream, StreamingResponse};
 
 pub use crate::http::websocket::{RustWebSocket, WsMessage, WsMessageType};
@@ -72,14 +68,8 @@ pub use crate::realtime::presence::{PresenceDiff, PresenceInfo, PresenceTracker}
 
 pub use crate::middleware::{
     PyBasicAuthMiddleware, PyCacheMiddleware, PyCircuitBreakerMiddleware, PyCompressionMiddleware,
-    PyCorsMiddleware, PyRateLimitMiddleware, PyRequestIdMiddleware,
-    PySecurityHeadersMiddleware, PyTimeoutMiddleware,
-};
-
-// Database exports
-pub use crate::database::{
-    finalize_db, finalize_db_all, get_db, AnyPool, ConnectionPool, DbSession, PoolConfig,
-    PoolStatus, RowStream,
+    PyCorsMiddleware, PyRateLimitMiddleware, PyRequestIdMiddleware, PySecurityHeadersMiddleware,
+    PyTimeoutMiddleware,
 };
 
 // Re-exports for internal use
@@ -125,10 +115,6 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
 
     // Redis
     module.add_class::<RedisPool>()?;
-
-    // gRPC
-    module.add_class::<GrpcConfig>()?;
-    module.add_class::<GrpcServer>()?;
 
     // Streaming/SSE
     module.add_class::<SSEEvent>()?;
@@ -182,17 +168,6 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
 
     // Static file handler
     module.add_class::<StaticFileHandler>()?;
-
-    // Database
-    module.add_class::<ConnectionPool>()?;
-    module.add_class::<PoolConfig>()?;
-    module.add_class::<PoolStatus>()?;
-    module.add_class::<DbSession>()?;
-    module.add_class::<RowStream>()?;
-    module.add_class::<AnyPool>()?;
-    module.add_function(wrap_pyfunction!(get_db, module)?)?;
-    module.add_function(wrap_pyfunction!(finalize_db, module)?)?;
-    module.add_function(wrap_pyfunction!(finalize_db_all, module)?)?;
 
     // Utils: string, pagination, crypto, time
     crate::utils::register_utils(module)?;

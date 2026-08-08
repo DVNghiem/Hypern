@@ -5,7 +5,7 @@
 
 Hypern is a flexible, open-source web framework that combines the ease of Python with the raw performance of [Rust](https://github.com/rust-lang/rust). Built on top of production-ready Rust libraries, Hypern empowers you to rapidly develop high-performance web applications, RESTful APIs, and real-time systems.
 
-With Hypern, you get seamless async/await support, built-in WebSocket and SSE capabilities, powerful task scheduling, database connection pooling, and comprehensive middleware support—all while writing familiar Python code with the performance characteristics of Rust.
+With Hypern, you get seamless async/await support, built-in WebSocket and SSE capabilities, powerful task scheduling, and comprehensive middleware support—all while writing familiar Python code with the performance characteristics of Rust.
 
 ### 🏁 Get started
 
@@ -163,7 +163,7 @@ app.start(
 
 ### 🔌 Integration & Extensions
 - **Dependency Injection** (DI) with singleton and factory patterns
-- **Middleware support** with before/after request hooks
+- **Middleware support** with one async `next()` pipeline
   - CORS middleware
   - Rate limiting middleware
   - Compression middleware
@@ -172,7 +172,6 @@ app.start(
   - Timeout middleware
   - Logging middleware
   - Basic authentication middleware
-- **Database connection pooling** for PostgreSQL, MySQL, SQLite
 - **Background task execution** with TaskExecutor
 - **Task scheduling** with cron expressions and intervals
 - **Router mounting** for modular application structure
@@ -222,14 +221,13 @@ app.use(rate_limit)
 # Add request logging
 app.use(LogMiddleware())
 
-# Custom middleware with before/after hooks
-@app.before_request
-async def log_request(req, res, ctx):
+# Custom middleware can run before and after the downstream handler
+async def add_server_header(req, res, ctx, next):
     print(f"→ {req.method} {req.path}")
-
-@app.after_request
-async def add_server_header(req, res, ctx):
+    await next()
     res.header("X-Powered-By", "Hypern")
+
+app.use(add_server_header)
 ```
 
 ### WebSocket Support
@@ -278,69 +276,6 @@ async def live_stream(req, res, ctx):
     stream.send_event("message", "Hello!")
     stream.send_data("Plain data")
     # Return collected events
-```
-
-### Database Integration
-
-```python
-from hypern import Hypern
-from hypern.database import Database, db, finalize_db
-
-app = Hypern()
-
-# Configure database connection pool (lazy initialization)
-Database.configure(
-    url="postgresql://user:pass@localhost:5432/mydb",
-    max_size=20,
-    min_idle=2,
-    connect_timeout_secs=30,
-    alias="default"  # Optional, defaults to "default"
-)
-
-# Multiple databases
-Database.configure(
-    url="postgresql://user:pass@localhost:5432/analytics",
-    max_size=5,
-    alias="analytics"
-)
-
-@app.get("/users")
-async def get_users(req, res, ctx):
-    # Get database session for this request
-    session = db(ctx)
-    users = session.query("SELECT * FROM users")
-    res.json(users)
-
-@app.post("/users")
-async def create_user(req, res, ctx):
-    session = db(ctx)
-    body = req.json()
-    
-    # With transaction
-    with session.transaction():
-        user_id = session.query_one(
-            "INSERT INTO users (name, email) VALUES ($1, $2) RETURNING id",
-            [body["name"], body["email"]]
-        )["id"]
-        
-        session.execute(
-            "INSERT INTO logs (user_id, action) VALUES ($1, $2)",
-            [user_id, "user_created"]
-        )
-    
-    res.status(201).json({"id": user_id})
-
-@app.get("/analytics")
-async def get_analytics(req, res, ctx):
-    # Use named database
-    analytics = db(ctx, alias="analytics")
-    logs = analytics.query("SELECT * FROM logs ORDER BY created_at DESC LIMIT 100")
-    res.json({"logs": logs})
-
-# Manual cleanup (usually automatic)
-@app.after_request
-async def cleanup_db(req, res, ctx):
-    finalize_db(ctx)  # Finalizes all databases for this request
 ```
 
 ### Background Tasks
@@ -564,15 +499,12 @@ from hypern import Hypern
 
 app = Hypern()
 
-# Register singleton (shared instance)
-class DatabaseService:
-    def __init__(self):
-        self.connection = "db_connection"
-    
-    def query(self, sql):
+# Register an application-owned singleton (shared instance)
+class CatalogService:
+    def list_items(self):
         return [{"id": 1, "name": "John"}]
 
-app.singleton("db", DatabaseService())
+app.singleton("catalog_service", CatalogService())
 
 # Register factory (new instance per request)
 class RequestLogger:
@@ -584,11 +516,11 @@ app.factory("logger", lambda: RequestLogger())
 # Use dependencies in routes
 @app.get("/data")
 async def get_data(req, res, ctx):
-    db = ctx.get("db")
+    catalog_service = ctx.get("catalog_service")
     logger = ctx.get("logger")
     
     logger.log("Fetching data")
-    data = db.query("SELECT * FROM items")
+    data = catalog_service.list_items()
     res.json(data)
 ```
 
@@ -653,7 +585,6 @@ For more detailed documentation, visit:
 - [Getting Started Guide](docs/getting-started.md)
 - [Routing](docs/routing.md)
 - [Middleware](docs/middleware.md)
-- [Database](docs/database.md)
 - [Authentication](docs/auth.md)
 - [WebSocket](docs/websocket.md)
 - [Task Scheduling](docs/scheduling.md)
@@ -676,5 +607,3 @@ This project is licensed under the terms specified in the [LICENSE](LICENSE) fil
 ---
 
 **Built with ❤️ using Python and Rust**
-
-

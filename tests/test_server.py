@@ -72,11 +72,11 @@ class NestedUserSchema(msgspec.Struct):
 
 
 # ============================================================================
-# Test Data Storage (in-memory database)
+# Test Data Storage (in-memory store)
 # ============================================================================
 
-class MockDatabase:
-    """In-memory database for testing."""
+class MockStore:
+    """In-memory store for testing."""
     
     def __init__(self):
         self.users: Dict[str, Dict[str, Any]] = {
@@ -117,7 +117,7 @@ class MockDatabase:
         return False
     
     def reset(self):
-        """Reset the database to initial state."""
+        """Reset the store to initial state."""
         self.users = {
             "1": {"id": "1", "name": "Alice", "email": "alice@example.com", "age": 30},
             "2": {"id": "2", "name": "Bob", "email": "bob@example.com", "age": 25},
@@ -131,8 +131,8 @@ class MockDatabase:
         self.next_product_id = 3
 
 
-# Global test database instance
-test_db = MockDatabase()
+# Global test store instance
+test_store = MockStore()
 
 
 def create_test_app() -> Hypern:
@@ -164,10 +164,10 @@ def create_test_app() -> Hypern:
     app.singleton("config", {
         "app_name": "Hypern Test App",
         "debug": True,
-        "database_url": "memory://test",
+        "store_url": "memory://test",
         "secret_key": "test-secret-key-123",
     })
-    app.singleton("database", test_db)
+    app.singleton("store", test_store)
     
     # Register factory dependencies
     def create_request_logger():
@@ -226,7 +226,7 @@ def create_test_app() -> Hypern:
     @app.get("/users/:user_id")
     def get_user(req, res, ctx):
         user_id = req.param("user_id")
-        user = test_db.get_user(user_id)
+        user = test_store.get_user(user_id)
         if user:
             res.json(user)
         else:
@@ -515,7 +515,7 @@ def create_test_app() -> Hypern:
     @app.post("/validated/user")
     @validate_body(CreateUserSchema)
     def create_validated_user(req, res, ctx, body: CreateUserSchema):
-        user = test_db.create_user({
+        user = test_store.create_user({
             "name": body.name,
             "email": body.email,
             "age": body.age
@@ -525,7 +525,7 @@ def create_test_app() -> Hypern:
     @app.get("/validated/search")
     @validate_query(QueryParamsSchema)
     def validated_search(req, res, ctx, query: QueryParamsSchema):
-        users = test_db.get_all_users()
+        users = test_store.get_all_users()
         
         # Apply search filter
         if query.search:
@@ -573,10 +573,10 @@ def create_test_app() -> Hypern:
     def get_config(req, res, ctx, config):
         res.json(config)
     
-    @app.get("/di/database")
-    @inject("database")
-    def get_database_users(req, res, ctx, database):
-        users = database.get_all_users()
+    @app.get("/di/store")
+    @inject("store")
+    def get_store_users(req, res, ctx, store):
+        users = store.get_all_users()
         res.json({"users": users})
     
     @app.get("/di/factory")
@@ -588,9 +588,9 @@ def create_test_app() -> Hypern:
         })
     
     @app.get("/di/multi")
-    @inject("database", "config")
-    def get_multi_inject(req, res, ctx, database, config):
-        users = database.get_all_users()
+    @inject("store", "config")
+    def get_multi_inject(req, res, ctx, store, config):
+        users = store.get_all_users()
         res.json({
             "user_count": len(users),
             "app_name": config.get("app_name", "unknown")
@@ -607,16 +607,16 @@ def create_test_app() -> Hypern:
     def router_get_config(req, res, ctx, config):
         res.json(config)
 
-    @router_di.get("/database")
-    @inject("database")
-    def router_get_database(req, res, ctx, database):
-        users = database.get_all_users()
+    @router_di.get("/store")
+    @inject("store")
+    def router_get_store(req, res, ctx, store):
+        users = store.get_all_users()
         res.json({"users": users})
 
     @router_di.get("/multi")
-    @inject("database", "config")
-    def router_get_multi(req, res, ctx, database, config):
-        users = database.get_all_users()
+    @inject("store", "config")
+    def router_get_multi(req, res, ctx, store, config):
+        users = store.get_all_users()
         res.json({
             "user_count": len(users),
             "app_name": config.get("app_name", "unknown")
@@ -624,9 +624,9 @@ def create_test_app() -> Hypern:
 
     @router_di.get("/stacked")
     @inject("config")
-    @inject("database")
-    def router_get_stacked(req, res, ctx, database, config):
-        users = database.get_all_users()
+    @inject("store")
+    def router_get_stacked(req, res, ctx, store, config):
+        users = store.get_all_users()
         res.json({
             "stacked": True,
             "user_count": len(users),
@@ -684,10 +684,10 @@ def create_test_app() -> Hypern:
 
     # @inject multi + @validate(body+query) combined
     @app.post("/di-validate/body-query")
-    @inject("database", "config")
+    @inject("store", "config")
     @validate(body=DiValidateBodySchema, query=DiValidateQuerySchema)
-    def div_inject_body_query(req, res, ctx, body: DiValidateBodySchema, query: DiValidateQuerySchema, database, config):
-        users = database.get_all_users()
+    def div_inject_body_query(req, res, ctx, body: DiValidateBodySchema, query: DiValidateQuerySchema, store, config):
+        users = store.get_all_users()
         res.json({
             "name": body.name,
             "value": body.value,
@@ -701,14 +701,14 @@ def create_test_app() -> Hypern:
     router_di_validate = Router(prefix="/router-di-validate")
 
     @router_di_validate.post("/create")
-    @inject("database", "config")
+    @inject("store", "config")
     @validate_body(DiValidateBodySchema)
-    def router_div_create(req, res, ctx, body: DiValidateBodySchema, database, config):
+    def router_div_create(req, res, ctx, body: DiValidateBodySchema, store, config):
         res.status(201).json({
             "name": body.name,
             "value": body.value,
             "debug": config.get("debug"),
-            "has_users": len(database.get_all_users()) > 0,
+            "has_users": len(store.get_all_users()) > 0,
         })
 
     @router_di_validate.get("/search")
@@ -886,13 +886,13 @@ def create_test_app() -> Hypern:
     
     @api_v1.get("/users")
     def v1_list_users(req, res, ctx):
-        users = test_db.get_all_users()
+        users = test_store.get_all_users()
         res.json({"version": "v1", "users": users})
     
     @api_v1.get("/users/:id")
     def v1_get_user(req, res, ctx):
         user_id = req.param("id")
-        user = test_db.get_user(user_id)
+        user = test_store.get_user(user_id)
         if user:
             res.json({"version": "v1", "user": user})
         else:
@@ -901,14 +901,14 @@ def create_test_app() -> Hypern:
     @api_v1.post("/users")
     def v1_create_user(req, res, ctx):
         data = req.json()
-        user = test_db.create_user(data)
+        user = test_store.create_user(data)
         res.status(201).json({"version": "v1", "user": user})
     
     api_v2 = Router(prefix="/api/v2")
     
     @api_v2.get("/users")
     def v2_list_users(req, res, ctx):
-        users = test_db.get_all_users()
+        users = test_store.get_all_users()
         res.json({
             "version": "v2",
             "data": users,
@@ -918,7 +918,7 @@ def create_test_app() -> Hypern:
     @api_v2.get("/users/:id")
     def v2_get_user(req, res, ctx):
         user_id = req.param("id")
-        user = test_db.get_user(user_id)
+        user = test_store.get_user(user_id)
         if user:
             res.json({"version": "v2", "data": user})
         else:
@@ -1005,7 +1005,7 @@ def create_test_app() -> Hypern:
     @summary("List Users (Router)")
     def router_docs_list_users(req, res, ctx):
         """List all users via router with API docs."""
-        res.json({"users": test_db.get_all_users()})
+        res.json({"users": test_store.get_all_users()})
     
     @router_docs.get("/users/:id")
     @tags("users", "docs-test")
@@ -1013,7 +1013,7 @@ def create_test_app() -> Hypern:
     def router_docs_get_user(req, res, ctx):
         """Get a user by ID via router with API docs."""
         user_id = req.param("id")
-        user = test_db.get_user(user_id)
+        user = test_store.get_user(user_id)
         if user:
             res.json(user)
         else:
@@ -1032,7 +1032,7 @@ def create_test_app() -> Hypern:
     @validate_body(CreateUserSchema)
     def router_docs_create_user(req, res, ctx, body: CreateUserSchema):
         """Create a user with validation and API doc decorators."""
-        user = test_db.create_user({
+        user = test_store.create_user({
             "name": body.name,
             "email": body.email,
             "age": body.age,
@@ -1067,19 +1067,19 @@ def create_test_app() -> Hypern:
     
     @app.get("/crud/users")
     def crud_list_users(req, res, ctx):
-        users = test_db.get_all_users()
+        users = test_store.get_all_users()
         res.json({"users": users})
     
     @app.post("/crud/users")
     def crud_create_user(req, res, ctx):
         data = req.json()
-        user = test_db.create_user(data)
+        user = test_store.create_user(data)
         res.status(201).json(user)
     
     @app.get("/crud/users/:id")
     def crud_get_user(req, res, ctx):
         user_id = req.param("id")
-        user = test_db.get_user(user_id)
+        user = test_store.get_user(user_id)
         if user:
             res.json(user)
         else:
@@ -1089,7 +1089,7 @@ def create_test_app() -> Hypern:
     def crud_update_user(req, res, ctx):
         user_id = req.param("id")
         data = req.json()
-        user = test_db.update_user(user_id, data)
+        user = test_store.update_user(user_id, data)
         if user:
             res.json(user)
         else:
@@ -1098,19 +1098,19 @@ def create_test_app() -> Hypern:
     @app.delete("/crud/users/:id")
     def crud_delete_user(req, res, ctx):
         user_id = req.param("id")
-        if test_db.delete_user(user_id):
+        if test_store.delete_user(user_id):
             res.status(204).send(None)
         else:
             res.status(404).json({"error": "User not found"})
     
     # ========================================================================
-    # Database Reset Endpoint (for tests)
+    # Store Reset Endpoint (for tests)
     # ========================================================================
     
-    @app.post("/test/reset-db")
-    def reset_database(req, res, ctx):
-        test_db.reset()
-        res.json({"status": "database_reset"})
+    @app.post("/test/reset-store")
+    def reset_store(req, res, ctx):
+        test_store.reset()
+        res.json({"status": "store_reset"})
     
     # ========================================================================
     # Middleware Testing Endpoints
@@ -1200,11 +1200,10 @@ def create_test_app() -> Hypern:
         res.json({"auth": "success", "protected": True})
     
     # ========================================================================
-    # Custom Middleware & Hooks Testing Endpoints
+    # Custom middleware testing endpoints
     # ========================================================================
     
-    # Import the decorators
-    from hypern.middleware import middleware, before_request, after_request
+    from hypern.middleware import middleware
     
     # Define custom middleware with @middleware decorator
     @middleware
@@ -1225,41 +1224,39 @@ def create_test_app() -> Hypern:
         # Don't call next() - short circuit
         res.status(403).json({"error": "Blocked by middleware"})
     
-    # Define before_request hooks
-    @before_request
-    async def add_before_header(req, res, ctx):
-        """Before-request hook that adds header."""
+    @middleware
+    async def add_before_header(req, res, ctx, next):
         res.header("X-Before-Request", "hook-executed")
+        await next()
     
-    @before_request
-    async def add_before_header_1(req, res, ctx):
-        """First before-request hook."""
+    @middleware
+    async def add_before_header_1(req, res, ctx, next):
         res.header("X-Before-1", "executed")
         ctx.set("before_1", True)
+        await next()
     
-    @before_request
-    async def add_before_header_2(req, res, ctx):
-        """Second before-request hook."""
+    @middleware
+    async def add_before_header_2(req, res, ctx, next):
         res.header("X-Before-2", "executed")
         ctx.set("before_2", True)
+        await next()
     
-    # Define after_request hooks
-    @after_request
-    async def add_after_header(req, res, ctx):
-        """After-request hook that adds header."""
+    @middleware
+    async def add_after_header(req, res, ctx, next):
+        await next()
         res.header("X-After-Request", "hook-executed")
     
-    @after_request
-    async def add_after_header_1(req, res, ctx):
-        """First after-request hook."""
+    @middleware
+    async def add_after_header_1(req, res, ctx, next):
+        await next()
         res.header("X-After-1", "executed")
     
-    @after_request
-    async def add_after_header_2(req, res, ctx):
-        """Second after-request hook."""
+    @middleware
+    async def add_after_header_2(req, res, ctx, next):
+        await next()
         res.header("X-After-2", "executed")
     
-    # Register the hooks globally
+    # Register global middleware in application order.
     app.use(add_before_header)
     app.use(add_before_header_1)
     app.use(add_before_header_2)

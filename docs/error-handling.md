@@ -162,30 +162,33 @@ def create_user(req, res, ctx, body: UserSchema):
     res.status(201).json({"message": "User created"})
 ```
 
-## Database Error Handling
+## Persistence Error Handling
 
 ```python
 from hypern import Hypern
 from hypern.exceptions import InternalServerError, ConflictError
-from hypern.database import Database
 
 app = Hypern()
-db = Database("postgresql://localhost/myapp")
+
+class ProductRepository:
+    def create(self, product):
+        # The application's persistence adapter owns this operation.
+        return {"id": "new-product", **product}
+
+app.singleton("product_repository", ProductRepository())
 
 @app.post("/products")
-def create_product(req, res, ctx):
+@app.inject("product_repository")
+def create_product(req, res, ctx, product_repository):
     body = req.json()
     
     try:
-        result = db.execute(
-            "INSERT INTO products (name, price) VALUES (?, ?)",
-            [body["name"], body["price"]]
-        )
-        res.status(201).json({"id": result.last_insert_id})
+        product = product_repository.create(body)
+        res.status(201).json(product)
     except Exception as e:
         if "unique constraint" in str(e):
             raise ConflictError("Product name already exists")
-        raise InternalServerError(f"Database error: {str(e)}")
+        raise InternalServerError(f"Persistence error: {str(e)}")
 ```
 
 ## Async Error Handling

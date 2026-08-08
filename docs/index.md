@@ -35,8 +35,6 @@ if __name__ == "__main__":
 | [Task Scheduling](scheduling.md) | Cron, intervals, retry, and monitoring |
 | [Error Handling](error-handling.md) | Exception handling and error responses |
 | [File Uploads](file-uploads.md) | Multipart file handling |
-| [Database](database.md) | Database operations and connection pooling |
-| [SQLAlchemy](sqlalchemy.md) | SQLAlchemy ORM integration and migrations |
 | [Best Practices](best-practices.md) | Performance tips and patterns |
 | [User Guide](user-guide.md) | Comprehensive user guide |
 
@@ -69,7 +67,7 @@ Hypern achieves high performance through:
 │                    Rust Core (Axum/Tokio)                    │
 │  - HTTP Server       - Middleware Chain    - JSON Parser     │
 │  - Radix Router      - Memory Pools        - SSE Streaming   │
-│  - Connection Pool   - Arena Allocator     - Task Executor   │
+│  - Redis Pool        - Arena Allocator     - Task Executor   │
 └─────────────────────────────────────────────────────────────┘
 ```
 

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import functools
-import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from hypern._hypern import Route as RustRoute
 from hypern._hypern import Router as RustRouter
+from hypern.middleware import normalize_middleware
 
 
 @dataclass(slots=True)
@@ -18,8 +17,6 @@ class _RouteDefinition:
     path: str
     handler: Callable
     middleware: tuple[Callable, ...] = ()
-    before_hooks: tuple[Callable, ...] = ()
-    after_hooks: tuple[Callable, ...] = ()
     options: dict[str, Any] = field(default_factory=dict)
 
 
@@ -53,8 +50,6 @@ class Router:
         self.prefix = prefix.rstrip("/")
         self._routes: list[_RouteDefinition] = []
         self._middleware: list[Callable] = []
-        self._before_handlers: list[Callable] = []
-        self._after_handlers: list[Callable] = []
         self._error_handlers: dict[type, Callable] = {}
         self._registration_change_listeners: set[Callable[[], None]] = set()
         self._registration_frozen = False
@@ -114,9 +109,6 @@ class Router:
         converted_path = self._convert_express_path(full_path)
         
         method = method.upper()
-        before_hooks = self._normalize_route_hooks(options.pop("before_hooks", ()))
-        after_hooks = self._normalize_route_hooks(options.pop("after_hooks", ()))
-
         # Store the raw handler. Mounted routes are executed by the application's
         # canonical Python pipeline, which receives this middleware metadata.
         self._routes.append(
@@ -125,8 +117,6 @@ class Router:
                 path=converted_path,
                 handler=handler,
                 middleware=tuple(middleware or ()),
-                before_hooks=before_hooks,
-                after_hooks=after_hooks,
                 options=options,
             )
         )
@@ -142,15 +132,6 @@ class Router:
         self._rust_router.add_route(route)
         self._notify_registration_changed()
 
-    @staticmethod
-    def _normalize_route_hooks(hooks: Any) -> tuple[Callable, ...]:
-        """Freeze route hook metadata supplied through route decorator options."""
-        if hooks is None:
-            return ()
-        if callable(hooks):
-            return (hooks,)
-        return tuple(hooks)
-    
     def get(self, path: str, middleware: list[Callable] | None = None, **options):
         """Register a GET route."""
         def decorator(handler: Callable) -> Callable:
@@ -217,62 +198,12 @@ class Router:
             router.use(logging_middleware)
         """
         self._assert_registration_open()
-        self._middleware.append(middleware)
+        normalized = normalize_middleware(middleware)
+        if normalized is None:
+            raise TypeError("Router middleware must use (req, res, ctx, next)")
+        self._middleware.append(normalized)
         self._notify_registration_changed()
         return self
-    
-    def before(self, handler: Callable) -> Callable:
-        """
-        Add a before-request handler.
-        
-        Example:
-            @router.before
-            async def log_request(req, res):
-                print(f"Request: {req.method} {req.path}")
-        """
-        self._assert_registration_open()
-        self._before_handlers.append(self._adapt_documented_hook(handler))
-        self._notify_registration_changed()
-        return handler
-
-    def before_with_context(self, handler: Callable) -> Callable:
-        """Add a before-request handler using ``(req, res, ctx)``."""
-        self._assert_registration_open()
-        self._before_handlers.append(handler)
-        self._notify_registration_changed()
-        return handler
-    
-    def after(self, handler: Callable) -> Callable:
-        """
-        Add an after-request handler.
-        
-        Example:
-            @router.after
-            async def add_headers(req, res):
-                res.header("X-Response-Time", "123ms")
-        """
-        self._assert_registration_open()
-        self._after_handlers.append(self._adapt_documented_hook(handler))
-        self._notify_registration_changed()
-        return handler
-
-    def after_with_context(self, handler: Callable) -> Callable:
-        """Add an after-request handler using ``(req, res, ctx)``."""
-        self._assert_registration_open()
-        self._after_handlers.append(handler)
-        self._notify_registration_changed()
-        return handler
-
-    @staticmethod
-    def _adapt_documented_hook(handler: Callable) -> Callable:
-        """Compile the documented ``(req, res)`` hook into the ctx-aware form."""
-        @functools.wraps(handler)
-        async def adapted(req, res, ctx):
-            result = handler(req, res)
-            if inspect.isawaitable(result):
-                await result
-
-        return adapted
     
     def error(self, exc_class: type) -> Callable:
         """

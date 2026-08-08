@@ -39,7 +39,7 @@ my_app/
 │   ├── validators.py
 │   ├── formatters.py
 │   └── helpers.py
-├── database/              # Database configuration
+├── persistence/           # Application-owned persistence adapter
 │   ├── __init__.py
 │   └── models.py
 └── tests/                 # Test files
@@ -59,7 +59,7 @@ from hypern import Hypern
 from config import settings
 from routes import setup_routes
 from middleware import setup_middleware
-from database import init_database
+from persistence import init_persistence
 
 # Create app instance
 app = Hypern()
@@ -70,8 +70,8 @@ app.config = settings
 # Setup middleware
 setup_middleware(app)
 
-# Setup database
-init_database(app)
+# Setup application-owned persistence
+init_persistence(app)
 
 # Setup routes
 setup_routes(app)
@@ -103,7 +103,7 @@ class Settings:
     WORKERS: int = int(os.getenv("WORKERS", "4"))
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
     
-    # Database
+    # Application-owned persistence configuration
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite://./db.sqlite")
     DATABASE_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "20"))
     DATABASE_TIMEOUT: int = int(os.getenv("DB_TIMEOUT", "30"))
@@ -124,67 +124,48 @@ class Settings:
 settings = Settings()
 ```
 
-## Database Best Practices
+## Application-Owned Persistence Best Practices
 
 ### Connection Pooling
 
 ```python
-# database/init.py
-from hypern.database import Database, db
+# persistence/init.py
 from config import settings
 
-def init_database():
-    Database.configure(
-        url=settings.DATABASE_URL,
-        max_size=settings.DATABASE_POOL_SIZE,
-        connect_timeout_secs=settings.DATABASE_TIMEOUT,
-    )
-    # Run migrations
-    migrate()
+def init_persistence(app):
+    repository = UserRepository(settings.DATABASE_URL)
+    app.singleton("user_repository", repository)
 
-def get_session(ctx):
-    """Get database session for the current request"""
-    return db(ctx)
+    # The application configures its driver, pool, and migrations.
+    migrate(repository)
 ```
 
 ### Query Optimization
 
-1. **Use connection pooling** - Configured by default in Hypern
+1. **Use connection pooling** - Configure it in your persistence adapter
 2. **Use prepared statements** - Prevent SQL injection
 3. **Index frequently queried columns** - Improve query performance
 4. **Batch operations** - Use transactions for multiple operations
 
 ```python
 # services/user_service.py
-from hypern.database import db
-
 class UserService:
-    @staticmethod
-    def create_users_batch(ctx, users):
-        session = db(ctx)
-        
-        # Start transaction
-        with session.transaction():
-            user_ids = []
-            for user in users:
-                result = session.execute(
-                    "INSERT INTO users (name, email) VALUES (?, ?)",
-                    [user["name"], user["email"]]
-                )
-                user_ids.append(result.last_insert_id)
-        
-        return user_ids
+    def __init__(self, user_repository):
+        self.user_repository = user_repository
+
+    def create_users_batch(self, users):
+        return self.user_repository.create_batch(users)
 ```
 
 ### Connection Management
 
-Database sessions are automatically managed per request. Use the `db()` helper in handlers:
+Your application owns its persistence lifecycle. Inject a repository or service into handlers:
 
 ```python
 @app.get("/users/:id")
-def get_user(req, res, ctx):
-    session = db(ctx)  # auto-managed, auto-finalized
-    user = session.query_one("SELECT * FROM users WHERE id = $1", [req.param("id")])
+@app.inject("user_repository")
+def get_user(req, res, ctx, user_repository):
+    user = user_repository.find_by_id(req.param("id"))
     res.json(user)
 ```
 
@@ -193,25 +174,24 @@ def get_user(req, res, ctx):
 ```python
 # services/user_service.py
 class UserService:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, user_repository):
+        self.user_repository = user_repository
     
     def get_by_id(self, user_id):
-        return self.db.execute("SELECT * FROM users WHERE id = ?", [user_id])
+        return self.user_repository.find_by_id(user_id)
 
 # main.py - Setup DI
 from hypern import Hypern
-from hypern.database import Database
 from services import UserService
 
 app = Hypern()
 
-# Register database
-db = Database("postgresql://localhost/mydb")
-app.singleton("db", db)
+# Register an application-owned repository
+user_repository = UserRepository()
+app.singleton("user_repository", user_repository)
 
 # Register services
-user_service = UserService(db)
+user_service = UserService(user_repository)
 app.singleton("user_service", user_service)
 
 # routes/users.py
@@ -511,7 +491,7 @@ def test_create_user(client):
 
 ## Performance Optimization
 
-1. **Use connection pooling** - Default in Hypern
+1. **Use connection pooling** - Configure it in your persistence adapter
 2. **Cache frequently accessed data** - Use in-memory caching
 3. **Use database indexes** - Index columns used in WHERE clauses
 4. **Batch operations** - Use transactions for multiple operations
@@ -543,7 +523,7 @@ def test_create_user(client):
 @app.get("/health")
 def health_check(req, res, ctx):
     checks = {
-        "database": check_database(ctx),
+        "persistence": check_persistence(ctx),
         "cache": check_cache(ctx),
     }
     
@@ -555,9 +535,9 @@ def health_check(req, res, ctx):
         "checks": checks
     })
 
-def check_database(ctx):
+def check_persistence(ctx):
     try:
-        ctx.db.query("SELECT 1")
+        ctx.get("health_service").check_persistence()
         return "ok"
     except:
         return "error"

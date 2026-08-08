@@ -134,7 +134,7 @@ HOST=127.0.0.1
 PORT=5000
 WORKERS=1
 
-# Database (if applicable)
+# Application configuration (if applicable)
 # DATABASE_URL=postgresql://user:pass@localhost:5432/dbname
 """
 

@@ -333,7 +333,7 @@ class TestMiddlewareConfiguration:
 
 
 class TestCustomMiddlewareDecorators:
-    """Test custom Python middleware decorators (@middleware, @before_request, @after_request)."""
+    """Test custom Python middleware decorators."""
     
     def test_middleware_decorator_exists(self):
         """The @middleware decorator should be importable."""
@@ -341,50 +341,16 @@ class TestCustomMiddlewareDecorators:
         assert middleware is not None
         assert callable(middleware)
     
-    def test_before_request_decorator_exists(self):
-        """The @before_request decorator should be importable."""
-        from hypern.middleware import before_request
-        assert before_request is not None
-        assert callable(before_request)
-    
-    def test_after_request_decorator_exists(self):
-        """The @after_request decorator should be importable."""
-        from hypern.middleware import after_request
-        assert after_request is not None
-        assert callable(after_request)
-    
-    def test_middleware_decorator_marks_function(self):
-        """@middleware decorator should mark function with _is_middleware attribute."""
+    def test_middleware_decorator_returns_callable(self):
+        """@middleware should return a callable middleware descriptor."""
         from hypern.middleware import middleware
         
         @middleware
         async def test_mw(req, res, ctx, next):
             await next()
         
-        assert hasattr(test_mw, '_is_middleware')
-        assert test_mw._is_middleware is True
-    
-    def test_before_request_decorator_marks_function(self):
-        """@before_request decorator should mark function with _before_request attribute."""
-        from hypern.middleware import before_request
-        
-        @before_request
-        async def test_before(req, res, ctx):
-            pass
-        
-        assert hasattr(test_before, '_before_request')
-        assert test_before._before_request is True
-    
-    def test_after_request_decorator_marks_function(self):
-        """@after_request decorator should mark function with _after_request attribute."""
-        from hypern.middleware import after_request
-        
-        @after_request
-        async def test_after(req, res, ctx):
-            pass
-        
-        assert hasattr(test_after, '_after_request')
-        assert test_after._after_request is True
+        assert callable(test_mw)
+        assert test_mw.__name__ == "test_mw"
     
     def test_custom_middleware_execution(self, client):
         """Custom @middleware decorated functions should execute with next() callback."""
@@ -400,24 +366,24 @@ class TestCustomMiddlewareDecorators:
         data = response.json()
         assert data["message"] == "custom middleware test"
     
-    def test_before_request_hook_execution(self, client):
-        """@before_request hooks should execute before route handler."""
+    def test_before_middleware_execution(self, client):
+        """Middleware should execute before the route handler."""
         response = client.get("/hooks/before-test")
         assert response.status_code == 200
         
-        # Check that before_request hook added header
+        # Check that middleware added the header.
         assert "X-Before-Request" in response.headers
         assert response.headers["X-Before-Request"] == "hook-executed"
         
         data = response.json()
         assert data["message"] == "before hook test"
     
-    def test_after_request_hook_execution(self, client):
-        """@after_request hooks should execute after route handler."""
+    def test_after_middleware_execution(self, client):
+        """Middleware should execute after the route handler returns."""
         response = client.get("/hooks/after-test")
         assert response.status_code == 200
         
-        # Check that after_request hook added header
+        # Check that middleware added the header after next().
         assert "X-After-Request" in response.headers
         assert response.headers["X-After-Request"] == "hook-executed"
         
@@ -443,12 +409,12 @@ class TestCustomMiddlewareDecorators:
         assert "error" in data
         assert data["error"] == "Blocked by middleware"
     
-    def test_multiple_before_hooks_execute_in_order(self, client):
-        """Multiple @before_request hooks should execute in registration order."""
+    def test_multiple_before_middleware_execute_in_order(self, client):
+        """Multiple middleware functions should execute in registration order."""
         response = client.get("/hooks/multiple-before")
         assert response.status_code == 200
         
-        # Check headers added by multiple before hooks
+        # Check headers added by multiple middleware functions.
         assert "X-Before-1" in response.headers
         assert "X-Before-2" in response.headers
         
@@ -456,12 +422,12 @@ class TestCustomMiddlewareDecorators:
         assert "order" in data
         assert data["order"] == ["before-1", "before-2", "handler"]
     
-    def test_multiple_after_hooks_execute_in_order(self, client):
-        """Multiple @after_request hooks should execute in registration order."""
+    def test_multiple_after_middleware_execute_in_reverse_order(self, client):
+        """Multiple middleware functions should unwind in reverse order."""
         response = client.get("/hooks/multiple-after")
         assert response.status_code == 200
         
-        # Check headers added by multiple after hooks
+        # Check headers added by middleware during unwind.
         assert "X-After-1" in response.headers
         assert "X-After-2" in response.headers
         

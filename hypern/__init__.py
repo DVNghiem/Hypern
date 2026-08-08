@@ -1,9 +1,6 @@
 from ._hypern import (
     BlockingExecutor,
-    # Database
-    ConnectionPool,
     Context,
-    DbSession,
     DIContainer,
     FormData,
     # Reload / Health
@@ -11,8 +8,6 @@ from ._hypern import (
     # Logging
     # Utils (Rust-accelerated)
     PageInfo,
-    PoolConfig,
-    PoolStatus,
     ReloadConfig,
     ReloadManager,
     Request,
@@ -25,8 +20,6 @@ from ._hypern import (
     TaskResult,
     TaskStatus,
     UploadedFile,
-    finalize_db,
-    get_db,
     paginate,
 )
 from .application import Hypern, create_app, hypern
@@ -50,10 +43,6 @@ from .blocking import (
     get_default_executor,
     set_default_executor,
 )
-
-# Database module
-from .database import Database
-from .database import db as get_database
 
 # Dependency Injection - standalone decorator
 from .di import inject
@@ -83,13 +72,12 @@ from .middleware import (
     # Rust middleware
     CorsMiddleware,
     # Utilities
+    Middleware,
     MiddlewareStack,
     RateLimitMiddleware,
     RequestIdMiddleware,
     SecurityHeadersMiddleware,
     TimeoutMiddleware,
-    after_request,
-    before_request,
     middleware,
 )
 from .openapi import (
@@ -180,17 +168,12 @@ __all__ = [
     "ChannelStats",
     "CompressionMiddleware",
     "Conflict",
-    # Database
-    "ConnectionPool",
     # Dependency Injection
     "Context",
     # Middleware (Rust-based)
     "CorsMiddleware",
     "CronExpression",
     "DIContainer",
-    # Database
-    "Database",
-    "DbSession",
     "ExceptionHandler",
     "Forbidden",
     # File Uploads
@@ -210,14 +193,13 @@ __all__ = [
     "JWTError",
     "MethodNotAllowed",
     # Middleware utilities
+    "Middleware",
     "MiddlewareStack",
     "NotFound",
     # OpenAPI
     "OpenAPIGenerator",
     # Utils
     "PageInfo",
-    "PoolConfig",
-    "PoolStatus",
     "PresenceDiff",
     "PresenceInfo",
     "PresenceTracker",
@@ -270,11 +252,9 @@ __all__ = [
     "WebSocketRoute",
     "WebSocketRouter",
     "WebSocketState",
-    "after_request",
     "api_doc",
     "api_tags",
     "background",
-    "before_request",
     "blocking",
     "blocking_map",
     "blocking_parallel",
@@ -282,9 +262,6 @@ __all__ = [
     "create_app",
     "error_boundary",
     "exception_handler",
-    "finalize_db",
-    "get_database",
-    "get_db",
     "get_default_executor",
     "get_task",
     "get_task_executor",

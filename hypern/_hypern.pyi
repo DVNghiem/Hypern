@@ -644,109 +644,6 @@ class ReloadManager:
 
 
 # ============================================================================
-# Database
-# ============================================================================
-
-class PoolConfig:
-    """Configuration for the database connection pool."""
-    url: str
-    max_size: int
-    min_idle: int | None
-    connect_timeout_secs: int
-    idle_timeout_secs: int | None
-    max_lifetime_secs: int | None
-    test_before_acquire: bool
-    keepalive_secs: int | None
-
-    def __init__(
-        self,
-        url: str,
-        max_size: int = 16,
-        min_idle: int | None = None,
-        connect_timeout_secs: int = 30,
-        idle_timeout_secs: int | None = None,
-        max_lifetime_secs: int | None = None,
-        test_before_acquire: bool = False,
-        keepalive_secs: int | None = None,
-    ) -> None: ...
-
-
-class PoolStatus:
-    """Status information about the connection pool."""
-    size: int
-    available: int
-    max_size: int
-
-
-class ConnectionPool:
-    """Static connection pool manager."""
-
-    def __init__(self) -> None: ...
-
-    @staticmethod
-    def initialize(config: PoolConfig) -> None: ...
-    @staticmethod
-    def status() -> PoolStatus | None: ...
-    @staticmethod
-    def is_initialized() -> bool: ...
-    @staticmethod
-    def close() -> None: ...
-    @staticmethod
-    def status_for_alias(alias: str) -> PoolStatus | None: ...
-    @staticmethod
-    def close_all() -> None: ...
-    @staticmethod
-    def close_alias(alias: str) -> None: ...
-    @staticmethod
-    def initialize_with_alias(config: PoolConfig, alias: str) -> None: ...
-
-
-class DbSession:
-    """Request-scoped database session."""
-    request_id: str
-
-    def begin(self) -> None: ...
-    def commit(self) -> None: ...
-    def rollback(self) -> None: ...
-    def query(self, sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]: ...
-    def query_one(self, sql: str, params: list[Any] | None = None) -> dict[str, Any] | None: ...
-    def execute(self, sql: str, params: list[Any] | None = None) -> int: ...
-    def execute_many(self, sql: str, params_list: list[list[Any]]) -> int: ...
-    def set_auto_commit(self, auto_commit: bool) -> None: ...
-    def set_error(self) -> None: ...
-    def state(self) -> str: ...
-
-
-class RowStream:
-    """
-    Streaming row iterator that yields chunks of rows lazily.
-
-    Allows Python to iterate over large result sets without loading everything into memory.
-    """
-
-    def __iter__(self) -> RowStream: ...
-    def __next__(self) -> list[dict[str, Any]]: ...
-    def is_exhausted(self) -> bool: ...
-    def chunk_count(self) -> int: ...
-
-
-class AnyPool:
-    """Generic connection pool interface for multiple database types."""
-
-    def __init__(self, url: str, max_connections: int = 16) -> None: ...
-    def query(self, sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]: ...
-    def query_one(self, sql: str, params: list[Any] | None = None) -> dict[str, Any] | None: ...
-    def execute(self, sql: str, params: list[Any] | None = None) -> int: ...
-    def stream_query(self, sql: str, params: list[Any] | None = None, chunk_size: int = 100) -> RowStream: ...
-    def close(self) -> None: ...
-
-
-def get_db(request_id: str) -> DbSession: ...
-def finalize_db(request_id: str) -> None: ...
-def finalize_db_all(request_id: str) -> None: ...
-
-
-# ============================================================================
 # Realtime: Channel / Topic
 # ============================================================================
 
@@ -1182,26 +1079,6 @@ def relative_time(ts_secs: int) -> str: ...
 def elapsed_ms(start_ms: int) -> int: ...
 def ms_to_sec(ms: int) -> int: ...
 def sec_to_ms(sec: int) -> int: ...
-
-
-# ============================================================================
-# gRPC
-# ============================================================================
-
-class GrpcConfig:
-    """Configuration for gRPC clients and servers."""
-    host: str
-    port: int
-
-    def __init__(self, host: str = "0.0.0.0", port: int = 50051) -> None: ...
-
-
-class GrpcServer:
-    """gRPC server implementation."""
-
-    def __init__(self, config: GrpcConfig | None = None) -> None: ...
-    def address(self) -> str: ...
-    def is_running(self) -> bool: ...
 
 
 # ============================================================================

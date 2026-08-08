@@ -18,22 +18,24 @@ Singletons are created once and shared across all requests:
 
 ```python
 from hypern import Hypern
-from hypern.database import Database
 
 app = Hypern()
 
 # Register configuration as singleton
 config = {
     "debug": True,
-    "database_url": "postgresql://localhost/mydb",
+    "service_endpoint": "https://api.example.com",
     "redis_url": "redis://localhost:6379",
     "secret_key": "your-secret-key"
 }
 app.singleton("config", config)
 
-# Register a database instance
-db = Database("postgresql://localhost/mydb")
-app.singleton("db", db)
+# Register an application-owned repository
+class UserRepository:
+    def find_by_id(self, user_id: str):
+        return {"id": user_id, "name": "Ada"}
+
+app.singleton("user_repository", UserRepository())
 ```
 
 ### Factory Registration
@@ -68,19 +70,15 @@ app.factory("email", create_email_service)
 
 ```python
 class UserService:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, repository):
+        self.repository = repository
     
     def get_user(self, user_id: str):
-        # Query database
-        user = self.db.execute(
-            "SELECT * FROM users WHERE id = ?", [user_id]
-        )
-        return user
+        return self.repository.find_by_id(user_id)
 
 # Register service as singleton
-db = Database("postgresql://localhost/mydb")
-user_service = UserService(db)
+user_repository = UserRepository()
+user_service = UserService(user_repository)
 app.singleton("user_service", user_service)
 ```
 
@@ -118,8 +116,8 @@ You can inject multiple dependencies in a single decorator call:
 from hypern import inject
 
 @app.post("/orders")
-@inject("db_pool", "email", "config")
-async def create_order(req, res, ctx, db_pool, email, config):
+@inject("order_service", "email", "config")
+async def create_order(req, res, ctx, order_service, email, config):
     data = req.json()
 ```
 
@@ -129,8 +127,8 @@ Or stack multiple `@inject` decorators (order matches argument order):
 @app.post("/orders")
 @inject("config")
 @inject("email")
-@inject("db_pool")
-async def create_order(req, res, ctx, db_pool, email, config):
+@inject("order_service")
+async def create_order(req, res, ctx, order_service, email, config):
     data = req.json()
 ```
 
@@ -187,17 +185,13 @@ async def get_user(req, res, ctx, user_service, logger):
 
 ```python
 @app.post("/orders")
-@app.inject("db_pool")
+@app.inject("order_service")
 @app.inject("email")
 @app.inject("config")
-async def create_order(req, res, ctx, db_pool, email, config):
+async def create_order(req, res, ctx, order_service, email, config):
     data = req.json()
-    
-    # Create order in database
-    order = await db_pool.fetchrow(
-        "INSERT INTO orders (user_id, items) VALUES ($1, $2) RETURNING *",
-        data["user_id"], data["items"]
-    )
+
+    order = await order_service.create(data)
     
     # Send confirmation email
     email.send(
@@ -303,11 +297,11 @@ def settings_page(req, res, ctx, config):
         "version": "1.0.0"
     })
 
-# Inject database
-@app.inject("db")
-def get_user(req, res, ctx, db):
+# Inject an application-owned repository
+@app.inject("user_repository")
+def get_user(req, res, ctx, user_repository):
     user_id = req.param("id")
-    user = db.execute("SELECT * FROM users WHERE id = ?", [user_id])
+    user = user_repository.find_by_id(user_id)
     res.json(user)
 
 # Inject service
@@ -337,25 +331,17 @@ def user_profile(req, res, ctx):
 ### Service Lifecycle
 
 ```python
-# Register with cleanup
-class DatabasePool:
-    def __init__(self, url):
-        self.db = None
-        self.url = url
-    
-    def connect(self):
-        # Use Hypern's Database class
-        from hypern.database import Database
-        self.db = Database(self.url)
-    
-    def close(self):
-        # Database connections are managed by Hypern
+# Application-owned services define their own lifecycle.
+class SearchService:
+    def start(self):
         pass
 
-# Register singleton
-db_pool = DatabasePool("postgresql://localhost/mydb")
-db_pool.connect()
-app.singleton("db", db_pool.db)
+    def close(self):
+        pass
+
+search_service = SearchService()
+search_service.start()
+app.singleton("search_service", search_service)
 ```
 
 ## Patterns
@@ -363,31 +349,42 @@ app.singleton("db", db_pool.db)
 ### Repository Pattern
 
 ```python
+class ApplicationStorage:
+    """A small application-owned storage adapter for this example."""
+    def __init__(self):
+        self.users = {}
+
+    def get(self, user_id: int):
+        return self.users.get(user_id)
+
+    def find_by_email(self, email: str):
+        return next(
+            (user for user in self.users.values() if user["email"] == email),
+            None,
+        )
+
+    def save(self, data: dict):
+        user = {"id": len(self.users) + 1, **data}
+        self.users[user["id"]] = user
+        return user
+
+
 class UserRepository:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, storage):
+        self.storage = storage
     
     def find_by_id(self, user_id: str):
-        return self.db.execute(
-            "SELECT * FROM users WHERE id = ?", [user_id]
-        )
+        return self.storage.get(user_id)
     
     def find_by_email(self, email: str):
-        return self.db.execute(
-            "SELECT * FROM users WHERE email = ?", [email]
-        )
+        return self.storage.find_by_email(email)
     
     def create(self, data: dict):
-        result = self.db.execute(
-            "INSERT INTO users (name, email) VALUES (?, ?)",
-            [data["name"], data["email"]]
-        )
-        return result
+        return self.storage.save(data)
 
 # Register repository
-from hypern.database import Database
-db = Database("postgresql://localhost/mydb")
-user_repo = UserRepository(db)
+storage = ApplicationStorage()
+user_repo = UserRepository(storage)
 app.singleton("user_repo", user_repo)
 ```
 
@@ -421,8 +418,8 @@ app.singleton("auth_service", auth_service)
 
 ```python
 class UnitOfWork:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, account_repository):
+        self.account_repository = account_repository
         self.transaction = None
     
     def __enter__(self):
@@ -431,28 +428,21 @@ class UnitOfWork:
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Commit or rollback handled by database
+        # Commit or rollback is owned by the application service.
         self.transaction = False
     
-    def execute(self, query, args):
-        return self.db.execute(query, args)
+    def transfer(self, amount, source_account, destination_account):
+        self.account_repository.transfer(amount, source_account, destination_account)
 
 # Usage in handler
 @app.post("/transfer")
-@app.inject("db")
-def transfer_funds(req, res, ctx, db):
+@app.inject("account_repository")
+def transfer_funds(req, res, ctx, account_repository):
     data = req.json()
     
-    with UnitOfWork(db) as uow:
+    with UnitOfWork(account_repository) as uow:
         # Both operations succeed or both fail
-        uow.execute(
-            "UPDATE accounts SET balance = balance - ? WHERE id = ?",
-            [data["amount"], data["from_account"]]
-        )
-        uow.execute(
-            "UPDATE accounts SET balance = balance + ? WHERE id = ?",
-            [data["amount"], data["to_account"]]
-        )
+        uow.transfer(data["amount"], data["from_account"], data["to_account"])
     
     res.json({"status": "success"})
 ```

@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import functools
+import inspect
+from typing import Any
 
 from hypern._hypern import (
     BasicAuthMiddleware,
@@ -14,6 +17,47 @@ from hypern._hypern import (
     SecurityHeadersMiddleware,
     TimeoutMiddleware,
 )
+
+
+class Middleware:
+    """A validated middleware callable."""
+
+    def __init__(self, handler: Callable) -> None:
+        _validate_middleware(handler)
+        self.handler = handler
+        functools.update_wrapper(self, handler)
+
+    def __call__(self, req: Any, res: Any, ctx: Any, next_fn: Callable) -> Any:
+        return self.handler(req, res, ctx, next_fn)
+
+
+def _validate_middleware(handler: Callable) -> None:
+    """Validate the public middleware calling convention."""
+    if not callable(handler):
+        raise TypeError("Middleware must be callable")
+
+    try:
+        parameters = tuple(inspect.signature(handler).parameters.values())
+    except (TypeError, ValueError) as error:
+        raise TypeError(
+            "Middleware must use (req, res, ctx, next)"
+        ) from error
+
+    valid_kinds = {
+        inspect.Parameter.POSITIONAL_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    }
+    if len(parameters) != 4 or any(parameter.kind not in valid_kinds for parameter in parameters):
+        raise TypeError("Middleware must use (req, res, ctx, next)")
+
+
+def normalize_middleware(value: object) -> Middleware | None:
+    """Return a validated descriptor for a middleware callable."""
+    if isinstance(value, Middleware):
+        return value
+    if callable(value):
+        return Middleware(value)
+    return None
 
 
 class MiddlewareStack:
@@ -51,49 +95,19 @@ class MiddlewareStack:
         return len(self._middleware)
 
 
-def middleware(func: Callable) -> Callable:
+def middleware(func: Callable) -> Middleware:
     """
-    Decorator to mark a function as middleware (for route-specific use).
-    
-    Note: For high-performance middleware, use the built-in Rust middleware.
-    This decorator is for simple route-specific logic only.
+    Decorator that validates a middleware callable.
     
     Example:
         @middleware
-        async def check_feature_flag(req, res, next):
+        async def check_feature_flag(req, res, ctx, next):
             if not feature_enabled("new_feature"):
                 res.status(404).json({"error": "Not found"})
                 return
             await next()
     """
-    func._is_middleware = True
-    return func
-
-
-def before_request(func: Callable) -> Callable:
-    """
-    Decorator to mark a function as a before-request hook.
-    
-    Example:
-        @app.before_request
-        async def log_request(req, res):
-            print(f"Incoming: {req.method} {req.path}")
-    """
-    func._before_request = True
-    return func
-
-
-def after_request(func: Callable) -> Callable:
-    """
-    Decorator to mark a function as an after-request hook.
-    
-    Example:
-        @app.after_request
-        async def add_headers(req, res):
-            res.header("X-Server", "Hypern")
-    """
-    func._after_request = True
-    return func
+    return Middleware(func)
 
 
 __all__ = [
@@ -105,11 +119,10 @@ __all__ = [
     'CorsMiddleware',
     # Utilities
     'MiddlewareStack',
+    'Middleware',
     'RateLimitMiddleware',
     'RequestIdMiddleware',
     'SecurityHeadersMiddleware',
     'TimeoutMiddleware',
-    'after_request',
-    'before_request',
     'middleware',
 ]

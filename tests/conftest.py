@@ -172,12 +172,12 @@ def session_client(base_url):
 
 
 @pytest.fixture(autouse=True)
-def reset_database(client):
-    """Reset the test database before each test."""
+def reset_store(client):
+    """Reset the test store before each test."""
     yield
-    # Reset database after each test
+    # Reset store after each test
     try:
-        client.post("/test/reset-db")
+        client.post("/test/reset-store")
     except httpx.RequestError:
         pass  # Ignore errors during cleanup
 

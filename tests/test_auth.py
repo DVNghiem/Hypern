@@ -22,7 +22,7 @@ from hypern.auth import (
 
 # Override autouse fixtures from conftest that require the test server
 @pytest.fixture(autouse=True)
-def reset_database():
+def reset_store():
     yield
 
 

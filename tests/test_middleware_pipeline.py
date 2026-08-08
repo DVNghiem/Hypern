@@ -6,8 +6,19 @@ from types import SimpleNamespace
 
 import pytest
 
-from hypern import Hypern, Router
+from hypern import Hypern, Middleware, Router
 from hypern import application as application_module
+from hypern.middleware import middleware
+
+
+def test_legacy_request_hook_apis_are_not_exposed():
+    app = Hypern()
+    router = Router()
+
+    assert not hasattr(app, "before_request")
+    assert not hasattr(app, "after_request")
+    assert not hasattr(router, "before")
+    assert not hasattr(router, "after")
 
 
 def test_start_propagates_invalid_rust_middleware_registration(monkeypatch):
@@ -114,16 +125,11 @@ def test_listen_freezes_app_and_mounted_router_registration(monkeypatch):
     async def middleware(req, res, ctx, next_fn):
         await next_fn()
 
-    def hook(req, res, ctx):
-        pass
-
     def handler(req, res, ctx):
         res.finished = True
 
     with pytest.raises(RuntimeError, match="registration is frozen after listen"):
         app.use(middleware)
-    with pytest.raises(RuntimeError, match="registration is frozen after listen"):
-        app.before_request(hook)
     with pytest.raises(RuntimeError, match="registration is frozen after listen"):
         app.get("/late")(handler)
     with pytest.raises(RuntimeError, match="registration is frozen after listen"):
@@ -132,11 +138,10 @@ def test_listen_freezes_app_and_mounted_router_registration(monkeypatch):
     with pytest.raises(RuntimeError, match="registration is frozen after listen"):
         router.use(middleware)
     with pytest.raises(RuntimeError, match="registration is frozen after listen"):
-        router.before_with_context(hook)
-    with pytest.raises(RuntimeError, match="registration is frozen after listen"):
         router.get("/late")(handler)
 
 
+@pytest.mark.skip(reason="Legacy request hooks were removed")
 def test_mounted_router_uses_one_pipeline_for_hooks_and_middleware():
     events: list[str] = []
     contexts: list[object] = []
@@ -247,6 +252,7 @@ def test_mounted_router_uses_one_pipeline_for_hooks_and_middleware():
     assert all(ctx is contexts[0] for ctx in contexts)
 
 
+@pytest.mark.skip(reason="Legacy request hooks were removed")
 def test_app_before_short_circuit_only_unwinds_the_app_scope():
     events: list[str] = []
     app = Hypern()
@@ -284,6 +290,7 @@ def test_app_before_short_circuit_only_unwinds_the_app_scope():
     assert events == ["app-before", "app-after"]
 
 
+@pytest.mark.skip(reason="Legacy request hooks were removed")
 def test_mounted_router_supports_documented_two_argument_hooks():
     events: list[str] = []
     app = Hypern()
@@ -327,6 +334,7 @@ def test_mounted_router_supports_documented_two_argument_hooks():
     ]
 
 
+@pytest.mark.skip(reason="Legacy request hooks were removed")
 def test_exception_after_next_is_not_handled_by_a_noop_error_handler():
     events: list[str] = []
     app = Hypern()
@@ -364,6 +372,7 @@ def test_exception_after_next_is_not_handled_by_a_noop_error_handler():
     assert events == ["handler", "error-handler", "route-after"]
 
 
+@pytest.mark.skip(reason="Legacy request hooks were removed")
 def test_route_short_circuit_unwinds_route_router_and_app_hooks():
     events: list[str] = []
     app = Hypern()
@@ -408,6 +417,7 @@ def test_route_short_circuit_unwinds_route_router_and_app_hooks():
     ]
 
 
+@pytest.mark.skip(reason="Legacy request hooks were removed")
 def test_handled_preterminal_failure_unwinds_route_router_and_app_hooks():
     events: list[str] = []
     app = Hypern()
@@ -486,6 +496,7 @@ def test_preterminal_failure_is_not_handled_by_a_noop_error_handler():
         asyncio.run(route.function(request, response))
 
 
+@pytest.mark.skip(reason="Legacy request hooks were removed")
 def test_router_before_short_circuit_unwinds_only_entered_scopes():
     events: list[str] = []
     app = Hypern()
@@ -590,6 +601,32 @@ def test_middleware_double_next_raises_after_first_downstream_entry():
         asyncio.run(route.function(SimpleNamespace(path="/double-next"), SimpleNamespace(finished=False)))
 
     assert events == ["handler", "after-first-next"]
+
+
+def test_middleware_decorator_rejects_an_invalid_signature():
+    with pytest.raises(TypeError, match=r"\(req, res, ctx, next\)"):
+
+        @middleware
+        async def invalid(req, res, next_fn):
+            await next_fn()
+
+
+def test_middleware_decorator_returns_a_neutral_descriptor():
+    @middleware
+    async def handler(req, res, ctx, next_fn):
+        await next_fn()
+
+    assert isinstance(handler, Middleware)
+
+
+def test_app_use_rejects_an_invalid_python_middleware_signature():
+    app = Hypern()
+
+    async def invalid(req, res, next_fn):
+        await next_fn()
+
+    with pytest.raises(TypeError, match=r"\(req, res, ctx, next\)"):
+        app.use(invalid)
 
 
 def test_mount_supports_router_prefix_and_explicit_prefix_forms():

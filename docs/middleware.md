@@ -1,6 +1,30 @@
 # Middleware
 
-Hypern provides high-performance Rust-based middleware for common web application needs. All middleware is implemented in Rust for maximum performance and exposed to Python through the API.
+Hypern provides Python middleware for application behavior and Rust middleware for high-performance built-ins. Register both with `app.use(...)`.
+
+## Python Middleware
+
+Python middleware uses one around-handler convention: `(req, res, ctx, next)`. Code before `await next()` handles the request; code after it can inspect or modify the response.
+
+```python
+from hypern import Hypern
+from hypern.middleware import middleware
+
+app = Hypern()
+
+@middleware
+async def auth(req, res, ctx, next):
+    if not ctx.get("user"):
+        return res.status(401).json({"error": "unauthorized"})
+
+    await next()
+    res.header("X-Auth-Checked", "true")
+
+app.use(auth)
+app.use("/admin", auth)
+```
+
+The decorator is optional: `app.use()` also accepts an async callable with the same signature. Do not use `before_request` or `after_request`; use code before or after `await next()` instead. Use `try/finally` around `await next()` for cleanup that must run when downstream code raises.
 
 ## Available Middleware
 
@@ -1127,4 +1151,3 @@ cache.clear()
 | `cache_control_respect` | `bool` | `True` | Respect `Cache-Control` request headers |
 | `max_cache_size` | `int` | `10000` | Maximum number of cached entries |
 | `paths` | `list[str]` | `[]` | Path prefixes to cache (empty = all GET requests) |
-

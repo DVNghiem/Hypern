@@ -627,14 +627,14 @@ app = Hypern()
 # Singleton - shared instance
 app.singleton("config", {
     "debug": True,
-    "database_url": "postgresql://..."
+    "service_endpoint": "https://api.example.com"
 })
 
 # Factory - new instance each time
-def create_database_connection():
-    return {"connection": "new"}
+def create_request_id():
+    return "request-id"
 
-app.factory("database", create_database_connection)
+app.factory("request_id", create_request_id)
 ```
 
 ### Injecting Dependencies
@@ -646,11 +646,11 @@ def get_config(req, res, ctx, config):
     res.json(config)
 
 @app.get("/data")
-@app.inject("database")
+@app.inject("request_id")
 @app.inject("config")
-def get_data(req, res, ctx, database, config):
+def get_data(req, res, ctx, request_id, config):
     res.json({
-        "database": database,
+        "request_id": request_id,
         "debug": config["debug"]
     })
 ```
@@ -936,7 +936,7 @@ if __name__ == "__main__":
 @app.on_startup
 async def startup():
     print("Server starting up...")
-    # Initialize database connections, etc.
+    # Initialize application-owned services, etc.
 
 @app.on_shutdown
 async def shutdown():
