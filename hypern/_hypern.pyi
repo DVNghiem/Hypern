@@ -881,63 +881,6 @@ class HeartbeatMonitor:
 
 
 # ============================================================================
-# HTTP Client
-# ============================================================================
-
-class ClientResponse:
-    """Response from an HTTP request."""
-    status: int
-
-    def headers(self) -> dict[str, str]: ...
-    def text(self) -> str: ...
-    def json(self) -> Any: ...
-    def bytes(self) -> bytes: ...
-
-
-class HttpClient:
-    """Async HTTP client backed by reqwest with Rust-level connection pooling."""
-
-    def __init__(
-        self,
-        base_url: str | None = None,
-        timeout: int = 30,
-        max_connections: int = 20,
-    ) -> None: ...
-    def get(
-        self,
-        url: str,
-        headers: dict[str, str] | None = None,
-        params: dict[str, Any] | None = None,
-    ) -> ClientResponse: ...
-    def post(
-        self,
-        url: str,
-        headers: dict[str, str] | None = None,
-        json: str | None = None,
-        body: bytes | None = None,
-    ) -> ClientResponse: ...
-    def put(
-        self,
-        url: str,
-        headers: dict[str, str] | None = None,
-        json: str | None = None,
-        body: bytes | None = None,
-    ) -> ClientResponse: ...
-    def patch(
-        self,
-        url: str,
-        headers: dict[str, str] | None = None,
-        json: str | None = None,
-        body: bytes | None = None,
-    ) -> ClientResponse: ...
-    def delete(
-        self,
-        url: str,
-        headers: dict[str, str] | None = None,
-    ) -> ClientResponse: ...
-
-
-# ============================================================================
 # Telemetry / Metrics
 # ============================================================================
 
@@ -1080,19 +1023,3 @@ def elapsed_ms(start_ms: int) -> int: ...
 def ms_to_sec(ms: int) -> int: ...
 def sec_to_ms(sec: int) -> int: ...
 
-
-# ============================================================================
-# Redis
-# ============================================================================
-
-class RedisPool:
-    """Redis connection pool with async support."""
-
-    def __init__(self, url: str, pool_size: int = 16) -> None: ...
-    def get(self, key: str) -> str | None: ...
-    def set(self, key: str, value: str, ex: int | None = None) -> None: ...
-    def delete(self, key: str) -> int: ...
-    def expire(self, key: str, seconds: int) -> bool: ...
-    def incr(self, key: str) -> int: ...
-    def publish(self, channel: str, message: str) -> int: ...
-    def ping(self) -> bool: ...

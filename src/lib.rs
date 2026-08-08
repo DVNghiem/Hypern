@@ -19,7 +19,6 @@ pub use crate::core::runtime;
 pub use crate::core::socket;
 
 // Core performance modules
-pub mod client;
 pub mod core;
 pub mod fast_path;
 pub mod http;
@@ -45,8 +44,6 @@ pub use crate::core::context::{Context, DIContainer};
 pub use crate::core::tasks::{TaskExecutor, TaskResult, TaskStatus};
 
 pub use crate::core::blocking_executor::BlockingExecutor;
-
-pub use crate::client::{ClientResponse, HttpClient};
 
 pub use crate::telemetry::MetricsRegistry;
 
@@ -102,10 +99,6 @@ fn _hypern(_py: Python, module: &Bound<PyModule>) -> PyResult<()> {
 
     // Blocking Executor (GIL-free parallel execution)
     module.add_class::<BlockingExecutor>()?;
-
-    // HTTP Client
-    module.add_class::<HttpClient>()?;
-    module.add_class::<ClientResponse>()?;
 
     // Telemetry / Metrics
     module.add_class::<MetricsRegistry>()?;

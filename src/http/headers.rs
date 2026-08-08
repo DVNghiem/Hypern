@@ -45,19 +45,6 @@ impl HeaderMap {
 }
 
 impl HeaderMap {
-    pub fn into_reqwest_headers(self) -> reqwest::header::HeaderMap {
-        let mut map = reqwest::header::HeaderMap::new();
-        for (k, v) in self.headers {
-            if let (Ok(key), Ok(val)) = (
-                k.parse::<reqwest::header::HeaderName>(),
-                v.parse::<reqwest::header::HeaderValue>(),
-            ) {
-                map.insert(key, val);
-            }
-        }
-        map
-    }
-
     pub fn from_axum(headers: &axum::http::HeaderMap) -> Self {
         let mut map = AHashMap::with_capacity(headers.len());
         for (key, value) in headers.iter() {
