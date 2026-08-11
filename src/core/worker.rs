@@ -1,9 +1,104 @@
 use axum::body::HttpBody;
 use axum::{body::Body, extract::State, http::Request, response::IntoResponse, Router};
 use pyo3::prelude::*;
+use std::io;
+use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
-use tokio::net::TcpListener;
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+
+use axum::serve::Listener;
+
+struct ConnectionLimitedListener {
+    listener: TcpListener,
+    permits: Arc<Semaphore>,
+}
+
+struct PermitConnection {
+    stream: TcpStream,
+    _permit: OwnedSemaphorePermit,
+}
+
+impl ConnectionLimitedListener {
+    fn new(listener: TcpListener, max_connections: usize) -> Self {
+        Self {
+            listener,
+            permits: Arc::new(Semaphore::new(max_connections)),
+        }
+    }
+}
+
+impl AsyncRead for PermitConnection {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for PermitConnection {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.get_mut().stream).poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_shutdown(cx)
+    }
+}
+
+impl Listener for ConnectionLimitedListener {
+    type Io = PermitConnection;
+    type Addr = SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        loop {
+            let permit = match self.permits.clone().acquire_owned().await {
+                Ok(permit) => permit,
+                Err(error) => {
+                    let error = io::Error::other(error);
+                    log::error!("connection limiter failed to acquire permit: {error}");
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    continue;
+                }
+            };
+
+            match self.listener.accept().await {
+                Ok((stream, address)) => {
+                    return (
+                        PermitConnection {
+                            stream,
+                            _permit: permit,
+                        },
+                        address,
+                    );
+                }
+                Err(error) => {
+                    drop(permit);
+                    log::error!("TCP accept error: {error}");
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            }
+        }
+    }
+
+    fn local_addr(&self) -> io::Result<Self::Addr> {
+        self.listener.local_addr()
+    }
+}
 
 use crate::core::interpreter::http_execute;
 use crate::core::reload::ReloadManager;
@@ -346,7 +441,7 @@ pub fn run_worker(
     socket_held: SocketHeld,
     worker_threads: usize,
     max_blocking_threads: usize,
-    _max_connections: usize,
+    max_connections: usize,
     router: Arc<HypernRouter>,
     middleware: Arc<MiddlewareChain>,
     handlers: Vec<(u64, Py<PyAny>)>,
@@ -489,11 +584,14 @@ pub fn run_worker(
         log::info!("Axum worker {} started", worker_id);
 
         // Serve with Axum
-        let server_result = axum::serve(listener, app)
-            .with_graceful_shutdown(async {
-                shutdown_rx.await.ok();
-            })
-            .await;
+        let server_result = axum::serve(
+            ConnectionLimitedListener::new(listener, max_connections),
+            app,
+        )
+        .with_graceful_shutdown(async {
+            shutdown_rx.await.ok();
+        })
+        .await;
         if let Err(error) = server_result {
             log::error!("Axum worker {} failed: {}", worker_id, error);
         }
@@ -530,4 +628,35 @@ pub async fn handle_request_standalone(
         reload_manager,
     };
     handle_request_inner(&state, req, String::new()).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn listener_waits_for_capacity_before_accepting_another_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut listener = ConnectionLimitedListener::new(listener, 1);
+
+        let first_client = TcpStream::connect(address).await.unwrap();
+        let first_connection = listener.accept().await.0;
+
+        let second_client = TcpStream::connect(address).await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), listener.accept())
+                .await
+                .is_err()
+        );
+
+        drop(first_connection);
+        let (_second_connection, _) =
+            tokio::time::timeout(Duration::from_secs(1), listener.accept())
+                .await
+                .expect("connection should proceed after capacity is released");
+
+        drop((first_client, second_client));
+    }
 }
