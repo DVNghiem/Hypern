@@ -1,6 +1,5 @@
 use pyo3::prelude::*;
 use std::sync::{Arc, OnceLock};
-use tokio::sync::Semaphore;
 
 use crate::{
     memory::pool::{RequestPool, ResponsePool},
@@ -13,7 +12,6 @@ static EV_LOOP: OnceLock<Py<PyAny>> = OnceLock::new();
 static BUILTINS: OnceLock<Py<PyModule>> = OnceLock::new();
 // Share single multi-threaded runtime
 static SHARED_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-static CONN_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
 static RUNTIME: OnceLock<Arc<RuntimeWrapper>> = OnceLock::new();
 
 // Global memory pools for request/response buffer reuse
@@ -56,12 +54,6 @@ pub fn get_runtime() -> &'static tokio::runtime::Runtime {
             .build()
             .unwrap()
     })
-}
-
-pub fn get_connection_semaphore(max_connections: usize) -> Arc<Semaphore> {
-    CONN_SEMAPHORE
-        .get_or_init(|| Arc::new(Semaphore::new(max_connections)))
-        .clone()
 }
 
 pub fn set_global_runtime(

@@ -19,6 +19,15 @@ pub struct Server {
     reload_manager: Option<ReloadManager>,
 }
 
+fn validate_max_connections(max_connections: usize) -> PyResult<()> {
+    if max_connections == 0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "max_connections must be greater than zero",
+        ));
+    }
+    Ok(())
+}
+
 #[pymethods]
 impl Server {
     #[new]
@@ -116,6 +125,8 @@ impl Server {
         max_blocking_threads: usize,
         max_connections: usize,
     ) -> PyResult<()> {
+        validate_max_connections(max_connections)?;
+
         // Initialize the log queue
         pyo3_log::init();
 
