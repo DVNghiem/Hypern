@@ -5,6 +5,7 @@ use std::time::Duration;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use dashmap::DashMap;
 use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyTuple};
 
 /// Task status
 #[pyclass(from_py_object)]
@@ -54,7 +55,8 @@ impl TaskResult {
 struct BackgroundTask {
     id: String,
     handler: Py<PyAny>,
-    args: Py<PyAny>,
+    args: Py<PyTuple>,
+    kwargs: Py<PyDict>,
     created_at: std::time::Instant,
     delay: Option<Duration>,
 }
@@ -118,24 +120,31 @@ impl TaskExecutor {
     }
 
     /// Submit a task for background execution
-    #[pyo3(signature = (handler, args=None, delay_ms=None))]
+    #[pyo3(signature = (handler, args=None, delay_seconds=None, *, kwargs=None))]
     pub fn submit(
         &self,
         py: Python<'_>,
         handler: Py<PyAny>,
-        args: Option<Py<PyAny>>,
-        delay_ms: Option<u64>,
+        args: Option<Py<PyTuple>>,
+        delay_seconds: Option<f64>,
+        kwargs: Option<Py<PyDict>>,
     ) -> PyResult<String> {
         let task_id = self.generate_id();
 
-        let args = args.unwrap_or_else(|| py.None());
+        let args = args.unwrap_or_else(|| PyTuple::empty(py).unbind());
+        let kwargs = kwargs.unwrap_or_else(|| PyDict::new(py).unbind());
+        let delay = delay_seconds
+            .map(Duration::try_from_secs_f64)
+            .transpose()
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
 
         let task = BackgroundTask {
             id: task_id.clone(),
             handler,
             args,
+            kwargs,
             created_at: std::time::Instant::now(),
-            delay: delay_ms.map(Duration::from_millis),
+            delay,
         };
 
         // Initialize result as pending
@@ -269,6 +278,7 @@ fn task_worker(
                 let execution_result = Python::attach(|py| {
                     let handler = task.handler.bind(py);
                     let args = task.args.bind(py);
+                    let kwargs = task.kwargs.bind(py);
 
                     // Check if it's a coroutine function
                     let asyncio = py.import("asyncio").ok();
@@ -281,7 +291,7 @@ fn task_worker(
                     if is_coro {
                         // Run async function
                         if let Some(ref asyncio_mod) = asyncio {
-                            match handler.call1((args,)) {
+                            match handler.call(args, Some(kwargs)) {
                                 Ok(coro) => asyncio_mod
                                     .call_method1("run", (coro,))
                                     .map(|r| r.to_string())
@@ -294,7 +304,7 @@ fn task_worker(
                     } else {
                         // Run sync function
                         handler
-                            .call1((args,))
+                            .call(args, Some(kwargs))
                             .map(|r| r.to_string())
                             .map_err(|e| e.to_string())
                     }

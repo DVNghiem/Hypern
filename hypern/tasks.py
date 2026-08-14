@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from hypern._hypern import TaskExecutor, TaskResult
@@ -77,7 +77,7 @@ def background(
             executor = get_task_executor()
             if executor is not None:
                 # Submit task to the global executor
-                return executor.submit(handler, args, delay_seconds)
+                return executor.submit(handler, args, delay_seconds, kwargs=kwargs)
             else:
                 # Fallback: run synchronously if no executor is available
                 # This allows functions to still work even if called before app initialization
@@ -87,9 +87,10 @@ def background(
 
 
 def submit_task(
-    handler: Callable, 
+    handler: Callable,
     args: tuple = (),
-    delay_seconds: float | None = None
+    delay_seconds: float | None = None,
+    kwargs: dict[str, Any] | None = None,
 ) -> str | None:
     """
     Submit a background task programmatically.
@@ -131,7 +132,7 @@ def submit_task(
     """
     executor = get_task_executor()
     if executor is not None:
-        return executor.submit(handler, args, delay_seconds)
+        return executor.submit(handler, args, delay_seconds, kwargs=kwargs)
     return None
 
 

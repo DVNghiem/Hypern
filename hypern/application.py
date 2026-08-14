@@ -258,10 +258,11 @@ class Hypern:
         return global_background(delay_seconds=delay_seconds)
     
     def submit_task(
-        self, 
-        handler: Callable, 
+        self,
+        handler: Callable,
         args: tuple = (),
-        delay_seconds: float | None = None
+        delay_seconds: float | None = None,
+        kwargs: dict[str, Any] | None = None,
     ) -> str | None:
         """
         Submit a background task programmatically.
@@ -283,7 +284,12 @@ class Hypern:
             task_id = app.submit_task(process_data, (data,), delay_seconds=300)
         """
         from hypern.tasks import submit_task as global_submit_task
-        return global_submit_task(handler, args=args, delay_seconds=delay_seconds)
+        return global_submit_task(
+            handler,
+            args=args,
+            delay_seconds=delay_seconds,
+            kwargs=kwargs,
+        )
     
     def get_task(self, task_id: str) -> TaskResult | None:
         """
