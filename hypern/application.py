@@ -85,9 +85,13 @@ class Hypern:
         task_workers: int = 4,
         task_queue_size: int = 1000,
         log_level: str = "info",
+        log_color: bool = True,
     ) -> None:
         # set default logging level to INFO if not already set
-        config_basic_logging(level=getattr(logging, log_level.upper(), logging.INFO))
+        config_basic_logging(
+            level=getattr(logging, log_level.upper(), logging.INFO),
+            use_colors=log_color,
+        )
         
         # Core routing
         self._router = RustRouter(path="/")

@@ -59,6 +59,7 @@ class ColourizedFormatter(logging.Formatter):
             if "color_message" in recordcopy.__dict__:
                 recordcopy.msg = recordcopy.__dict__["color_message"]
                 recordcopy.__dict__["message"] = recordcopy.getMessage()
+        recordcopy.levelname = levelname
         recordcopy.__dict__["levelprefix"] = levelname + ":" + seperator
         recordcopy.__dict__["process"] = click.style(str(process), fg="blue")
         return super().formatMessage(recordcopy)
@@ -66,15 +67,15 @@ class ColourizedFormatter(logging.Formatter):
 
 class DefaultFormatter(ColourizedFormatter):
     def should_use_colors(self) -> bool:
-        return sys.stderr.isatty()
+        return self.use_colors
 
-def config_basic_logging(level: int = logging.INFO) -> None:
+def config_basic_logging(level: int = logging.INFO, *, use_colors: bool = True) -> None:
     """
     Configures basic logging with a default formatter.
     """
     formatter = DefaultFormatter(
         fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        use_colors=True,
+        use_colors=use_colors,
         datefmt="%d-%m-%Y %H:%M:%S",
     )
     handler = logging.StreamHandler()
