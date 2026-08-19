@@ -31,7 +31,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Save image
-        run: docker save ${{ env.IMAGE }} | gzip > /tmp/hypern-docs.tar.gz
+        run: docker save ${{ env.IMAGE }} | gzip > hypern-docs.tar.gz
 
       - name: Copy image to server
         uses: appleboy/scp-action@v0.1.7
@@ -40,7 +40,7 @@ jobs:
           username: ${{ secrets.DOCS_USER }}
           key: ${{ secrets.DOCS_SSH_KEY }}
           port: ${{ secrets.DOCS_PORT || 22 }}
-          source: "/tmp/hypern-docs.tar.gz"
+          source: "hypern-docs.tar.gz"
           target: "~/deploy/"
 
       - name: Copy compose to server
