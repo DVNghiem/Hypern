@@ -52,6 +52,7 @@ jobs:
           port: ${{ secrets.DOCS_PORT || 22 }}
           source: "deploy/docker-compose.yml"
           target: "~/deploy/"
+          strip_components: 1
 
       - name: Deploy on server
         uses: appleboy/ssh-action@v1.0.3
