@@ -1,0 +1,71 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-22.04
+    environment: stag
+    env:
+      IMAGE: hypern-docs:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.docs
+          tags: ${{ env.IMAGE }}
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save image
+        run: docker save ${{ env.IMAGE }} | gzip > /tmp/hypern-docs.tar.gz
+
+      - name: Copy image to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DOCS_HOST }}
+          username: ${{ secrets.DOCS_USER }}
+          key: ${{ secrets.DOCS_SSH_KEY }}
+          port: ${{ secrets.DOCS_PORT || 22 }}
+          source: "/tmp/hypern-docs.tar.gz"
+          target: "~/deploy/"
+
+      - name: Copy compose to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DOCS_HOST }}
+          username: ${{ secrets.DOCS_USER }}
+          key: ${{ secrets.DOCS_SSH_KEY }}
+          port: ${{ secrets.DOCS_PORT || 22 }}
+          source: "deploy/docker-compose.yml"
+          target: "~/deploy/"
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DOCS_HOST }}
+          username: ${{ secrets.DOCS_USER }}
+          key: ${{ secrets.DOCS_SSH_KEY }}
+          port: ${{ secrets.DOCS_PORT || 22 }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            cd ~/deploy
+            docker load -i hypern-docs.tar.gz
+            rm -f hypern-docs.tar.gz
+            docker compose up -d --force-recreate --no-deps docs
+            docker image prune -f
+            docker compose ps
