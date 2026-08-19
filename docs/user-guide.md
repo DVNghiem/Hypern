@@ -164,22 +164,21 @@ app.mount(api_v2)
 def example(req, res, ctx):
     # Path parameters
     param_value = req.param("name")
-    
+
     # Query string parameters
     query_value = req.query("search")
-    all_queries = req.queries()  # Dict of all query params
-    
+    all_queries = req.query_params  # Dict of all query params
+
     # Headers
     auth = req.header("Authorization")
     content_type = req.header("Content-Type")
-    all_headers = req.headers()
-    
+    all_headers = req.headers
+
     # Body
     json_body = req.json()           # Parse JSON body
-    text_body = req.text()           # Raw text body
-    bytes_body = req.body()          # Raw bytes
+    bytes_body = req.body_bytes()    # Raw bytes (decode with .decode("utf-8") for text)
     form_data = req.form()           # Parse form data
-    
+
     # Cookies
     session = req.cookie("session_id")
     
@@ -696,7 +695,7 @@ from hypern import Hypern
 
 app = Hypern()
 
-@app.background(priority="normal")
+@app.background()
 def send_email(to: str, subject: str, body: str):
     # This runs in a background thread
     print(f"Sending email to {to}")
@@ -1059,8 +1058,8 @@ class Hypern:
     def stream(content_type: str, buffer_size: int) -> StreamingResponse
     
     # Background Tasks
-    def background(priority: str = "normal")
-    def submit_task(handler, args, priority) -> str
+    def background(delay_seconds: float | None = None)
+    def submit_task(handler, args, delay_seconds: float | None = None) -> str
     def get_task(task_id: str) -> TaskResult
     
     # Lifecycle

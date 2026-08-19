@@ -12,18 +12,17 @@ def example(req, res, ctx):
     
     # Query string parameters
     query_value = req.query("search")
-    all_queries = req.queries()  # Dict of all query params
-    
+    all_queries = req.query_params  # Dict of all query params
+
     # Headers
     auth = req.header("Authorization")
     content_type = req.header("Content-Type")
-    all_headers = req.headers()
-    
+    all_headers = req.headers
+
     # Body
-    json_body = req.json()           # Parse JSON body
-    text_body = req.text()           # Raw text body
-    bytes_body = req.body()          # Raw bytes
-    form_data = req.form()           # Parse form data
+    json_body = req.json()            # Parse JSON body
+    bytes_body = req.body_bytes()     # Raw bytes (decode with .decode("utf-8") for text)
+    form_data = req.form()            # Parse form data
     
     # Cookies
     session = req.cookie("session_id")

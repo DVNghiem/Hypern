@@ -215,12 +215,15 @@ from hypern import StreamingResponse
 
 @app.get("/download")
 def download_large_file(req, res, ctx):
-    def file_chunks():
-        with open("large_file.bin", "rb") as f:
-            while chunk := f.read(8192):
-                yield chunk
-    
-    res.stream(file_chunks(), content_type="application/octet-stream")
+    stream = StreamingResponse(content_type="application/octet-stream")
+
+    with open("large_file.bin", "rb") as f:
+        while chunk := f.read(8192):
+            if not stream.write(chunk):
+                break
+
+    stream.close()
+    return stream
 ```
 
 ## Performance Considerations

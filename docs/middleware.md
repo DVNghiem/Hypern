@@ -38,7 +38,7 @@ All middleware is implemented in Rust:
 | `TimeoutMiddleware` | Request timeout enforcement |
 | `CompressionMiddleware` | Response compression (gzip, deflate, brotli) |
 | `RequestIdMiddleware` | Unique request ID generation/tracking |
-| `LogMiddleware` | Request/response logging |
+| `LogMiddleware` | _Not shipped — implement as a Python middleware (see below)._ |
 | `BasicAuthMiddleware` | HTTP Basic Authentication |
 | `CircuitBreakerMiddleware` | Circuit breaker for cascading failure protection |
 | `CacheMiddleware` | Response caching for GET requests |
@@ -47,15 +47,23 @@ All middleware is implemented in Rust:
 
 ```python
 from hypern import Hypern
-from hypern.middleware import CorsMiddleware, RateLimitMiddleware, SecurityHeadersMiddleware, LogMiddleware
+from hypern.middleware import (
+    CorsMiddleware,
+    RateLimitMiddleware,
+    SecurityHeadersMiddleware,
+    RequestIdMiddleware,
+)
+# Logging middleware is not built in — implement it with the @middleware decorator.
+from middleware.logging import access_log
 
 app = Hypern()
 
 # Add middleware (order matters - they execute in order added)
-app.use(LogMiddleware())                      # Logging first
-app.use(SecurityHeadersMiddleware.strict())   # Security headers
-app.use(CorsMiddleware.permissive())          # CORS handling
-app.use(RateLimitMiddleware())                # Rate limiting
+app.use(RequestIdMiddleware())                 # Request IDs first
+app.use(access_log)                            # Then your access logger
+app.use(SecurityHeadersMiddleware.strict())    # Security headers
+app.use(CorsMiddleware.permissive())           # CORS handling
+app.use(RateLimitMiddleware())                 # Rate limiting
 
 @app.get("/api/data")
 def get_data(req, res, ctx):
@@ -264,33 +272,47 @@ The middleware:
 
 ## Logging Middleware
 
-Logs incoming requests using Rust's tracing infrastructure.
-
-### Usage
+Hypern does not ship a built-in logger middleware. Add a small Python
+middleware that uses the standard `logging` module. Place it after
+`RequestIdMiddleware` so the request ID is available on the context:
 
 ```python
-from hypern.middleware import LogMiddleware
+import logging
+import time
+from hypern import Hypern
+from hypern.middleware import RequestIdMiddleware, middleware
 
-# Default logger
-log = LogMiddleware.default_logger()
-app.use(log)
+logger = logging.getLogger("hypern.access")
+app = Hypern()
 
-# Custom configuration
-log = LogMiddleware(
-    level="info",           # "debug", "info", "warn", "error"
-    log_headers=True,       # Include request headers in logs
-    skip_paths=["/health", "/metrics"]  # Skip logging these paths
-)
-app.use(log)
+app.use(RequestIdMiddleware())
+
+@middleware
+async def access_log(req, res, ctx, next):
+    start = time.perf_counter()
+    logger.info("%s %s start request_id=%s", req.method, req.path, ctx.request_id)
+    try:
+        await next()
+    finally:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "%s %s %s %.2fms request_id=%s",
+            req.method,
+            req.path,
+            res.status_code,
+            elapsed_ms,
+            ctx.request_id,
+        )
+
+app.use(access_log)
 ```
 
-### Log Output
+### Log fields you can capture
 
-Logs include:
-- Request ID
-- HTTP method
-- Request path
-- Response time (on completion)
+- `req.method`, `req.path`, `req.ip`, `req.headers`
+- `ctx.request_id` (set by `RequestIdMiddleware`)
+- `res.status_code` after `await next()`
+- `ctx.elapsed_ms()` for total request time
 
 ## Basic Authentication Middleware
 
@@ -367,7 +389,7 @@ Middleware executes in the order it's added. Recommended order:
 
 ```python
 app.use(RequestIdMiddleware())       # 1. Request tracking (first for tracing)
-app.use(LogMiddleware())             # 2. Logging (after request ID)
+app.use(access_log)                  # 2. Logging (after request ID) — see Python example below
 app.use(SecurityHeadersMiddleware()) # 3. Security headers
 app.use(CorsMiddleware())            # 4. CORS handling
 app.use(RateLimitMiddleware())       # 5. Rate limiting
@@ -827,20 +849,18 @@ Complete production-ready middleware configuration:
 ```python
 from hypern import Hypern
 from hypern.middleware import (
-    RequestIdMiddleware, LogMiddleware, SecurityHeadersMiddleware, CorsMiddleware, 
+    RequestIdMiddleware, SecurityHeadersMiddleware, CorsMiddleware,
     RateLimitMiddleware, TimeoutMiddleware, CompressionMiddleware
 )
+from middleware.logging import access_log  # Python-defined access logger
 
 app = Hypern()
 
 # Request tracking
 app.use(RequestIdMiddleware())
 
-# Logging
-app.use(LogMiddleware(
-    level="info",
-    skip_paths=["/health", "/metrics", "/ready"]
-))
+# Logging (Python-side — see the Logging Middleware section above)
+app.use(access_log)
 
 # Security
 app.use(SecurityHeadersMiddleware(

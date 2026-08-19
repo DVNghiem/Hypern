@@ -246,7 +246,7 @@ TaskStatus.FAILED     # Task raised an exception
 ## Async Tasks
 
 ```python
-@app.background(priority="normal")
+@app.background()
 async def async_task(url: str):
     import aiohttp
     async with aiohttp.ClientSession() as session:

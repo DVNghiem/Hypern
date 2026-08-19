@@ -615,8 +615,8 @@ This project is licensed under the terms specified in the [LICENSE](LICENSE) fil
 ## 🔗 Links
 
 - [Documentation](https://hypern.dev/docs)
-- [GitHub Repository](https://github.com/yourusername/hypern)
-- [Issue Tracker](https://github.com/yourusername/hypern/issues)
+- [GitHub Repository](https://github.com/dangvannghiem/hypern)
+- [Issue Tracker](https://github.com/dangvannghiem/hypern/issues)
 
 ---
 

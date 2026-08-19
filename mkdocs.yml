@@ -3,12 +3,54 @@ site_description: A Fast Async Python backend with a Rust runtime
 site_author: Martin Dang
 site_url: https://hypern.dev
 
+repo_name: hypern
+repo_url: https://github.com/dangvannghiem/hypern
+edit_uri: edit/main/docs/
+
 theme:
   name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - navigation.tracking
+    - toc.follow
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+  icon:
+    repo: fontawesome/brands/github
 
 plugins:
   - search:
       lang: en
+
+extra:
+  version:
+    provider: mike
+    default: stable
+  generator: false
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/dangvannghiem/hypern
+      name: Hypern on GitHub
 
 nav:
   - Home: index.md
@@ -33,11 +75,28 @@ nav:
       - File Uploads: file-uploads.md
       - Error Handling: error-handling.md
       - Metrics: metrics.md
+      - Cookies & Sessions: cookie-session.md
       - Utilities: utils.md
   - Best Practices: best-practices.md
+  - Performance: performance.md
   - User Guide: user-guide.md
 
 markdown_extensions:
   - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
   - toc:
       permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true

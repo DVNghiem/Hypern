@@ -246,7 +246,7 @@ def create_user(
 
 ```python
 # middleware/error_handler.py
-from hypern.exceptions import RequestError
+from hypern import HTTPException
 import logging
 
 logger = logging.getLogger(__name__)
@@ -254,19 +254,12 @@ logger = logging.getLogger(__name__)
 def error_handler_middleware(req, res, ctx, next):
     try:
         next()
-    except RequestError as e:
-        logger.warning(f"{req.method} {req.path} - {type(e).__name__}: {e.message}")
-        res.status(e.status_code).json({
-            "error": type(e).__name__,
-            "message": e.message,
-            "request_id": req.id
-        })
-    except Exception as e:
+    except HTTPException as e:
+        logger.warning(f"{req.method} {req.path} - {type(e).__name__}: {e.detail}")
+        res.status(e.status_code).json(e.to_dict())
+    except Exception:
         logger.error(f"Unhandled error on {req.method} {req.path}", exc_info=True)
-        res.status(500).json({
-            "error": "Internal Server Error",
-            "request_id": req.id
-        })
+        res.status(500).json({"error": True, "message": "Internal Server Error"})
 ```
 
 ## Background Tasks
@@ -310,7 +303,7 @@ def create_user(
 
 ```python
 # routes/files.py
-from hypern import ValidationError
+from hypern import UnprocessableEntity, BadRequest
 import os
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf", ".doc", ".docx"}
@@ -319,18 +312,24 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 def validate_upload(file):
     _, ext = os.path.splitext(file.filename)
     if ext.lower() not in ALLOWED_EXTENSIONS:
-        raise ValidationError(f"File type {ext} not allowed")
-    
+        raise UnprocessableEntity(
+            f"File type {ext} not allowed",
+            data={"field": "file", "value": ext},
+        )
+
     if file.size > MAX_FILE_SIZE:
-        raise ValidationError("File exceeds maximum size")
+        raise UnprocessableEntity(
+            "File exceeds maximum size",
+            data={"field": "file", "limit_bytes": MAX_FILE_SIZE},
+        )
 
 @app.post("/upload")
 def upload_file(req, res, ctx):
     files = req.files()
-    
+
     if "file" not in files:
-        raise ValidationError("No file provided")
-    
+        raise BadRequest("No file provided", data={"field": "file"})
+
     file = files["file"]
     validate_upload(file)
     
@@ -356,26 +355,26 @@ Use streaming for large responses:
 ```python
 @app.get("/export/users")
 def export_users_csv(req, res, ctx):
+    from hypern import StreamingResponse
+
     import csv
     import io
-    
-    def generate_csv():
-        users = ctx.db.query("SELECT id, name, email FROM users")
-        output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=["id", "name", "email"])
-        writer.writeheader()
-        
-        for user in users:
-            yield output.getvalue()
-            output.truncate(0)
-            output.seek(0)
-            writer.writerow(user)
-    
-    res.stream(
-        generate_csv(),
-        content_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=users.csv"}
-    )
+
+    stream = StreamingResponse(content_type="text/csv")
+    stream.append_header("Content-Disposition", "attachment; filename=users.csv")
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["id", "name", "email"])
+    writer.writeheader()
+
+    for user in ctx.db.query("SELECT id, name, email FROM users"):
+        writer.writerow(user)
+        stream.write_str(output.getvalue())
+        output.truncate(0)
+        output.seek(0)
+
+    stream.close()
+    return stream
 ```
 
 ## Security Best Practices
@@ -397,7 +396,7 @@ app.use(CORS(
 
 ```python
 import jwt
-from hypern.exceptions import UnauthorizedError
+from hypern import Unauthorized
 from functools import wraps
 
 def require_auth(handler):
@@ -405,7 +404,7 @@ def require_auth(handler):
     def wrapper(req, res, ctx, *args, **kwargs):
         auth_header = req.header("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            raise UnauthorizedError("Missing or invalid authorization")
+            raise Unauthorized("Missing or invalid authorization")
         
         token = auth_header[7:]
         try:
@@ -413,7 +412,7 @@ def require_auth(handler):
             ctx.user_id = payload["user_id"]
             ctx.user = get_user(payload["user_id"])
         except jwt.InvalidTokenError:
-            raise UnauthorizedError("Invalid token")
+            raise Unauthorized("Invalid token")
         
         return handler(req, res, ctx, *args, **kwargs)
     

@@ -150,7 +150,7 @@ from .websocket import (
     WebSocketState,
 )
 
-__version__ = "0.4.0"
+__version__ = "1.1.4"
 
 __all__ = [
     "APIKeyAuth",
