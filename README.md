@@ -170,7 +170,6 @@ app.start(
   - Security headers middleware
   - Request ID tracking
   - Timeout middleware
-  - Logging middleware
   - Basic authentication middleware
 - **Background task execution** with TaskExecutor
 - **Task scheduling** with cron expressions and intervals
@@ -202,7 +201,7 @@ app.start(
 
 ```python
 from hypern import Hypern
-from hypern.middleware import CorsMiddleware, RateLimitMiddleware, LogMiddleware
+from hypern.middleware import CorsMiddleware, RateLimitMiddleware
 
 app = Hypern()
 
@@ -217,9 +216,6 @@ app.use(cors)
 # Add rate limiting (100 requests per minute)
 rate_limit = RateLimitMiddleware(max_requests=100, window_seconds=60)
 app.use(rate_limit)
-
-# Add request logging
-app.use(LogMiddleware())
 
 # Custom middleware can run before and after the downstream handler
 async def add_server_header(req, res, ctx, next):
@@ -591,18 +587,33 @@ app.static("/", "dist")
 
 ---
 
-## 📖 Documentation
+## � Documentation
 
 For more detailed documentation, visit:
 - [Getting Started Guide](docs/getting-started.md)
+- [User Guide](docs/user-guide.md)
 - [Routing](docs/routing.md)
+- [Request & Response](docs/request-response.md)
 - [Middleware](docs/middleware.md)
 - [Authentication](docs/auth.md)
 - [WebSocket](docs/websocket.md)
+- [Server-Sent Events](docs/sse.md)
+- [Realtime](docs/realtime.md)
 - [Task Scheduling](docs/scheduling.md)
+- [Background Tasks](docs/tasks.md)
 - [Request Validation](docs/validation.md)
 - [Dependency Injection](docs/dependency-injection.md)
+- [Error Handling](docs/error-handling.md)
+- [File Uploads](docs/file-uploads.md)
+- [Cookie & Session](docs/cookie-session.md)
 - [SQLAlchemy Integration](docs/sqlalchemy.md)
+- [Blocking Executor](docs/blocking-executor.md)
+- [Performance](docs/performance.md)
+- [Metrics](docs/metrics.md)
+- [Zero-Downtime Reload](docs/zero-downtime.md)
+- [CLI](docs/cli.md)
+- [Utils](docs/utils.md)
+- [Best Practices](docs/best-practices.md)
 
 ## 🤝 Contributing
 
@@ -614,7 +625,7 @@ This project is licensed under the terms specified in the [LICENSE](LICENSE) fil
 
 ## 🔗 Links
 
-- [Documentation](https://hypern.dev/docs)
+- [Documentation](https://hypern.smartsolution.id.vn)
 - [GitHub Repository](https://github.com/dangvannghiem/hypern)
 - [Issue Tracker](https://github.com/dangvannghiem/hypern/issues)
 
