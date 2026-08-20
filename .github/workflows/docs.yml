@@ -1,9 +1,6 @@
 name: docs
 
 on:
-  push:
-    tags:
-      - v*.*.*
   workflow_dispatch:
 
 permissions:
@@ -12,7 +9,6 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-22.04
-    environment: stag
     env:
       IMAGE: hypern-docs:latest
     steps:
