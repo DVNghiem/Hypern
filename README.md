@@ -626,8 +626,8 @@ This project is licensed under the terms specified in the [LICENSE](LICENSE) fil
 ## 🔗 Links
 
 - [Documentation](https://hypern.smartsolution.id.vn)
-- [GitHub Repository](https://github.com/dangvannghiem/hypern)
-- [Issue Tracker](https://github.com/dangvannghiem/hypern/issues)
+- [GitHub Repository](https://github.com/DVNghiem/Hypern)
+- [Issue Tracker](https://github.com/DVNghiem/Hypern/issues)
 
 ---
 
