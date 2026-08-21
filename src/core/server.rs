@@ -125,8 +125,6 @@ impl Server {
         max_blocking_threads: usize,
         max_connections: usize,
     ) -> PyResult<()> {
-        Python::initialize();
-        
         validate_max_connections(max_connections)?;
 
         // Initialize the log queue
